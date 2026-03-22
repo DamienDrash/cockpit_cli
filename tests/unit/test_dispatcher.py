@@ -7,6 +7,7 @@ from cockpit.application.dispatch.command_dispatcher import (
 from cockpit.application.dispatch.event_bus import EventBus
 from cockpit.application.handlers.base import (
     CommandContextError,
+    ConfirmationRequiredError,
     DispatchResult,
 )
 from cockpit.domain.commands.command import Command
@@ -50,6 +51,40 @@ class CommandDispatcherTests(unittest.TestCase):
             any(isinstance(event, StatusMessagePublished) for event in bus.published)
         )
 
+    def test_returns_confirmation_payload_without_executed_event(self) -> None:
+        bus = EventBus()
+        dispatcher = CommandDispatcher(event_bus=bus)
+        observed: list[tuple[Command, DispatchResult]] = []
+
+        def handler(_command: Command) -> DispatchResult:
+            raise ConfirmationRequiredError(
+                "confirm restart",
+                payload={
+                    "pending_command_name": "docker.restart",
+                    "confirmation_message": "Restart container web?",
+                },
+            )
+
+        dispatcher.register("docker.restart", handler)
+        dispatcher.observe(lambda command, result: observed.append((command, result)))
+
+        result = dispatcher.dispatch(
+            Command(id="cmd_1", source=CommandSource.KEYBINDING, name="docker.restart")
+        )
+
+        self.assertFalse(result.success)
+        self.assertTrue(result.data["confirmation_required"])
+        self.assertEqual(result.data["pending_command_name"], "docker.restart")
+        self.assertEqual(observed, [])
+        self.assertFalse(any(isinstance(event, CommandExecuted) for event in bus.published))
+        self.assertTrue(
+            any(
+                isinstance(event, StatusMessagePublished)
+                and event.message == "confirm restart"
+                for event in bus.published
+            )
+        )
+
     def test_raises_for_unknown_command(self) -> None:
         dispatcher = CommandDispatcher(event_bus=EventBus())
 
@@ -61,4 +96,3 @@ class CommandDispatcherTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-

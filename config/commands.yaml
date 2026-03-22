@@ -6,3 +6,4 @@ commands:
   - layout.apply_default
   - terminal.focus
   - terminal.restart
+  - docker.restart

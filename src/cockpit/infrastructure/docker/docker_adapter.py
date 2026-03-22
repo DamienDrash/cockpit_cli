@@ -28,6 +28,12 @@ class DockerRuntimeSnapshot:
     message: str | None = None
 
 
+@dataclass(slots=True, frozen=True)
+class DockerActionResult:
+    success: bool
+    message: str
+
+
 class DockerAdapter:
     """Load structured container status from Docker or SSH targets."""
 
@@ -142,4 +148,66 @@ class DockerAdapter:
             encoding="utf-8",
             errors="replace",
             check=False,
+        )
+
+    def restart_container(
+        self,
+        container_id: str,
+        *,
+        target_kind: SessionTargetKind = SessionTargetKind.LOCAL,
+        target_ref: str | None = None,
+    ) -> DockerActionResult:
+        if target_kind is SessionTargetKind.SSH:
+            return self._restart_remote_container(container_id, target_ref)
+
+        try:
+            result = self._run_docker("restart", container_id)
+        except FileNotFoundError:
+            return DockerActionResult(
+                success=False,
+                message="The docker executable is not available in this environment.",
+            )
+
+        if result.returncode != 0:
+            return DockerActionResult(
+                success=False,
+                message=result.stderr.strip() or f"Docker restart failed for {container_id}.",
+            )
+        return DockerActionResult(
+            success=True,
+            message=result.stdout.strip() or f"Restarted docker container {container_id}.",
+        )
+
+    def _restart_remote_container(
+        self,
+        container_id: str,
+        target_ref: str | None,
+    ) -> DockerActionResult:
+        if not target_ref:
+            return DockerActionResult(
+                success=False,
+                message="No SSH target is configured for this workspace.",
+            )
+        if self._ssh_command_runner is None:
+            return DockerActionResult(
+                success=False,
+                message="SSH docker inspection is not configured.",
+            )
+        result = self._ssh_command_runner.run(
+            target_ref,
+            f"docker restart {shlex.quote(container_id)}",
+        )
+        if not result.is_available:
+            return DockerActionResult(
+                success=False,
+                message=result.message or "SSH is unavailable.",
+            )
+        if result.returncode != 0:
+            return DockerActionResult(
+                success=False,
+                message=result.stderr.strip() or f"Docker restart failed for {container_id}.",
+            )
+        return DockerActionResult(
+            success=True,
+            message=result.stdout.strip() or f"Restarted docker container {container_id}.",
         )

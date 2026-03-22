@@ -11,6 +11,11 @@ TEXTUAL_AVAILABLE = importlib.util.find_spec("textual") is not None
 if TEXTUAL_AVAILABLE:
     from cockpit.bootstrap import build_container
     from cockpit.infrastructure.cron.cron_adapter import CronAdapter, CronJob, CronSnapshot
+    from cockpit.infrastructure.docker.docker_adapter import (
+        DockerActionResult,
+        DockerContainerSummary,
+        DockerRuntimeSnapshot,
+    )
     from cockpit.infrastructure.shell.local_shell_adapter import (
         LocalShellAdapter,
     )
@@ -22,6 +27,7 @@ if TEXTUAL_AVAILABLE:
     from cockpit.ui.panels.logs_panel import LogsPanel
     from cockpit.ui.panels.cron_panel import CronPanel
     from cockpit.ui.screens.app_shell import CockpitApp
+    from cockpit.ui.widgets.confirmation_bar import ConfirmationBar
     from cockpit.ui.widgets.command_palette import CommandPalette
     from cockpit.ui.widgets.file_context import FileContext
     from cockpit.ui.widgets.file_explorer import FileExplorer
@@ -143,6 +149,54 @@ if TEXTUAL_AVAILABLE:
                 is_available=True,
                 message=None,
             )
+
+    class FakeDockerAdapter:
+        def __init__(self) -> None:
+            self._restart_counts: dict[str, int] = {}
+
+        def list_containers(
+            self,
+            *,
+            target_kind: SessionTargetKind = SessionTargetKind.LOCAL,
+            target_ref: str | None = None,
+        ) -> DockerRuntimeSnapshot:
+            del target_kind, target_ref
+            web_restarts = self._restart_counts.get("abc123", 0)
+            web_status = "Up 10 minutes" if web_restarts == 0 else "Up 0 seconds (restarted)"
+            return DockerRuntimeSnapshot(
+                containers=[
+                    DockerContainerSummary(
+                        container_id="abc123",
+                        name="web",
+                        image="nginx:latest",
+                        state="running",
+                        status=web_status,
+                        ports="80/tcp",
+                    ),
+                    DockerContainerSummary(
+                        container_id="def456",
+                        name="db",
+                        image="postgres:16",
+                        state="running",
+                        status="Up 2 hours",
+                        ports="5432/tcp",
+                    ),
+                ],
+                is_available=True,
+                daemon_reachable=True,
+                message=None,
+            )
+
+        def restart_container(
+            self,
+            container_id: str,
+            *,
+            target_kind: SessionTargetKind = SessionTargetKind.LOCAL,
+            target_ref: str | None = None,
+        ) -> DockerActionResult:
+            del target_kind, target_ref
+            self._restart_counts[container_id] = self._restart_counts.get(container_id, 0) + 1
+            return DockerActionResult(success=True, message=f"restarted {container_id}")
 
 
 @unittest.skipUnless(TEXTUAL_AVAILABLE, "textual must be installed for e2e tests")
@@ -330,6 +384,34 @@ class CockpitAppE2ETests(unittest.IsolatedAsyncioTestCase):
                 self.assertIn("[Docker]", tab_text)
                 self.assertIn("Containers:", docker_text)
 
+    async def test_docker_restart_requires_confirmation_and_refreshes_panel(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            root, workspace_dir, _nested_dir, _selected_file = self._write_project_fixture(
+                Path(temp_dir)
+            )
+
+            app = self._build_app(root)
+            async with app.run_test() as pilot:
+                await self._open_workspace(app, pilot, workspace_dir)
+                await self._run_slash_command(app, pilot, "/tab focus docker")
+
+                before_text = self._rendered_text(app.query_one(DockerPanel))
+                self.assertIn("status=Up 10 minutes", before_text)
+
+                await pilot.press("f8")
+                await pilot.pause()
+
+                confirmation_bar = app.query_one(ConfirmationBar)
+                self.assertTrue(confirmation_bar.is_open)
+                self.assertIn("Restart container web?", self._rendered_text(confirmation_bar))
+
+                await pilot.press("enter")
+                await pilot.pause()
+
+                after_text = self._rendered_text(app.query_one(DockerPanel))
+                self.assertFalse(confirmation_bar.is_open)
+                self.assertIn("status=Up 0 seconds (restarted)", after_text)
+
     async def test_cron_tab_displays_jobs_and_restores_active_tab(self) -> None:
         with TemporaryDirectory() as temp_dir:
             root, workspace_dir, _nested_dir, _selected_file = self._write_project_fixture(
@@ -425,6 +507,7 @@ class CockpitAppE2ETests(unittest.IsolatedAsyncioTestCase):
             shell_adapter=StaticShellAdapter(shell="/bin/sh"),
             ssh_command_runner=FakeSSHCommandRunner(),
             cron_adapter=FakeCronAdapter(),
+            docker_adapter=FakeDockerAdapter(),
         )
         return CockpitApp(
             container=container,
@@ -523,6 +606,7 @@ class CockpitAppE2ETests(unittest.IsolatedAsyncioTestCase):
                     "  - layout.apply_default",
                     "  - terminal.focus",
                     "  - terminal.restart",
+                    "  - docker.restart",
                 ]
             )
             + "\n",

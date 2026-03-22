@@ -107,6 +107,11 @@ class PanelHost(Vertical):
     def available_tabs(self) -> list[tuple[str, str]]:
         return [(tab["id"], tab["name"]) for tab in self._tabs]
 
+    def refresh_panel(self, panel_id: str) -> None:
+        panel = self._panels_by_id.get(panel_id)
+        if panel is not None:
+            panel.resume()
+
     def _active_panel(self) -> PanelContract:
         active_panel_id = self._tab_panel_id(self._active_tab_id)
         panel = self._panels_by_id.get(active_panel_id)

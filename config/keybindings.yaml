@@ -15,3 +15,5 @@ bindings:
     action: terminal.restart
   - key: ctrl+t
     action: terminal.focus
+  - key: f8
+    action: docker.restart

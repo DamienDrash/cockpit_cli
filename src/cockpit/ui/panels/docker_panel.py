@@ -80,14 +80,17 @@ class DockerPanel(Static):
         """No runtime resources need disposal yet."""
 
     def command_context(self) -> dict[str, object]:
+        selected = self._selected_container()
         return {
             "panel_id": self.PANEL_ID,
             "workspace_id": self._workspace_id,
             "session_id": self._session_id,
+            "workspace_name": self._workspace_name,
             "target_kind": self._target_kind.value,
             "target_ref": self._target_ref,
             "workspace_root": self._workspace_root,
             "selected_container_id": self._selected_container_id,
+            "selected_container_name": selected.name if selected is not None else None,
         }
 
     def on_key(self, event: events.Key) -> None:
@@ -169,7 +172,12 @@ class DockerPanel(Static):
                     f"ports={selected.ports or '(none)'}",
                 ]
             )
-        lines.extend(["", "Use Up/Down to inspect containers. Press r to refresh."])
+        lines.extend(
+            [
+                "",
+                "Use Up/Down to inspect containers. Press r to refresh. Press F8 to restart the selected container.",
+            ]
+        )
         return "\n".join(lines)
 
     def _selected_container(self) -> DockerContainerSummary | None:

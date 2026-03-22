@@ -30,6 +30,7 @@ from cockpit.shared.enums import CommandSource, SessionTargetKind, StatusLevel
 from cockpit.shared.risk import classify_target_risk
 from cockpit.shared.utils import make_id
 from cockpit.ui.panels.panel_host import PanelHost
+from cockpit.ui.widgets.confirmation_bar import ConfirmationBar
 from cockpit.ui.widgets.command_palette import CommandPalette, PaletteItem
 from cockpit.ui.widgets.header import CockpitHeader
 from cockpit.ui.widgets.slash_input import SlashInput
@@ -52,6 +53,7 @@ class CockpitApp(App[None]):
         ("ctrl+5", "focus_cron_tab", "Focus Cron"),
         ("ctrl+t", "focus_terminal", "Focus Terminal"),
         ("ctrl+r", "restart_terminal", "Restart Terminal"),
+        ("f8", "restart_selected_docker", "Restart Container"),
     ]
 
     def __init__(
@@ -64,11 +66,13 @@ class CockpitApp(App[None]):
         self.container = container or build_container()
         self._main_thread_id = get_ident()
         self._startup_command_text = startup_command_text
+        self._pending_confirmation: dict[str, object] | None = None
 
     def compose(self) -> ComposeResult:
         yield CockpitHeader(show_clock=False)
         with Vertical(id="app-body"):
             yield TabBar()
+            yield ConfirmationBar()
             yield PanelHost(container=self.container)
             yield CommandPalette()
             yield SlashInput()
@@ -87,6 +91,16 @@ class CockpitApp(App[None]):
         self._run_startup_flow()
 
     def on_key(self, event: events.Key) -> None:
+        confirmation_bar = self.query_one(ConfirmationBar)
+        if confirmation_bar.is_open:
+            if event.key in {"enter", "y"}:
+                self._confirm_pending_action()
+                event.stop()
+                return
+            if event.key in {"escape", "n"}:
+                self._cancel_pending_action()
+                event.stop()
+                return
         palette = self.query_one(CommandPalette)
         if not palette.is_open:
             return
@@ -210,6 +224,16 @@ class CockpitApp(App[None]):
             )
         )
 
+    def action_restart_selected_docker(self) -> None:
+        self._dispatch_command(
+            Command(
+                id=make_id("cmd"),
+                source=CommandSource.KEYBINDING,
+                name="docker.restart",
+                context=self._command_context(),
+            )
+        )
+
     def action_toggle_palette(self) -> None:
         palette = self.query_one(CommandPalette)
         if palette.is_open:
@@ -226,6 +250,8 @@ class CockpitApp(App[None]):
             return
 
         self._apply_command_result(command.name, result.data)
+        if result.data.get("confirmation_required") is not True:
+            self._clear_confirmation()
         if result.success and command.name in {
             "workspace.open",
             "workspace.reopen_last",
@@ -234,6 +260,7 @@ class CockpitApp(App[None]):
             "layout.apply_default",
             "terminal.focus",
             "terminal.restart",
+            "docker.restart",
         }:
             self._persist_current_snapshot()
 
@@ -278,6 +305,13 @@ class CockpitApp(App[None]):
         status_bar.set_message(message, level)
 
     def _apply_command_result(self, command_name: str, data: dict[str, object]) -> None:
+        if data.get("confirmation_required") is True:
+            self._set_pending_confirmation(data)
+            return
+        refresh_panel_id = data.get("refresh_panel_id")
+        if isinstance(refresh_panel_id, str):
+            self.query_one(PanelHost).refresh_panel(refresh_panel_id)
+            return
         if command_name not in {
             "workspace.open",
             "workspace.reopen_last",
@@ -455,6 +489,22 @@ class CockpitApp(App[None]):
                         )
                     )
                 continue
+            if command_name == "docker.restart":
+                selected_container_id = context.get("selected_container_id")
+                selected_container_name = context.get("selected_container_name")
+                if not isinstance(selected_container_id, str) or not selected_container_id:
+                    continue
+                label = "Restart Selected Container"
+                if isinstance(selected_container_name, str) and selected_container_name:
+                    label = f"Restart {selected_container_name}"
+                items.append(
+                    PaletteItem(
+                        label=label,
+                        command_text=f"docker restart {shlex.quote(selected_container_id)}",
+                        description=command_name,
+                    )
+                )
+                continue
             label_command = labels.get(command_name)
             if label_command is None:
                 continue
@@ -467,6 +517,49 @@ class CockpitApp(App[None]):
                 )
             )
         return items
+
+    def _set_pending_confirmation(self, data: dict[str, object]) -> None:
+        self._pending_confirmation = {
+            "command_name": data.get("pending_command_name"),
+            "args": data.get("pending_args"),
+            "context": data.get("pending_context"),
+        }
+        message = data.get("confirmation_message")
+        if not isinstance(message, str) or not message:
+            message = "Confirm pending action. Press Enter/Y to continue or Esc/N to cancel."
+        self.query_one(ConfirmationBar).open(message)
+
+    def _clear_confirmation(self) -> None:
+        self._pending_confirmation = None
+        self.query_one(ConfirmationBar).close()
+
+    def _confirm_pending_action(self) -> None:
+        pending = self._pending_confirmation
+        if not isinstance(pending, dict):
+            return
+        command_name = pending.get("command_name")
+        args = pending.get("args")
+        context = pending.get("context")
+        if not isinstance(command_name, str) or not command_name:
+            self._cancel_pending_action()
+            return
+        next_args = dict(args) if isinstance(args, dict) else {}
+        next_args["confirmed"] = True
+        next_context = dict(context) if isinstance(context, dict) else self._command_context()
+        self._clear_confirmation()
+        self._dispatch_command(
+            Command(
+                id=make_id("cmd"),
+                source=CommandSource.KEYBINDING,
+                name=command_name,
+                args=next_args,
+                context=next_context,
+            )
+        )
+
+    def _cancel_pending_action(self) -> None:
+        self._clear_confirmation()
+        self._set_status("Cancelled pending action.", StatusLevel.WARNING)
 
     def _target_label_from_data(self, data: dict[str, object]) -> str:
         target_kind = self._target_kind_from_data(data.get("target_kind"))

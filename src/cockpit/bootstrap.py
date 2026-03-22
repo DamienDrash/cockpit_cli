@@ -8,6 +8,7 @@ from pathlib import Path
 from cockpit.application.dispatch.command_dispatcher import CommandDispatcher
 from cockpit.application.dispatch.command_parser import CommandParser
 from cockpit.application.dispatch.event_bus import EventBus
+from cockpit.application.handlers.docker_handlers import RestartDockerContainerHandler
 from cockpit.application.handlers.layout_handlers import ApplyDefaultLayoutHandler
 from cockpit.application.handlers.session_handlers import RestoreSessionHandler
 from cockpit.application.handlers.tab_handlers import FocusTabHandler
@@ -95,6 +96,7 @@ def build_container(
     shell_adapter: ShellAdapter | None = None,
     ssh_command_runner: SSHCommandRunner | None = None,
     cron_adapter: CronAdapter | None = None,
+    docker_adapter: DockerAdapter | None = None,
 ) -> ApplicationContainer:
     """Create the minimum runnable application dependency graph."""
     project_root = discover_project_root(start)
@@ -124,7 +126,7 @@ def build_container(
         ssh_adapter=SSHShellAdapter(),
     )
     cron_adapter = cron_adapter or CronAdapter(ssh_command_runner=ssh_command_runner)
-    docker_adapter = DockerAdapter(ssh_command_runner=ssh_command_runner)
+    docker_adapter = docker_adapter or DockerAdapter(ssh_command_runner=ssh_command_runner)
     git_adapter = GitAdapter(ssh_command_runner=ssh_command_runner)
     remote_filesystem_adapter = RemoteFilesystemAdapter(ssh_command_runner)
     pty_manager = PTYManager(
@@ -247,6 +249,9 @@ def build_container(
     )
     command_dispatcher.register(
         "terminal.restart", RestartTerminalHandler(pty_manager)
+    )
+    command_dispatcher.register(
+        "docker.restart", RestartDockerContainerHandler(docker_adapter)
     )
 
     return ApplicationContainer(

@@ -98,6 +98,53 @@ class DockerAdapterTests(unittest.TestCase):
         self.assertEqual(len(snapshot.containers), 1)
         self.assertEqual(snapshot.containers[0].name, "web")
 
+    def test_restarts_local_container(self) -> None:
+        adapter = DockerAdapter()
+        with patch(
+            "cockpit.infrastructure.docker.docker_adapter.subprocess.run",
+            return_value=CompletedProcess(
+                args=("docker", "restart", "abc123"),
+                returncode=0,
+                stdout="abc123\n",
+                stderr="",
+            ),
+        ):
+            result = adapter.restart_container("abc123")
+
+        self.assertTrue(result.success)
+        self.assertEqual(result.message, "abc123")
+
+    def test_reports_missing_docker_binary_on_restart(self) -> None:
+        adapter = DockerAdapter()
+        with patch("cockpit.infrastructure.docker.docker_adapter.subprocess.run") as run_mock:
+            run_mock.side_effect = FileNotFoundError()
+            result = adapter.restart_container("abc123")
+
+        self.assertFalse(result.success)
+        self.assertIn("docker executable", result.message)
+
+    def test_restarts_remote_container(self) -> None:
+        adapter = DockerAdapter(
+            ssh_command_runner=FakeSSHCommandRunner(
+                SSHCommandResult(
+                    target_ref="dev@example.com",
+                    command="docker restart abc123",
+                    returncode=0,
+                    stdout="abc123\n",
+                    stderr="",
+                )
+            )
+        )
+
+        result = adapter.restart_container(
+            "abc123",
+            target_kind=SessionTargetKind.SSH,
+            target_ref="dev@example.com",
+        )
+
+        self.assertTrue(result.success)
+        self.assertEqual(result.message, "abc123")
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -13,6 +13,14 @@ class CommandContextError(CommandHandlingError):
     """Raised when command context is missing or invalid."""
 
 
+class ConfirmationRequiredError(CommandHandlingError):
+    """Raised when a command requires explicit user confirmation."""
+
+    def __init__(self, message: str, *, payload: dict[str, object]) -> None:
+        super().__init__(message)
+        self.payload = payload
+
+
 @dataclass(slots=True)
 class DispatchResult:
     success: bool
@@ -28,4 +36,3 @@ class NoOpHandler:
 
     def __call__(self, _command: object) -> DispatchResult:
         return DispatchResult(success=True, message=self._message)
-

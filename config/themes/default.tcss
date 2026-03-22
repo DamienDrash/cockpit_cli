@@ -25,6 +25,14 @@ Screen {
   margin: 1 0;
 }
 
+#confirmation-bar {
+  margin: 1 0 0 0;
+  padding: 1;
+  background: $warning;
+  color: $text;
+  border: round $error;
+}
+
 #work-panel {
   height: 1fr;
   border: round $accent;

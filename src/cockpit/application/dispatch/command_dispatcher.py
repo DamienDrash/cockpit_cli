@@ -7,6 +7,7 @@ from collections.abc import Callable
 from cockpit.application.handlers.base import (
     CommandContextError,
     CommandHandlingError,
+    ConfirmationRequiredError,
     DispatchResult,
 )
 from cockpit.application.dispatch.event_bus import EventBus
@@ -46,6 +47,18 @@ class CommandDispatcher:
 
         try:
             result = handler(command)
+        except ConfirmationRequiredError as exc:
+            self._event_bus.publish(
+                StatusMessagePublished(message=str(exc), level=StatusLevel.WARNING)
+            )
+            return DispatchResult(
+                success=False,
+                message=str(exc),
+                data={
+                    "confirmation_required": True,
+                    **exc.payload,
+                },
+            )
         except CommandContextError as exc:
             self._event_bus.publish(
                 StatusMessagePublished(message=str(exc), level=StatusLevel.ERROR)
