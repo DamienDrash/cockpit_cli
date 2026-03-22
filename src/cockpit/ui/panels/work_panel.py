@@ -6,10 +6,12 @@ from threading import get_ident
 
 from textual import events
 from textual.app import ComposeResult
+from textual.css.query import NoMatches
 from textual.widgets import Static
 
 from cockpit.application.dispatch.event_bus import EventBus
 from cockpit.domain.events.runtime_events import (
+    PanelStateChanged,
     PTYStarted,
     PTYStartupFailed,
     PanelMounted,
@@ -195,32 +197,31 @@ class WorkPanel(BasePanel):
         panel_id = getattr(event, "panel_id", None)
         if panel_id != self.PANEL_ID:
             return
+        if not self.is_attached or not self.is_mounted:
+            return
         if get_ident() != self._main_thread_id:
             self.app.call_from_thread(self._apply_runtime_event, event)
             return
         self._apply_runtime_event(event)
 
     def _apply_runtime_event(self, event: object) -> None:
-        terminal = self.query_one(EmbeddedTerminal)
+        widgets = self._runtime_widgets()
+        if widgets is None:
+            return
+        terminal, note = widgets
         if isinstance(event, PTYStarted):
             terminal.clear(f"Terminal running in {event.cwd}")
-            self.query_one("#work-panel-note", Static).update(
-                "Terminal active. Focus the terminal region to type."
-            )
+            note.update("Terminal active. Focus the terminal region to type.")
             buffered = self._stream_router.get_buffer(self.PANEL_ID)
             if buffered:
                 terminal.append_output(buffered)
         elif isinstance(event, PTYStartupFailed):
-            self.query_one("#work-panel-note", Static).update(
-                "Terminal startup failed. Restart after fixing the environment."
-            )
+            note.update("Terminal startup failed. Restart after fixing the environment.")
             terminal.set_status(f"Terminal failed to start: {event.reason}")
         elif isinstance(event, ProcessOutputReceived):
             terminal.append_output(event.chunk)
         elif isinstance(event, TerminalExited):
-            self.query_one("#work-panel-note", Static).update(
-                f"Terminal exited with code {event.exit_code}. Press Ctrl+R to restart."
-            )
+            note.update(f"Terminal exited with code {event.exit_code}. Press Ctrl+R to restart.")
             terminal.set_status(f"\n[terminal exited with {event.exit_code}]")
 
     @staticmethod
@@ -258,6 +259,12 @@ class WorkPanel(BasePanel):
                 "Explorer active. Use arrows to move, Enter to open, Backspace to go up."
             )
         self._render_context()
+        self._event_bus.publish(
+            PanelStateChanged(
+                panel_id=self.PANEL_ID,
+                snapshot=dict(self.snapshot_state().snapshot),
+            )
+        )
 
     def _merge_recovery_message(self, message: str) -> str:
         if not self._recovery_message:
@@ -265,6 +272,17 @@ class WorkPanel(BasePanel):
         if message in self._recovery_message:
             return self._recovery_message
         return f"{self._recovery_message} {message}"
+
+    def _runtime_widgets(self) -> tuple[EmbeddedTerminal, Static] | None:
+        if not self.is_attached or not self.is_mounted:
+            return None
+        try:
+            return (
+                self.query_one(EmbeddedTerminal),
+                self.query_one("#work-panel-note", Static),
+            )
+        except NoMatches:
+            return None
 
     @staticmethod
     def _terminal_payload_for_key(event: events.Key) -> str | None:

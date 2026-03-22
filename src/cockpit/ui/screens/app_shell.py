@@ -6,6 +6,7 @@ from threading import get_ident
 
 from textual.app import App, ComposeResult
 from textual.containers import Vertical
+from textual.css.query import NoMatches
 from textual.widgets import Footer, Input, Static
 
 from cockpit.application.dispatch.command_dispatcher import UnknownCommandError
@@ -15,6 +16,7 @@ from cockpit.domain.commands.command import Command
 from cockpit.domain.events.base import BaseEvent
 from cockpit.domain.events.domain_events import CommandExecuted
 from cockpit.domain.events.runtime_events import (
+    PanelStateChanged,
     PTYStarted,
     PTYStartupFailed,
     PanelFocused,
@@ -61,6 +63,7 @@ class CockpitApp(App[None]):
         self.container.event_bus.subscribe(StatusMessagePublished, self._on_event)
         self.container.event_bus.subscribe(CommandExecuted, self._on_event)
         self.container.event_bus.subscribe(PanelFocused, self._on_event)
+        self.container.event_bus.subscribe(PanelStateChanged, self._on_event)
         self.container.event_bus.subscribe(PTYStarted, self._on_event)
         self.container.event_bus.subscribe(PTYStartupFailed, self._on_event)
         self.container.event_bus.subscribe(TerminalExited, self._on_event)
@@ -84,7 +87,10 @@ class CockpitApp(App[None]):
 
     def on_unmount(self) -> None:
         self._persist_current_snapshot()
-        self.query_one(PanelHost).shutdown()
+        try:
+            self.query_one(PanelHost).shutdown()
+        except NoMatches:
+            pass
         self.container.shutdown()
 
     def action_focus_terminal(self) -> None:
@@ -140,7 +146,12 @@ class CockpitApp(App[None]):
                 level,
             )
         elif isinstance(event, PanelFocused):
-            self.query_one(PanelHost).focus_terminal()
+            try:
+                self.query_one(PanelHost).focus_terminal()
+            except NoMatches:
+                return
+        elif isinstance(event, PanelStateChanged):
+            self._persist_current_snapshot()
         elif isinstance(event, PTYStarted):
             self._set_status(f"Terminal started in {event.cwd}", StatusLevel.INFO)
         elif isinstance(event, PTYStartupFailed):
@@ -153,7 +164,10 @@ class CockpitApp(App[None]):
             )
 
     def _set_status(self, message: str, level: StatusLevel) -> None:
-        status_bar = self.query_one(StatusBar)
+        try:
+            status_bar = self.query_one(StatusBar)
+        except NoMatches:
+            return
         status_bar.set_message(message, level)
 
     def _apply_command_result(self, command_name: str, data: dict[str, object]) -> None:
@@ -190,7 +204,10 @@ class CockpitApp(App[None]):
         return self.query_one(PanelHost).command_context()
 
     def _persist_current_snapshot(self) -> None:
-        panel_host = self.query_one(PanelHost)
+        try:
+            panel_host = self.query_one(PanelHost)
+        except NoMatches:
+            return
         context = panel_host.command_context()
         session_id = context.get("session_id")
         if not isinstance(session_id, str) or not session_id:

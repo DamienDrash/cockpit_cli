@@ -20,6 +20,12 @@ class PanelFocused(RuntimeEvent):
 
 
 @dataclass(slots=True, kw_only=True)
+class PanelStateChanged(RuntimeEvent):
+    panel_id: str
+    snapshot: dict[str, object]
+
+
+@dataclass(slots=True, kw_only=True)
 class PTYStarted(RuntimeEvent):
     panel_id: str
     cwd: str

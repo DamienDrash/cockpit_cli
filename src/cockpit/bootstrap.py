@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 
 from cockpit.application.dispatch.command_dispatcher import CommandDispatcher
 from cockpit.application.dispatch.command_parser import CommandParser
@@ -44,6 +45,7 @@ from cockpit.infrastructure.shell.local_shell_adapter import LocalShellAdapter
 from cockpit.runtime.pty_manager import PTYManager
 from cockpit.runtime.stream_router import StreamRouter
 from cockpit.runtime.task_supervisor import TaskSupervisor
+from cockpit.shared.config import default_db_path
 
 
 @dataclass(slots=True)
@@ -64,13 +66,17 @@ class ApplicationContainer:
         self.store.close()
 
 
-def build_container() -> ApplicationContainer:
+def build_container(
+    *,
+    start: Path | None = None,
+    shell_adapter: LocalShellAdapter | None = None,
+) -> ApplicationContainer:
     """Create the minimum runnable application dependency graph."""
     event_bus = EventBus()
     command_parser = CommandParser()
     command_dispatcher = CommandDispatcher(event_bus=event_bus)
-    store = SQLiteStore()
-    config_loader = ConfigLoader()
+    store = SQLiteStore(default_db_path(start))
+    config_loader = ConfigLoader(start=start)
     workspace_repository = WorkspaceRepository(store)
     layout_repository = LayoutRepository(store)
     session_repository = SessionRepository(store)
@@ -79,7 +85,7 @@ def build_container() -> ApplicationContainer:
     audit_repository = AuditLogRepository(store)
     stream_router = StreamRouter()
     task_supervisor = TaskSupervisor()
-    shell_adapter = LocalShellAdapter()
+    shell_adapter = shell_adapter or LocalShellAdapter()
     pty_manager = PTYManager(
         event_bus=event_bus,
         shell_adapter=shell_adapter,
