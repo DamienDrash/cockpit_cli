@@ -149,6 +149,8 @@ class ActivityLogService:
                     "panel_id": event.panel_id,
                     "cwd": event.cwd,
                     "pid": event.pid,
+                    "target_kind": event.target_kind.value,
+                    "target_ref": event.target_ref,
                 },
             )
         if isinstance(event, PTYStartupFailed):
@@ -159,6 +161,8 @@ class ActivityLogService:
                     "panel_id": event.panel_id,
                     "cwd": event.cwd,
                     "reason": event.reason,
+                    "target_kind": event.target_kind.value,
+                    "target_ref": event.target_ref,
                 },
             )
         if isinstance(event, TerminalExited):
@@ -235,7 +239,16 @@ class ActivityLogService:
         if not isinstance(metadata, dict):
             metadata = {}
         detail_parts: list[str] = []
-        for key in ("root_path", "layout_id", "snapshot_kind", "cwd", "reason", "exit_code"):
+        for key in (
+            "root_path",
+            "layout_id",
+            "snapshot_kind",
+            "cwd",
+            "reason",
+            "exit_code",
+            "target_kind",
+            "target_ref",
+        ):
             value = metadata.get(key)
             if value is not None:
                 detail_parts.append(f"{key}={value}")

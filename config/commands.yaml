@@ -7,3 +7,5 @@ commands:
   - terminal.focus
   - terminal.restart
   - docker.restart
+  - db.run_query
+  - curl.send

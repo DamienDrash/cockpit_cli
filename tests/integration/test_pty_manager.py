@@ -11,10 +11,12 @@ from cockpit.domain.events.runtime_events import (
     ProcessOutputReceived,
     TerminalExited,
 )
+from cockpit.infrastructure.shell.base import ShellLaunchConfig
 from cockpit.infrastructure.shell.local_shell_adapter import LocalShellAdapter
 from cockpit.runtime.pty_manager import PTYManager
 from cockpit.runtime.stream_router import StreamRouter
 from cockpit.runtime.task_supervisor import TaskSupervisor
+from cockpit.shared.enums import SessionTargetKind
 
 
 class PTYManagerTests(unittest.TestCase):
@@ -166,6 +168,44 @@ class PTYManagerTests(unittest.TestCase):
             self.assertTrue(self._wait_for(lambda: manager.get_session("work-panel") is None))
             manager.shutdown()
 
+    def test_starts_remote_session_and_preserves_target_metadata(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            bus = EventBus()
+            router = StreamRouter()
+            manager = PTYManager(
+                event_bus=bus,
+                shell_adapter=FakeRemoteShellAdapter(),
+                stream_router=router,
+                task_supervisor=TaskSupervisor(),
+            )
+            started = Event()
+            seen: list[PTYStarted] = []
+
+            def on_started(event: PTYStarted) -> None:
+                if event.panel_id == "work-panel":
+                    seen.append(event)
+                    started.set()
+
+            bus.subscribe(PTYStarted, on_started)
+
+            session = manager.start_session(
+                "work-panel",
+                temp_dir,
+                target_kind=SessionTargetKind.SSH,
+                target_ref="dev@example.com",
+            )
+
+            self.assertIsNotNone(session)
+            assert session is not None
+            self.assertTrue(started.wait(1.0))
+            self.assertEqual(session.target_kind, SessionTargetKind.SSH)
+            self.assertEqual(session.target_ref, "dev@example.com")
+            self.assertTrue(seen)
+            self.assertEqual(seen[0].target_kind, SessionTargetKind.SSH)
+            self.assertEqual(seen[0].target_ref, "dev@example.com")
+            manager.stop_session("work-panel")
+            manager.shutdown()
+
     def _build_manager(self) -> tuple[PTYManager, EventBus, StreamRouter]:
         bus = EventBus()
         router = StreamRouter()
@@ -184,6 +224,22 @@ class PTYManagerTests(unittest.TestCase):
                 return True
             time.sleep(0.05)
         return bool(predicate())
+
+class FakeRemoteShellAdapter:
+    def build_launch_config(
+        self,
+        cwd: str,
+        *,
+        command: list[str] | tuple[str, ...] | None = None,
+        target_kind: SessionTargetKind = SessionTargetKind.LOCAL,
+        target_ref: str | None = None,
+    ) -> ShellLaunchConfig:
+        del cwd, command, target_kind, target_ref
+        return ShellLaunchConfig(
+            command=("/bin/sh", "-lc", "printf 'remote ready\\n'; sleep 30"),
+            cwd=str(Path.cwd()),
+            env={},
+        )
 
 
 if __name__ == "__main__":

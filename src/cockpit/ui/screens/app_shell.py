@@ -51,6 +51,8 @@ class CockpitApp(App[None]):
         ("ctrl+3", "focus_logs_tab", "Focus Logs"),
         ("ctrl+4", "focus_docker_tab", "Focus Docker"),
         ("ctrl+5", "focus_cron_tab", "Focus Cron"),
+        ("ctrl+6", "focus_db_tab", "Focus DB"),
+        ("ctrl+7", "focus_curl_tab", "Focus Curl"),
         ("ctrl+t", "focus_terminal", "Focus Terminal"),
         ("ctrl+r", "restart_terminal", "Restart Terminal"),
         ("f8", "restart_selected_docker", "Restart Container"),
@@ -214,6 +216,28 @@ class CockpitApp(App[None]):
             )
         )
 
+    def action_focus_db_tab(self) -> None:
+        self._dispatch_command(
+            Command(
+                id=make_id("cmd"),
+                source=CommandSource.KEYBINDING,
+                name="tab.focus",
+                args={"argv": ["db"]},
+                context=self._command_context(),
+            )
+        )
+
+    def action_focus_curl_tab(self) -> None:
+        self._dispatch_command(
+            Command(
+                id=make_id("cmd"),
+                source=CommandSource.KEYBINDING,
+                name="tab.focus",
+                args={"argv": ["curl"]},
+                context=self._command_context(),
+            )
+        )
+
     def action_restart_terminal(self) -> None:
         self._dispatch_command(
             Command(
@@ -261,6 +285,8 @@ class CockpitApp(App[None]):
             "terminal.focus",
             "terminal.restart",
             "docker.restart",
+            "db.run_query",
+            "curl.send",
         }:
             self._persist_current_snapshot()
 
@@ -307,6 +333,11 @@ class CockpitApp(App[None]):
     def _apply_command_result(self, command_name: str, data: dict[str, object]) -> None:
         if data.get("confirmation_required") is True:
             self._set_pending_confirmation(data)
+            return
+        result_panel_id = data.get("result_panel_id")
+        result_payload = data.get("result_payload")
+        if isinstance(result_panel_id, str) and isinstance(result_payload, dict):
+            self.query_one(PanelHost).deliver_panel_result(result_panel_id, result_payload)
             return
         refresh_panel_id = data.get("refresh_panel_id")
         if isinstance(refresh_panel_id, str):
@@ -467,6 +498,14 @@ class CockpitApp(App[None]):
             "layout.apply_default": (
                 "Apply Default Layout",
                 "layout apply_default",
+            ),
+            "db.run_query": (
+                "Run Example DB Query",
+                'db run_query "SELECT name FROM sqlite_master ORDER BY name LIMIT 10"',
+            ),
+            "curl.send": (
+                "Send Example GET Request",
+                "curl send GET https://example.com",
             ),
             "terminal.focus": (
                 "Focus Terminal",

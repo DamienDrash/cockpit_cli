@@ -11,17 +11,24 @@ TEXTUAL_AVAILABLE = importlib.util.find_spec("textual") is not None
 if TEXTUAL_AVAILABLE:
     from cockpit.bootstrap import build_container
     from cockpit.infrastructure.cron.cron_adapter import CronAdapter, CronJob, CronSnapshot
+    from cockpit.infrastructure.db.database_adapter import (
+        DatabaseCatalogSnapshot,
+        DatabaseQueryResult,
+    )
     from cockpit.infrastructure.docker.docker_adapter import (
         DockerActionResult,
         DockerContainerSummary,
         DockerRuntimeSnapshot,
     )
+    from cockpit.infrastructure.http.http_adapter import HttpResponseSummary
     from cockpit.infrastructure.shell.local_shell_adapter import (
         LocalShellAdapter,
     )
     from cockpit.infrastructure.shell.base import ShellLaunchConfig
     from cockpit.infrastructure.ssh.command_runner import SSHCommandResult
     from cockpit.shared.enums import SessionTargetKind
+    from cockpit.ui.panels.curl_panel import CurlPanel
+    from cockpit.ui.panels.db_panel import DBPanel
     from cockpit.ui.panels.docker_panel import DockerPanel
     from cockpit.ui.panels.git_panel import GitPanel
     from cockpit.ui.panels.logs_panel import LogsPanel
@@ -29,6 +36,7 @@ if TEXTUAL_AVAILABLE:
     from cockpit.ui.screens.app_shell import CockpitApp
     from cockpit.ui.widgets.confirmation_bar import ConfirmationBar
     from cockpit.ui.widgets.command_palette import CommandPalette
+    from cockpit.ui.widgets.embedded_terminal import EmbeddedTerminal
     from cockpit.ui.widgets.file_context import FileContext
     from cockpit.ui.widgets.file_explorer import FileExplorer
     from cockpit.ui.widgets.slash_input import SlashInput
@@ -197,6 +205,84 @@ if TEXTUAL_AVAILABLE:
             del target_kind, target_ref
             self._restart_counts[container_id] = self._restart_counts.get(container_id, 0) + 1
             return DockerActionResult(success=True, message=f"restarted {container_id}")
+
+
+    class FakeDatabaseAdapter:
+        def __init__(self) -> None:
+            self.calls: list[str] = []
+
+        def list_databases(
+            self,
+            root_path: str,
+            *,
+            target_kind: SessionTargetKind = SessionTargetKind.LOCAL,
+            target_ref: str | None = None,
+        ) -> DatabaseCatalogSnapshot:
+            del target_kind, target_ref
+            database_path = str(Path(root_path).resolve() / "workspace.sqlite3")
+            return DatabaseCatalogSnapshot(
+                databases=[database_path],
+                is_available=True,
+                message=None,
+            )
+
+        def run_query(
+            self,
+            database_path: str,
+            query: str,
+            *,
+            target_kind: SessionTargetKind = SessionTargetKind.LOCAL,
+            target_ref: str | None = None,
+            row_limit: int = 50,
+        ) -> DatabaseQueryResult:
+            del target_kind, target_ref, row_limit
+            self.calls.append(query)
+            lowered = query.lower()
+            if lowered.startswith(("insert", "update", "delete", "create", "alter", "drop")):
+                return DatabaseQueryResult(
+                    success=True,
+                    database_path=database_path,
+                    query=query,
+                    affected_rows=1,
+                    message="Affected 1 row.",
+                )
+            return DatabaseQueryResult(
+                success=True,
+                database_path=database_path,
+                query=query,
+                columns=["name"],
+                rows=[["users"], ["jobs"]],
+                row_count=2,
+                message="Returned 2 rows.",
+            )
+
+
+    class FakeHttpAdapter:
+        def __init__(self) -> None:
+            self.calls: list[tuple[str, str, str | None]] = []
+
+        def send_request(
+            self,
+            method: str,
+            url: str,
+            *,
+            headers: dict[str, str] | None = None,
+            body: str | None = None,
+            timeout_seconds: int = 10,
+        ) -> HttpResponseSummary:
+            del headers, timeout_seconds
+            self.calls.append((method, url, body))
+            return HttpResponseSummary(
+                success=True,
+                method=method,
+                url=url,
+                status_code=200,
+                reason="OK",
+                duration_ms=17,
+                headers={"content-type": "application/json"},
+                body_preview='{"ok": true, "url": "' + url + '"}',
+                message=f"{method} {url} -> 200",
+            )
 
 
 @unittest.skipUnless(TEXTUAL_AVAILABLE, "textual must be installed for e2e tests")
@@ -439,6 +525,104 @@ class CockpitAppE2ETests(unittest.IsolatedAsyncioTestCase):
                 self.assertIn("[Cron]", tab_text)
                 self.assertIn("/usr/local/bin/backup", cron_text)
 
+    async def test_db_tab_runs_query_and_restores_active_tab(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            root, workspace_dir, _nested_dir, _selected_file = self._write_project_fixture(
+                Path(temp_dir)
+            )
+
+            first_app = self._build_app(root)
+            async with first_app.run_test() as pilot:
+                await self._open_workspace(first_app, pilot, workspace_dir)
+                await self._run_slash_command(first_app, pilot, "/tab focus db")
+                await self._run_slash_command(
+                    first_app,
+                    pilot,
+                    '/db run_query "SELECT name FROM sqlite_master ORDER BY name LIMIT 10"',
+                )
+
+                tab_text = self._rendered_text(first_app.query_one(TabBar))
+                db_text = self._rendered_text(first_app.query_one(DBPanel))
+
+                self.assertIn("[DB]", tab_text)
+                self.assertIn("columns=name", db_text)
+                self.assertIn("users", db_text)
+
+            second_app = self._build_app(root)
+            async with second_app.run_test() as pilot:
+                await pilot.pause()
+
+                tab_text = self._rendered_text(second_app.query_one(TabBar))
+                db_text = self._rendered_text(second_app.query_one(DBPanel))
+
+                self.assertIn("[DB]", tab_text)
+                self.assertIn("users", db_text)
+
+    async def test_db_write_query_requires_confirmation(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            root, workspace_dir, _nested_dir, _selected_file = self._write_project_fixture(
+                Path(temp_dir)
+            )
+
+            app = self._build_app(root)
+            async with app.run_test() as pilot:
+                await self._open_workspace(app, pilot, workspace_dir)
+                await self._run_slash_command(app, pilot, "/tab focus db")
+
+                slash_input = app.query_one(SlashInput)
+                slash_input.focus()
+                slash_input.value = '/db run_query "UPDATE users SET active = 0"'
+                await pilot.press("enter")
+                await pilot.pause()
+
+                confirmation_bar = app.query_one(ConfirmationBar)
+                self.assertTrue(confirmation_bar.is_open)
+                self.assertIn("mutating SQL", self._rendered_text(confirmation_bar))
+
+                await pilot.press("enter")
+                await pilot.pause()
+
+                db_text = self._rendered_text(app.query_one(DBPanel))
+                self.assertFalse(confirmation_bar.is_open)
+                self.assertIn("affected_rows=1", db_text)
+
+    async def test_curl_tab_sends_request_and_requires_confirmation_for_post(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            root, workspace_dir, _nested_dir, _selected_file = self._write_project_fixture(
+                Path(temp_dir)
+            )
+
+            app = self._build_app(root)
+            async with app.run_test() as pilot:
+                await self._open_workspace(app, pilot, workspace_dir)
+                await self._run_slash_command(app, pilot, "/tab focus curl")
+                await self._run_slash_command(
+                    app,
+                    pilot,
+                    "/curl send GET https://example.com/health",
+                )
+
+                curl_text = self._rendered_text(app.query_one(CurlPanel))
+                self.assertIn("status=200", curl_text)
+                self.assertIn('"ok": true', curl_text)
+
+                slash_input = app.query_one(SlashInput)
+                slash_input.focus()
+                slash_input.value = '/curl send POST https://example.com/api body="{\\"ok\\":true}"'
+                await pilot.press("enter")
+                await pilot.pause()
+
+                confirmation_bar = app.query_one(ConfirmationBar)
+                self.assertTrue(confirmation_bar.is_open)
+                self.assertIn("Send POST request", self._rendered_text(confirmation_bar))
+
+                await pilot.press("enter")
+                await pilot.pause()
+
+                curl_text = self._rendered_text(app.query_one(CurlPanel))
+                self.assertFalse(confirmation_bar.is_open)
+                self.assertIn("POST 200 https://example.com/api", curl_text)
+
     async def test_remote_workspace_opens_with_remote_context_and_restores(self) -> None:
         with TemporaryDirectory() as temp_dir:
             root, _workspace_dir, _nested_dir, _selected_file = self._write_project_fixture(
@@ -452,11 +636,13 @@ class CockpitAppE2ETests(unittest.IsolatedAsyncioTestCase):
 
                 context_text = self._rendered_text(first_app.query_one(FileContext))
                 explorer_text = self._rendered_text(first_app.query_one(FileExplorer))
+                terminal_output = first_app.query_one(EmbeddedTerminal).current_output()
 
                 self.assertIn("Root: /srv/app", context_text)
                 self.assertIn("Target: ssh:dev@example.com", context_text)
                 self.assertIn("Explorer: remote dev@example.com:/srv/app", explorer_text)
                 self.assertIn("> current/", explorer_text)
+                self.assertIn("remote ready", terminal_output)
                 await pilot.press("enter")
                 await pilot.pause()
 
@@ -496,6 +682,21 @@ class CockpitAppE2ETests(unittest.IsolatedAsyncioTestCase):
 
                 self.assertIn("[Work]", tab_text)
 
+    async def test_split_layout_displays_multiple_panels_in_the_same_tab(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            root, workspace_dir, _nested_dir, _selected_file = self._write_project_fixture(
+                Path(temp_dir),
+                split_layout=True,
+            )
+
+            app = self._build_app(root)
+            async with app.run_test() as pilot:
+                await self._open_workspace(app, pilot, workspace_dir)
+                await pilot.pause()
+
+                self.assertTrue(app.query_one(FileContext).display)
+                self.assertTrue(app.query_one(DBPanel).display)
+
     def _build_app(
         self,
         root: Path,
@@ -508,6 +709,8 @@ class CockpitAppE2ETests(unittest.IsolatedAsyncioTestCase):
             ssh_command_runner=FakeSSHCommandRunner(),
             cron_adapter=FakeCronAdapter(),
             docker_adapter=FakeDockerAdapter(),
+            database_adapter=FakeDatabaseAdapter(),
+            http_adapter=FakeHttpAdapter(),
         )
         return CockpitApp(
             container=container,
@@ -533,7 +736,12 @@ class CockpitAppE2ETests(unittest.IsolatedAsyncioTestCase):
         await getattr(pilot, "press")("enter")
         await getattr(pilot, "pause")()
 
-    def _write_project_fixture(self, root: Path) -> tuple[Path, Path, Path, Path]:
+    def _write_project_fixture(
+        self,
+        root: Path,
+        *,
+        split_layout: bool = False,
+    ) -> tuple[Path, Path, Path, Path]:
         (root / "src").mkdir()
         (root / "config" / "layouts").mkdir(parents=True)
         (root / "config" / "themes").mkdir(parents=True)
@@ -541,20 +749,37 @@ class CockpitAppE2ETests(unittest.IsolatedAsyncioTestCase):
             "[project]\nname='cockpit-e2e'\n",
             encoding="utf-8",
         )
-        (root / "config" / "layouts" / "default.yaml").write_text(
-            "\n".join(
+        layout_lines = [
+            "id: default",
+            "name: Default",
+            "tabs:",
+            "  - id: work",
+            "    name: Work",
+            "    root_split:",
+            "      orientation: vertical",
+            "      ratio: 0.7",
+            "      children:",
+            "        - panel_id: work-panel",
+            "          panel_type: work",
+        ]
+        if split_layout:
+            layout_lines.extend(
                 [
-                    "id: default",
-                    "name: Default",
-                    "tabs:",
-                    "  - id: work",
-                    "    name: Work",
+                    "        - panel_id: db-panel",
+                    "          panel_type: db",
+                    "  - id: docker",
+                    "    name: Docker",
                     "    root_split:",
                     "      orientation: vertical",
-                    "      ratio: 0.7",
+                    "      ratio: 1.0",
                     "      children:",
-                    "        - panel_id: work-panel",
-                    "          panel_type: work",
+                    "        - panel_id: docker-panel",
+                    "          panel_type: docker",
+                ]
+            )
+        else:
+            layout_lines.extend(
+                [
                     "  - id: git",
                     "    name: Git",
                     "    root_split:",
@@ -579,6 +804,22 @@ class CockpitAppE2ETests(unittest.IsolatedAsyncioTestCase):
                     "      children:",
                     "        - panel_id: cron-panel",
                     "          panel_type: cron",
+                    "  - id: db",
+                    "    name: DB",
+                    "    root_split:",
+                    "      orientation: vertical",
+                    "      ratio: 1.0",
+                    "      children:",
+                    "        - panel_id: db-panel",
+                    "          panel_type: db",
+                    "  - id: curl",
+                    "    name: Curl",
+                    "    root_split:",
+                    "      orientation: vertical",
+                    "      ratio: 1.0",
+                    "      children:",
+                    "        - panel_id: curl-panel",
+                    "          panel_type: curl",
                     "  - id: logs",
                     "    name: Logs",
                     "    root_split:",
@@ -587,12 +828,17 @@ class CockpitAppE2ETests(unittest.IsolatedAsyncioTestCase):
                     "      children:",
                     "        - panel_id: logs-panel",
                     "          panel_type: logs",
-                    "focus_path:",
-                    "  - work",
-                    "  - work-panel",
                 ]
             )
-            + "\n",
+        layout_lines.extend(
+            [
+                "focus_path:",
+                "  - work",
+                "  - work-panel",
+            ]
+        )
+        (root / "config" / "layouts" / "default.yaml").write_text(
+            "\n".join(layout_lines) + "\n",
             encoding="utf-8",
         )
         (root / "config" / "commands.yaml").write_text(
@@ -607,6 +853,8 @@ class CockpitAppE2ETests(unittest.IsolatedAsyncioTestCase):
                     "  - terminal.focus",
                     "  - terminal.restart",
                     "  - docker.restart",
+                    "  - db.run_query",
+                    "  - curl.send",
                 ]
             )
             + "\n",

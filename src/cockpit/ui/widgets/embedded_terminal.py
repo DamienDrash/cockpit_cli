@@ -8,7 +8,8 @@ from textual.widgets import Static
 
 
 ANSI_RE = re.compile(r"\x1b\[[0-9;?]*[ -/]*[@-~]")
-CONTROL_RE = re.compile(r"[\x00-\x08\x0b-\x1f\x7f]")
+OSC_RE = re.compile(r"\x1b\][^\x07]*(?:\x07|\x1b\\)")
+CONTROL_RE = re.compile(r"[\x00-\x07\x0b-\x0c\x0e-\x1a\x1c-\x1f]")
 
 
 class EmbeddedTerminal(Static):
@@ -34,7 +35,7 @@ class EmbeddedTerminal(Static):
         if not sanitized:
             return
         follow_output = self._viewport_offset == 0
-        self._buffer = f"{self._buffer}{sanitized}"[-self._max_chars :]
+        self._buffer = self._apply_stream_update(self._buffer, sanitized)[-self._max_chars :]
         if follow_output:
             self._viewport_offset = 0
         self._refresh_view()
@@ -71,9 +72,24 @@ class EmbeddedTerminal(Static):
         return self._viewport_offset
 
     def _sanitize(self, chunk: str) -> str:
-        normalized = chunk.replace("\r\n", "\n").replace("\r", "\n")
-        without_ansi = ANSI_RE.sub("", normalized)
-        return CONTROL_RE.sub("", without_ansi)
+        without_osc = OSC_RE.sub("", chunk)
+        without_ansi = ANSI_RE.sub("", without_osc)
+        normalized = without_ansi.replace("\r\n", "\n")
+        return CONTROL_RE.sub("", normalized)
+
+    def _apply_stream_update(self, buffer: str, chunk: str) -> str:
+        result = buffer
+        for character in chunk:
+            if character == "\r":
+                last_newline = result.rfind("\n")
+                result = result[: last_newline + 1] if last_newline >= 0 else ""
+                continue
+            if character in {"\b", "\x7f"}:
+                if result and result[-1] != "\n":
+                    result = result[:-1]
+                continue
+            result = f"{result}{character}"
+        return result
 
     def _refresh_view(self) -> None:
         if not self._buffer:

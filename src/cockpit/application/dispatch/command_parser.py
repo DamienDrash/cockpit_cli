@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import shlex
 
 from cockpit.domain.commands.command import Command
@@ -15,6 +16,8 @@ class CommandParseError(ValueError):
 
 class CommandParser:
     """Parses slash and non-slash command input into `Command` objects."""
+
+    _NAMED_ARG_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_-]*=.*$")
 
     def parse(
         self,
@@ -44,7 +47,7 @@ class CommandParser:
         args: dict[str, object] = {"argv": []}
         argv = []
         for token in tail:
-            if "=" in token and not token.startswith("="):
+            if self._NAMED_ARG_RE.match(token):
                 key, value = token.split("=", 1)
                 args[key] = value
             else:
@@ -58,4 +61,3 @@ class CommandParser:
             args=args,
             context=context or {},
         )
-

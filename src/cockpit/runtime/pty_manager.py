@@ -35,6 +35,9 @@ class TerminalSession:
     process: subprocess.Popen[bytes]
     master_fd: int
     task: BackgroundTask
+    target_kind: SessionTargetKind = SessionTargetKind.LOCAL
+    target_ref: str | None = None
+    launch_command: tuple[str, ...] = ()
     rows: int | None = None
     cols: int | None = None
 
@@ -105,6 +108,8 @@ class PTYManager:
                     panel_id=panel_id,
                     cwd=cwd,
                     reason=reason,
+                    target_kind=target_kind,
+                    target_ref=target_ref,
                 )
             )
             self._event_bus.publish(
@@ -132,6 +137,9 @@ class PTYManager:
             process=process,
             master_fd=master_fd,
             task=task,
+            target_kind=target_kind,
+            target_ref=target_ref,
+            launch_command=launch.command,
         )
         with self._lock:
             self._sessions[panel_id] = session
@@ -140,6 +148,8 @@ class PTYManager:
                 panel_id=panel_id,
                 cwd=launch.cwd,
                 pid=process.pid,
+                target_kind=target_kind,
+                target_ref=target_ref,
             )
         )
         return session

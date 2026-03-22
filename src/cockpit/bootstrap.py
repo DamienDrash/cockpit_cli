@@ -8,6 +8,8 @@ from pathlib import Path
 from cockpit.application.dispatch.command_dispatcher import CommandDispatcher
 from cockpit.application.dispatch.command_parser import CommandParser
 from cockpit.application.dispatch.event_bus import EventBus
+from cockpit.application.handlers.curl_handlers import SendHttpRequestHandler
+from cockpit.application.handlers.db_handlers import RunDatabaseQueryHandler
 from cockpit.application.handlers.docker_handlers import RestartDockerContainerHandler
 from cockpit.application.handlers.layout_handlers import ApplyDefaultLayoutHandler
 from cockpit.application.handlers.session_handlers import RestoreSessionHandler
@@ -35,9 +37,11 @@ from cockpit.domain.events.domain_events import (
 from cockpit.domain.events.runtime_events import PTYStarted, PTYStartupFailed, TerminalExited
 from cockpit.infrastructure.config.config_loader import ConfigLoader
 from cockpit.infrastructure.cron.cron_adapter import CronAdapter
+from cockpit.infrastructure.db.database_adapter import DatabaseAdapter
 from cockpit.infrastructure.docker.docker_adapter import DockerAdapter
 from cockpit.infrastructure.filesystem.remote_filesystem_adapter import RemoteFilesystemAdapter
 from cockpit.infrastructure.git.git_adapter import GitAdapter
+from cockpit.infrastructure.http.http_adapter import HttpAdapter
 from cockpit.infrastructure.persistence.repositories import (
     AuditLogRepository,
     CommandHistoryRepository,
@@ -56,6 +60,8 @@ from cockpit.runtime.pty_manager import PTYManager
 from cockpit.runtime.stream_router import StreamRouter
 from cockpit.runtime.task_supervisor import TaskSupervisor
 from cockpit.shared.config import default_db_path, discover_project_root
+from cockpit.ui.panels.curl_panel import CurlPanel
+from cockpit.ui.panels.db_panel import DBPanel
 from cockpit.ui.panels.git_panel import GitPanel
 from cockpit.ui.panels.docker_panel import DockerPanel
 from cockpit.ui.panels.cron_panel import CronPanel
@@ -80,6 +86,8 @@ class ApplicationContainer:
     pty_manager: PTYManager
     cron_adapter: CronAdapter
     docker_adapter: DockerAdapter
+    database_adapter: DatabaseAdapter
+    http_adapter: HttpAdapter
     git_adapter: GitAdapter
     remote_filesystem_adapter: RemoteFilesystemAdapter
     panel_registry: PanelRegistry
@@ -97,6 +105,8 @@ def build_container(
     ssh_command_runner: SSHCommandRunner | None = None,
     cron_adapter: CronAdapter | None = None,
     docker_adapter: DockerAdapter | None = None,
+    database_adapter: DatabaseAdapter | None = None,
+    http_adapter: HttpAdapter | None = None,
 ) -> ApplicationContainer:
     """Create the minimum runnable application dependency graph."""
     project_root = discover_project_root(start)
@@ -127,6 +137,8 @@ def build_container(
     )
     cron_adapter = cron_adapter or CronAdapter(ssh_command_runner=ssh_command_runner)
     docker_adapter = docker_adapter or DockerAdapter(ssh_command_runner=ssh_command_runner)
+    database_adapter = database_adapter or DatabaseAdapter()
+    http_adapter = http_adapter or HttpAdapter()
     git_adapter = GitAdapter(ssh_command_runner=ssh_command_runner)
     remote_filesystem_adapter = RemoteFilesystemAdapter(ssh_command_runner)
     pty_manager = PTYManager(
@@ -186,6 +198,27 @@ def build_container(
             factory=lambda container: CronPanel(
                 event_bus=container.event_bus,
                 cron_adapter=container.cron_adapter,
+            ),
+        )
+    )
+    panel_registry.register(
+        PanelSpec(
+            panel_type=DBPanel.PANEL_TYPE,
+            panel_id=DBPanel.PANEL_ID,
+            display_name="DB",
+            factory=lambda container: DBPanel(
+                event_bus=container.event_bus,
+                database_adapter=container.database_adapter,
+            ),
+        )
+    )
+    panel_registry.register(
+        PanelSpec(
+            panel_type=CurlPanel.PANEL_TYPE,
+            panel_id=CurlPanel.PANEL_ID,
+            display_name="Curl",
+            factory=lambda container: CurlPanel(
+                event_bus=container.event_bus,
             ),
         )
     )
@@ -253,6 +286,12 @@ def build_container(
     command_dispatcher.register(
         "docker.restart", RestartDockerContainerHandler(docker_adapter)
     )
+    command_dispatcher.register(
+        "db.run_query", RunDatabaseQueryHandler(database_adapter)
+    )
+    command_dispatcher.register(
+        "curl.send", SendHttpRequestHandler(http_adapter)
+    )
 
     return ApplicationContainer(
         project_root=project_root,
@@ -267,6 +306,8 @@ def build_container(
         pty_manager=pty_manager,
         cron_adapter=cron_adapter,
         docker_adapter=docker_adapter,
+        database_adapter=database_adapter,
+        http_adapter=http_adapter,
         git_adapter=git_adapter,
         remote_filesystem_adapter=remote_filesystem_adapter,
         panel_registry=panel_registry,

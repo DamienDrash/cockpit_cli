@@ -54,6 +54,7 @@ class WorkPanel(BasePanel):
         self._stream_router = stream_router
         self._remote_filesystem_adapter = remote_filesystem_adapter
         self._main_thread_id = get_ident()
+        self._subscriptions_registered = False
         self._workspace_name = "No workspace"
         self._workspace_root = ""
         self._workspace_id: str | None = None
@@ -77,10 +78,12 @@ class WorkPanel(BasePanel):
 
     def on_mount(self) -> None:
         self._main_thread_id = get_ident()
-        self._event_bus.subscribe(PTYStarted, self._on_runtime_event)
-        self._event_bus.subscribe(PTYStartupFailed, self._on_runtime_event)
-        self._event_bus.subscribe(ProcessOutputReceived, self._on_runtime_event)
-        self._event_bus.subscribe(TerminalExited, self._on_runtime_event)
+        if not self._subscriptions_registered:
+            self._event_bus.subscribe(PTYStarted, self._on_runtime_event)
+            self._event_bus.subscribe(PTYStartupFailed, self._on_runtime_event)
+            self._event_bus.subscribe(ProcessOutputReceived, self._on_runtime_event)
+            self._event_bus.subscribe(TerminalExited, self._on_runtime_event)
+            self._subscriptions_registered = True
         self._event_bus.publish(
             PanelMounted(
                 panel_id=self.PANEL_ID,
@@ -136,8 +139,10 @@ class WorkPanel(BasePanel):
     def attach_terminal(self) -> None:
         terminal = self.query_one(EmbeddedTerminal)
         terminal.clear("Launching terminal...")
+        target_label = self._target_label() or "local"
         self.query_one("#work-panel-note", Static).update(
-            f"Terminal target cwd: {self._cwd or self._workspace_root or '(unset)'}"
+            "Terminal target: "
+            f"{target_label} {self._cwd or self._workspace_root or '(unset)'}"
         )
         if not self._cwd:
             return
@@ -234,14 +239,29 @@ class WorkPanel(BasePanel):
             return
         terminal, note = widgets
         if isinstance(event, PTYStarted):
+            target_label = (
+                f"{event.target_kind.value}:{event.target_ref}"
+                if event.target_kind is SessionTargetKind.SSH and event.target_ref
+                else event.target_kind.value
+            )
             terminal.clear(f"Terminal running in {event.cwd}")
-            note.update("Terminal active. Focus the terminal region to type.")
+            note.update(
+                f"Terminal active on {target_label}. Focus the terminal region to type."
+            )
             self._sync_terminal_size()
             buffered = self._stream_router.get_buffer(self.PANEL_ID)
             if buffered:
                 terminal.append_output(buffered)
         elif isinstance(event, PTYStartupFailed):
-            note.update("Terminal startup failed. Restart after fixing the environment.")
+            target_label = (
+                f"{event.target_kind.value}:{event.target_ref}"
+                if event.target_kind is SessionTargetKind.SSH and event.target_ref
+                else event.target_kind.value
+            )
+            note.update(
+                "Terminal startup failed "
+                f"for {target_label}. Restart after fixing the environment."
+            )
             terminal.set_status(f"Terminal failed to start: {event.reason}")
         elif isinstance(event, ProcessOutputReceived):
             terminal.append_output(event.chunk)

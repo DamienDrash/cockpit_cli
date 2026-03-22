@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable
+
 from textual.app import ComposeResult
 from textual.containers import Vertical
 
@@ -11,7 +13,7 @@ from cockpit.ui.panels.registry import PanelContract
 
 
 class PanelHost(Vertical):
-    """Hosts the reference panel set for the first application slice."""
+    """Hosts the reference panel set and materializes layout split trees."""
 
     def __init__(self, *, container: ApplicationContainer) -> None:
         super().__init__(id="panel-host")
@@ -19,12 +21,22 @@ class PanelHost(Vertical):
         self._panels_by_id = self._container.panel_registry.create_panels(container)
         self._active_tab_id = "work"
         self._layout_id = "default"
-        self._tabs: list[dict[str, str]] = [
+        self._tabs: list[dict[str, object]] = [
             {
                 "id": "work",
                 "name": "Work",
                 "panel_id": "work-panel",
                 "panel_type": "work",
+                "root_split": {
+                    "orientation": "vertical",
+                    "ratio": 1.0,
+                    "children": [
+                        {
+                            "panel_id": "work-panel",
+                            "panel_type": "work",
+                        }
+                    ],
+                },
             }
         ]
 
@@ -40,14 +52,16 @@ class PanelHost(Vertical):
         snapshot = context.get("snapshot")
         panel_snapshots = self._panel_snapshots(snapshot if isinstance(snapshot, dict) else {})
         for panel_id, panel in self._panels_by_id.items():
+            panel_snapshot = panel_snapshots.get(panel_id, {})
             panel_context = dict(context)
-            panel_context.update(panel_snapshots.get(panel_id, {}))
+            panel_context.update(panel_snapshot)
             panel.initialize(panel_context)
+            panel.restore_state(panel_snapshot)
         active_tab_id = context.get("active_tab_id")
-        self.set_active_tab(
-            str(active_tab_id) if isinstance(active_tab_id, str) and active_tab_id else "work",
-            focus=False,
+        self._active_tab_id = (
+            str(active_tab_id) if isinstance(active_tab_id, str) and active_tab_id else "work"
         )
+        self.set_active_tab(self._active_tab_id, focus=False)
 
     def focus_terminal(self) -> None:
         panel = self._panels_by_id.get("work-panel")
@@ -59,7 +73,7 @@ class PanelHost(Vertical):
         context = self._active_panel().command_context()
         context["layout_id"] = self._layout_id
         context["active_tab_id"] = self._active_tab_id
-        context["available_tab_ids"] = [tab["id"] for tab in self._tabs]
+        context["available_tab_ids"] = [str(tab["id"]) for tab in self._tabs]
         return context
 
     def snapshot_state(self) -> PanelState:
@@ -86,15 +100,19 @@ class PanelHost(Vertical):
         )
 
     def set_active_tab(self, tab_id: str, *, focus: bool = True) -> str:
-        panels = self._tab_panels()
-        next_tab = tab_id if tab_id in panels else self._tabs[0]["id"]
+        visible_map = self._tab_panels()
+        next_tab = tab_id if tab_id in visible_map else str(self._tabs[0]["id"])
         self._active_tab_id = next_tab
-        active_panel = panels[next_tab]
+        visible_panel_ids = set(self._panel_ids_for_tab(next_tab))
         for panel in self._panels():
-            panel.display = panel is active_panel
-        panels[next_tab].resume()
+            panel.display = panel.PANEL_ID in visible_panel_ids
+            if panel.PANEL_ID in visible_panel_ids:
+                panel.resume()
+            else:
+                panel.suspend()
         if focus:
-            panels[next_tab].focus()
+            primary_panel = visible_map[next_tab]
+            primary_panel.focus()
         return next_tab
 
     def active_tab_id(self) -> str:
@@ -105,14 +123,22 @@ class PanelHost(Vertical):
             panel.dispose()
 
     def available_tabs(self) -> list[tuple[str, str]]:
-        return [(tab["id"], tab["name"]) for tab in self._tabs]
+        return [(str(tab["id"]), str(tab["name"])) for tab in self._tabs]
 
     def refresh_panel(self, panel_id: str) -> None:
         panel = self._panels_by_id.get(panel_id)
         if panel is not None:
             panel.resume()
 
+    def deliver_panel_result(self, panel_id: str, payload: dict[str, object]) -> None:
+        panel = self._panels_by_id.get(panel_id)
+        if panel is not None:
+            panel.apply_command_result(payload)
+
     def _active_panel(self) -> PanelContract:
+        panel = self._focused_panel()
+        if panel is not None:
+            return panel
         active_panel_id = self._tab_panel_id(self._active_tab_id)
         panel = self._panels_by_id.get(active_panel_id)
         if panel is not None:
@@ -138,10 +164,10 @@ class PanelHost(Vertical):
             }
         return panel_snapshots
 
-    def _normalize_tabs(self, raw_tabs: object) -> list[dict[str, str]]:
+    def _normalize_tabs(self, raw_tabs: object) -> list[dict[str, object]]:
         if not isinstance(raw_tabs, list):
             return list(self._tabs)
-        tabs: list[dict[str, str]] = []
+        tabs: list[dict[str, object]] = []
         for raw_tab in raw_tabs:
             if not isinstance(raw_tab, dict):
                 continue
@@ -156,6 +182,20 @@ class PanelHost(Vertical):
                     "name": str(raw_tab.get("name", tab_id.title())),
                     "panel_id": panel_id,
                     "panel_type": str(panel_type or tab_id),
+                    "root_split": (
+                        raw_tab.get("root_split")
+                        if isinstance(raw_tab.get("root_split"), dict)
+                        else {
+                            "orientation": "vertical",
+                            "ratio": 1.0,
+                            "children": [
+                                {
+                                    "panel_id": panel_id,
+                                    "panel_type": str(panel_type or tab_id),
+                                }
+                            ],
+                        }
+                    ),
                 }
             )
         return tabs or list(self._tabs)
@@ -163,9 +203,9 @@ class PanelHost(Vertical):
     def _tab_panels(self) -> dict[str, PanelContract]:
         tabs: dict[str, PanelContract] = {}
         for tab in self._tabs:
-            panel = self._panels_by_id.get(tab["panel_id"])
+            panel = self._panels_by_id.get(str(tab["panel_id"]))
             if panel is not None:
-                tabs[tab["id"]] = panel
+                tabs[str(tab["id"])] = panel
         if "work" not in tabs:
             work_panel = self._panels_by_id.get("work-panel")
             if work_panel is not None:
@@ -175,5 +215,34 @@ class PanelHost(Vertical):
     def _tab_panel_id(self, tab_id: str) -> str:
         for tab in self._tabs:
             if tab["id"] == tab_id:
-                return tab["panel_id"]
+                return str(tab["panel_id"])
         return "work-panel"
+
+    def _focused_panel(self) -> PanelContract | None:
+        focused = getattr(self.screen, "focused", None)
+        while focused is not None:
+            panel_id = getattr(focused, "id", None)
+            if isinstance(panel_id, str):
+                panel = self._panels_by_id.get(panel_id)
+                if panel is not None:
+                    return panel
+            focused = getattr(focused, "parent", None)
+        return None
+
+    def _panel_ids_for_tab(self, tab_id: str) -> list[str]:
+        for tab in self._tabs:
+            if tab["id"] == tab_id:
+                return list(self._panel_ids_from_node(tab.get("root_split")))
+        return ["work-panel"]
+
+    def _panel_ids_from_node(self, raw_node: object) -> Iterable[str]:
+        if not isinstance(raw_node, dict):
+            return ()
+        raw_children = raw_node.get("children", [])
+        panel_ids: list[str] = []
+        for child in raw_children if isinstance(raw_children, list) else []:
+            if isinstance(child, dict) and isinstance(child.get("panel_id"), str):
+                panel_ids.append(str(child["panel_id"]))
+                continue
+            panel_ids.extend(self._panel_ids_from_node(child))
+        return panel_ids

@@ -25,6 +25,16 @@ Screen {
   margin: 1 0;
 }
 
+.tab-root {
+  height: 1fr;
+}
+
+.split-node {
+  height: 1fr;
+  width: 1fr;
+  margin: 0 0 1 0;
+}
+
 #confirmation-bar {
   margin: 1 0 0 0;
   padding: 1;
@@ -55,6 +65,20 @@ Screen {
 }
 
 #cron-panel {
+  height: 1fr;
+  border: round $accent;
+  padding: 1;
+  background: $panel;
+}
+
+#db-panel {
+  height: 1fr;
+  border: round $accent;
+  padding: 1;
+  background: $panel;
+}
+
+#curl-panel {
   height: 1fr;
   border: round $accent;
   padding: 1;

@@ -58,6 +58,30 @@ class EmbeddedTerminalWidgetTests(unittest.IsolatedAsyncioTestCase):
             self.assertIn("[terminal exited with 0]", terminal.current_output())
             self.assertIn("[terminal exited with 0]", self._rendered_text(terminal))
 
+    async def test_carriage_return_rewrites_the_current_line(self) -> None:
+        app = TerminalWidgetTestApp()
+
+        async with app.run_test(size=(80, 8)) as pilot:
+            terminal = app.query_one(EmbeddedTerminal)
+            terminal.clear("ready")
+            terminal.append_output("progress 10%\rprogress 90%\n")
+            await pilot.pause()
+
+            self.assertIn("progress 90%", terminal.current_output())
+            self.assertNotIn("progress 10%", self._rendered_text(terminal))
+
+    async def test_backspace_updates_the_current_line(self) -> None:
+        app = TerminalWidgetTestApp()
+
+        async with app.run_test(size=(80, 8)) as pilot:
+            terminal = app.query_one(EmbeddedTerminal)
+            terminal.clear("ready")
+            terminal.append_output("helo\blo\n")
+            await pilot.pause()
+
+            self.assertIn("hello", terminal.current_output())
+            self.assertIn("hello", self._rendered_text(terminal))
+
     @staticmethod
     def _rendered_text(widget: object) -> str:
         renderable = getattr(widget, "renderable", None)

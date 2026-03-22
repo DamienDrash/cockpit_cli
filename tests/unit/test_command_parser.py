@@ -15,6 +15,14 @@ class CommandParserTests(unittest.TestCase):
         self.assertEqual(command.args["argv"], ["/tmp/project"])
         self.assertEqual(command.args["mode"], "replace")
 
+    def test_parser_keeps_equals_inside_quoted_positional_args(self) -> None:
+        parser = CommandParser()
+
+        command = parser.parse('/db run_query "UPDATE users SET active = 0"')
+
+        self.assertEqual(command.name, "db.run_query")
+        self.assertEqual(command.args["argv"], ["UPDATE users SET active = 0"])
+
     def test_parser_supports_single_token_commands(self) -> None:
         parser = CommandParser()
 
@@ -32,4 +40,3 @@ class CommandParserTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-

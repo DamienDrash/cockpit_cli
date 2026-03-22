@@ -25,6 +25,9 @@ class BasePanel(Vertical):
         """Return the persistable state for the panel."""
         raise NotImplementedError
 
+    def apply_command_result(self, payload: dict[str, object]) -> None:
+        """Apply command-result data routed back into the panel."""
+
     def suspend(self) -> None:
         """Pause panel-specific runtime resources."""
 

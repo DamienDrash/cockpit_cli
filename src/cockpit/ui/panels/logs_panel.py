@@ -57,6 +57,7 @@ class LogsPanel(Static):
         self._event_bus = event_bus
         self._activity_log_service = activity_log_service
         self._main_thread_id = get_ident()
+        self._subscriptions_registered = False
         self._workspace_name = "No workspace"
         self._workspace_root = ""
         self._workspace_id: str | None = None
@@ -66,8 +67,10 @@ class LogsPanel(Static):
 
     def on_mount(self) -> None:
         self._main_thread_id = get_ident()
-        for event_type in self._REFRESH_EVENTS:
-            self._event_bus.subscribe(event_type, self._on_activity_event)
+        if not self._subscriptions_registered:
+            for event_type in self._REFRESH_EVENTS:
+                self._event_bus.subscribe(event_type, self._on_activity_event)
+            self._subscriptions_registered = True
         self._event_bus.publish(
             PanelMounted(
                 panel_id=self.PANEL_ID,

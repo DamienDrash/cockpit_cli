@@ -33,6 +33,22 @@ tabs:
       children:
         - panel_id: cron-panel
           panel_type: cron
+  - id: db
+    name: DB
+    root_split:
+      orientation: vertical
+      ratio: 1.0
+      children:
+        - panel_id: db-panel
+          panel_type: db
+  - id: curl
+    name: Curl
+    root_split:
+      orientation: vertical
+      ratio: 1.0
+      children:
+        - panel_id: curl-panel
+          panel_type: curl
   - id: logs
     name: Logs
     root_split:

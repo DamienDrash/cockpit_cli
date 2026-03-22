@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from cockpit.domain.events.base import RuntimeEvent
-from cockpit.shared.enums import StatusLevel
+from cockpit.shared.enums import SessionTargetKind, StatusLevel
 
 
 @dataclass(slots=True, kw_only=True)
@@ -30,6 +30,8 @@ class PTYStarted(RuntimeEvent):
     panel_id: str
     cwd: str
     pid: int | None = None
+    target_kind: SessionTargetKind = SessionTargetKind.LOCAL
+    target_ref: str | None = None
 
 
 @dataclass(slots=True, kw_only=True)
@@ -37,6 +39,8 @@ class PTYStartupFailed(RuntimeEvent):
     panel_id: str
     cwd: str
     reason: str
+    target_kind: SessionTargetKind = SessionTargetKind.LOCAL
+    target_ref: str | None = None
 
 
 @dataclass(slots=True, kw_only=True)

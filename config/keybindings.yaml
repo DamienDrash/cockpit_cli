@@ -11,6 +11,10 @@ bindings:
     action: tab.focus.docker
   - key: ctrl+5
     action: tab.focus.cron
+  - key: ctrl+6
+    action: tab.focus.db
+  - key: ctrl+7
+    action: tab.focus.curl
   - key: ctrl+r
     action: terminal.restart
   - key: ctrl+t
