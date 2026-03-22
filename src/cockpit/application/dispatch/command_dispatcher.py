@@ -1,0 +1,101 @@
+"""Command dispatcher."""
+
+from __future__ import annotations
+
+from collections.abc import Callable
+
+from cockpit.application.handlers.base import (
+    CommandContextError,
+    CommandHandlingError,
+    DispatchResult,
+)
+from cockpit.application.dispatch.event_bus import EventBus
+from cockpit.domain.commands.command import Command
+from cockpit.domain.events.domain_events import CommandExecuted
+from cockpit.domain.events.runtime_events import StatusMessagePublished
+from cockpit.shared.enums import StatusLevel
+
+CommandHandler = Callable[[Command], DispatchResult]
+CommandObserver = Callable[[Command, DispatchResult], None]
+
+
+class UnknownCommandError(LookupError):
+    """Raised when a command handler is not registered."""
+
+
+class CommandDispatcher:
+    """Dispatches command objects to registered handlers."""
+
+    def __init__(self, *, event_bus: EventBus) -> None:
+        self._event_bus = event_bus
+        self._handlers: dict[str, CommandHandler] = {}
+        self._observers: list[CommandObserver] = []
+
+    def register(self, command_name: str, handler: CommandHandler) -> None:
+        if command_name in self._handlers:
+            raise ValueError(f"Handler already registered for '{command_name}'.")
+        self._handlers[command_name] = handler
+
+    def observe(self, observer: CommandObserver) -> None:
+        self._observers.append(observer)
+
+    def dispatch(self, command: Command) -> DispatchResult:
+        handler = self._handlers.get(command.name)
+        if handler is None:
+            raise UnknownCommandError(f"No handler registered for '{command.name}'.")
+
+        try:
+            result = handler(command)
+        except CommandContextError as exc:
+            self._event_bus.publish(
+                StatusMessagePublished(message=str(exc), level=StatusLevel.ERROR)
+            )
+            failure = DispatchResult(success=False, message=str(exc))
+            self._notify_observers(command, failure)
+            self._event_bus.publish(
+                CommandExecuted(
+                    command_id=command.id,
+                    name=command.name,
+                    source=command.source,
+                    success=False,
+                    message=failure.message,
+                )
+            )
+            return failure
+        except CommandHandlingError as exc:
+            self._event_bus.publish(
+                StatusMessagePublished(message=str(exc), level=StatusLevel.ERROR)
+            )
+            failure = DispatchResult(success=False, message=str(exc))
+            self._notify_observers(command, failure)
+            self._event_bus.publish(
+                CommandExecuted(
+                    command_id=command.id,
+                    name=command.name,
+                    source=command.source,
+                    success=False,
+                    message=failure.message,
+                )
+            )
+            return failure
+
+        self._notify_observers(command, result)
+        self._event_bus.publish(
+            CommandExecuted(
+                command_id=command.id,
+                name=command.name,
+                source=command.source,
+                success=result.success,
+                message=result.message,
+            )
+        )
+        if result.message:
+            level = StatusLevel.INFO if result.success else StatusLevel.ERROR
+            self._event_bus.publish(
+                StatusMessagePublished(message=result.message, level=level)
+            )
+        return result
+
+    def _notify_observers(self, command: Command, result: DispatchResult) -> None:
+        for observer in self._observers:
+            observer(command, result)

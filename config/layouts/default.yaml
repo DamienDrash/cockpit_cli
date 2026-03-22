@@ -1,0 +1,15 @@
+id: default
+name: Default
+tabs:
+  - id: work
+    name: Work
+    root_split:
+      orientation: vertical
+      ratio: 0.7
+      children:
+        - panel_id: work-panel
+          panel_type: work
+focus_path:
+  - work
+  - work-panel
+

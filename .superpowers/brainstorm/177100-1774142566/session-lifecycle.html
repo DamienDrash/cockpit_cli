@@ -1,0 +1,78 @@
+<h2>Session, Snapshot, Resume, Panel Lifecycle</h2>
+<p class="subtitle">V1-Resume stellt Arbeitskontext zuverlässig wieder her, ohne falsche Versprechen über laufende Prozesse zu machen</p>
+
+<div class="section">
+  <div class="mockup">
+    <div class="mockup-header">Session Snapshot Layers</div>
+    <div class="mockup-body">
+      <div class="cards">
+        <div class="card">
+          <div class="card-body">
+            <h3>Light Snapshot</h3>
+            <p>Häufig gespeichert: aktiver Tab, Fokus, cwd, Explorer-Auswahl, Panel-Flags, letzte Commands.</p>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-body">
+            <h3>Structural Snapshot</h3>
+            <p>Bei Layoutänderungen: Tabs, Split-Ratios, Panel-Bindings, Sichtbarkeit, Fokuspfad.</p>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-body">
+            <h3>Resume Snapshot</h3>
+            <p>Beim Beenden/Suspend: Workspace-Ref, Layout-Ref, Panel-Snapshots, Terminal-Launch-Konfiguration, keine Live-PTY-Objekte.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <div class="mockup">
+    <div class="mockup-header">Resume Flow</div>
+    <div class="mockup-body">
+      <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:10px;">
+        <div class="placeholder">Load Session Row</div>
+        <div class="placeholder">Resolve Workspace</div>
+        <div class="placeholder">Apply Layout</div>
+        <div class="placeholder">Instantiate Panels</div>
+        <div class="placeholder">Restore PanelState</div>
+        <div class="placeholder">Recreate Terminal in stored cwd</div>
+        <div class="placeholder">Publish SessionRestored</div>
+      </div>
+      <p class="subtitle" style="margin-top:16px;">If workspace path is missing or invalid, resume degrades to a clear recovery state instead of crashing.</p>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <div class="split">
+    <div class="mockup">
+      <div class="mockup-header">WorkPanel Lifecycle</div>
+      <div class="mockup-body">
+        <ul>
+          <li><strong>mount()</strong> panel host created and wired</li>
+          <li><strong>initialize(context)</strong> workspace path, selection, launch config injected</li>
+          <li><strong>restore_state(snapshot)</strong> explorer/work-context restored</li>
+          <li><strong>attach_terminal()</strong> fresh PTY started in stored cwd</li>
+          <li><strong>snapshot_state()</strong> returns persistable panel data only</li>
+          <li><strong>suspend()</strong> terminal stopped or detached cleanly</li>
+          <li><strong>dispose()</strong> event subscriptions and runtime handles released</li>
+        </ul>
+      </div>
+    </div>
+    <div class="mockup">
+      <div class="mockup-header">Explicit Non-Goals</div>
+      <div class="mockup-body">
+        <ul>
+          <li>No resurrection of arbitrary interactive subprocesses</li>
+          <li>No replay of transient terminal output buffers across restarts</li>
+          <li>No hidden best-effort reattachment that can silently lie to the user</li>
+          <li>Failure must surface as visible session recovery state</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</div>

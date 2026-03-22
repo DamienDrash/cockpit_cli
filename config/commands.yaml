@@ -1,0 +1,8 @@
+commands:
+  - workspace.open
+  - workspace.reopen_last
+  - session.restore
+  - layout.apply_default
+  - terminal.focus
+  - terminal.restart
+

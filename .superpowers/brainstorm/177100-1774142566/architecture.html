@@ -1,0 +1,88 @@
+<h2>Core Platform Spine</h2>
+<p class="subtitle">Startbare local-first Spine-App mit Workspace-First-Einstieg, WorkPanel und eingebettetem Terminal</p>
+
+<div class="section">
+  <div class="mockup">
+    <div class="mockup-header">Schichten und Verantwortlichkeiten</div>
+    <div class="mockup-body">
+      <div class="cards">
+        <div class="card">
+          <div class="card-body">
+            <h3>UI / Textual</h3>
+            <p>AppShell, Header, Tabbar, Statusbar, Command Palette, Slash Input, Panel Hosts</p>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-body">
+            <h3>Application</h3>
+            <p>WorkspaceService, SessionService, LayoutService, NavigationController, CommandDispatcher</p>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-body">
+            <h3>Domain</h3>
+            <p>Workspace, Session, Layout, Tab, PanelState, Command, Events, Policies</p>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-body">
+            <h3>Infrastructure</h3>
+            <p>SQLite store, config loader, local shell adapter, filesystem adapter, keybinding config</p>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-body">
+            <h3>Runtime</h3>
+            <p>PTY/process manager, stream router, background task supervisor for local terminal execution</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <div class="mockup">
+    <div class="mockup-header">Primary Happy Path</div>
+    <div class="mockup-body">
+      <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:12px;align-items:start;">
+        <div class="placeholder">Launch App</div>
+        <div class="placeholder">Choose / Open Workspace</div>
+        <div class="placeholder">Resolve Layout + Session</div>
+        <div class="placeholder">Mount WorkPanel</div>
+        <div class="placeholder">Start Fresh Local Terminal in Stored CWD</div>
+      </div>
+      <p class="subtitle" style="margin-top:16px;">Resume restores UI and workspace context, not live terminal processes.</p>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <div class="split">
+    <div class="mockup">
+      <div class="mockup-header">WorkPanel</div>
+      <div class="mockup-body">
+        <div class="mock-nav">Path Breadcrumb | File Actions | Search</div>
+        <div style="display:flex;gap:12px;margin-top:12px;">
+          <div class="mock-sidebar">Project tree / cwd context</div>
+          <div class="mock-content">
+            Main work area
+            <div style="margin-top:12px;" class="placeholder">Selected file / work context</div>
+            <div style="margin-top:12px;" class="placeholder">Embedded terminal region</div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="mockup">
+      <div class="mockup-header">State Boundaries</div>
+      <div class="mockup-body">
+        <ul>
+          <li>Persist: workspace id, cwd, layout, active tab, focused panel, panel config</li>
+          <li>Persist: explorer selection, panel sizes, command history</li>
+          <li>Do not persist live PTY internals or interactive subprocess state</li>
+          <li>On reopen: recreate terminal with same cwd and shell profile</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</div>

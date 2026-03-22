@@ -1,0 +1,72 @@
+Screen {
+  layout: vertical;
+}
+
+#app-body {
+  height: 1fr;
+  padding: 1 2;
+  background: $surface;
+}
+
+#status-bar {
+  height: 1;
+  padding: 0 1;
+}
+
+#tab-bar {
+  height: auto;
+  padding: 0 1;
+  background: $boost;
+  color: $text;
+}
+
+#panel-host {
+  height: 1fr;
+  margin: 1 0;
+}
+
+#work-panel {
+  height: 1fr;
+  border: round $accent;
+  padding: 1;
+  background: $panel;
+}
+
+#file-context {
+  margin: 0 0 1 0;
+  padding: 1;
+  background: $boost;
+}
+
+#file-explorer {
+  height: 11;
+  margin: 0 0 1 0;
+  padding: 1;
+  background: $surface-lighten-1;
+  border: round $primary;
+}
+
+#file-explorer:focus {
+  border: round $warning;
+}
+
+#work-panel-note {
+  color: $text-muted;
+  margin: 0 0 1 0;
+}
+
+#embedded-terminal {
+  height: 1fr;
+  padding: 1;
+  background: $surface-darken-1;
+  color: $text;
+  border: tall $primary;
+}
+
+#embedded-terminal:focus {
+  border: tall $success;
+}
+
+#slash-input {
+  margin: 1 0 0 0;
+}

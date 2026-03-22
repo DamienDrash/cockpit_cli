@@ -1,0 +1,112 @@
+<h2>Core Modules</h2>
+<p class="subtitle">Welche Teile der Spine im ersten Spec real existieren und wie sie zusammenspielen</p>
+
+<div class="section">
+  <div class="mockup">
+    <div class="mockup-header">Module Map</div>
+    <div class="mockup-body">
+      <div class="cards">
+        <div class="card">
+          <div class="card-body">
+            <h3>AppShell</h3>
+            <p>Root Textual app. Hält Header, Tabbar, Statusbar, Command Palette, Slash Input und aktive Navigation.</p>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-body">
+            <h3>WorkspaceService</h3>
+            <p>Lädt Workspace-Kontext, Root Path, Default Layout und Startparameter für den ersten Screen.</p>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-body">
+            <h3>SessionService</h3>
+            <p>Erstellt, lädt, snapshotet und restauriert Sessions. Kennt die Resume-Grenze.</p>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-body">
+            <h3>LayoutService</h3>
+            <p>Baut Tabs, Split-Struktur, Panel-Platzierung und Fokuspfad aus gespeicherten Layoutdaten.</p>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-body">
+            <h3>CommandDispatcher</h3>
+            <p>Zentrale Aktionsschicht für Slash, Palette, Keybindings und UI-Aktionen.</p>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-body">
+            <h3>EventBus</h3>
+            <p>Lose Kopplung zwischen Shell, Services, Panels und Status-UI über typisierte Events.</p>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-body">
+            <h3>PanelHost + WorkPanel</h3>
+            <p>Panel-Lifecycle, Snapshot/Restore und die Referenzimplementierung für Dateikontext plus eingebettetes Terminal.</p>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-body">
+            <h3>LocalShellAdapter + PTYManager</h3>
+            <p>Lokale Shell starten, cwd setzen, Output streamen, Terminal-Lebenszyklus überwachen.</p>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-body">
+            <h3>SQLiteStore + ConfigLoader</h3>
+            <p>Sessions, Workspaces, Layouts und History in SQLite; deklarative Layouts/Bindings/Themes aus YAML/TCSS.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <div class="mockup">
+    <div class="mockup-header">Open Workspace Flow</div>
+    <div class="mockup-body">
+      <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:10px;">
+        <div class="placeholder">AppShell</div>
+        <div class="placeholder">WorkspaceService</div>
+        <div class="placeholder">SessionService</div>
+        <div class="placeholder">LayoutService</div>
+        <div class="placeholder">PanelHost</div>
+        <div class="placeholder">WorkPanel</div>
+        <div class="placeholder">PTYManager</div>
+      </div>
+      <p class="subtitle" style="margin-top:16px;">Open workspace → resolve prior snapshot → build layout → mount panel → create fresh terminal in stored cwd → publish ready events.</p>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <div class="split">
+    <div class="mockup">
+      <div class="mockup-header">Must Exist in First Spec</div>
+      <div class="mockup-body">
+        <ul>
+          <li>Typed domain models for Workspace, Session, Layout, PanelState, Command</li>
+          <li>One dispatcher for all action sources</li>
+          <li>Panel lifecycle contract</li>
+          <li>SQLite-backed snapshot persistence</li>
+          <li>One real local runtime path via PTY</li>
+        </ul>
+      </div>
+    </div>
+    <div class="mockup">
+      <div class="mockup-header">Explicitly Deferred</div>
+      <div class="mockup-body">
+        <ul>
+          <li>SSH execution and remote rehydration</li>
+          <li>Git/Docker/DB/Curl/Cron feature panels</li>
+          <li>Live process resume across app restarts</li>
+          <li>Plugin API exposure to third parties</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</div>

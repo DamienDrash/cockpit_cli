@@ -1,0 +1,8 @@
+bindings:
+  - key: ctrl+k
+    action: palette.open
+  - key: ctrl+r
+    action: terminal.restart
+  - key: ctrl+t
+    action: terminal.focus
+
