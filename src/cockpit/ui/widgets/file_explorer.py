@@ -63,7 +63,7 @@ class FileExplorer(Static):
             elif root not in selected_candidate.resolve().parents and selected_candidate.resolve() != root:
                 recovery_messages.append("Explorer selection moved outside the workspace and was reset.")
 
-        self._render()
+        self._refresh_view()
         return ExplorerSelection(
             browser_path=self.browser_path,
             selected_path=self.selected_path,
@@ -76,7 +76,7 @@ class FileExplorer(Static):
                 0,
                 min(len(self._entries) - 1, self._selected_index + delta),
             )
-        self._render()
+        self._refresh_view()
         return ExplorerSelection(
             browser_path=self.browser_path,
             selected_path=self.selected_path,
@@ -90,7 +90,7 @@ class FileExplorer(Static):
                 browser_path=str(selected),
                 selected_path=str(selected),
             )
-        self._render()
+        self._refresh_view()
         return ExplorerSelection(
             browser_path=self.browser_path,
             selected_path=self.selected_path,
@@ -100,7 +100,7 @@ class FileExplorer(Static):
         if self._root_path is None or self._browser_path is None:
             return ExplorerSelection(browser_path="", selected_path="")
         if self._browser_path == self._root_path:
-            self._render()
+            self._refresh_view()
             return ExplorerSelection(
                 browser_path=self.browser_path,
                 selected_path=self.selected_path,
@@ -147,7 +147,7 @@ class FileExplorer(Static):
         )
         return entries[:200]
 
-    def _render(self) -> None:
+    def _refresh_view(self) -> None:
         if self._browser_path is None:
             self.update("No explorer context loaded.")
             return

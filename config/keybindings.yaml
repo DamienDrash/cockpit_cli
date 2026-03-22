@@ -17,8 +17,16 @@ bindings:
     action: tab.focus.curl
   - key: ctrl+r
     action: terminal.restart
+  - key: ctrl+]
+    action: panel.focus_next
   - key: ctrl+t
     action: terminal.focus
+  - key: ctrl+alt+o
+    action: layout.toggle_orientation
+  - key: ctrl+alt+=
+    action: layout.grow
+  - key: ctrl+alt+-
+    action: layout.shrink
   - key: f8
     action: docker.restart
   - key: f9

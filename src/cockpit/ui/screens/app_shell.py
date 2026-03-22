@@ -54,10 +54,14 @@ class CockpitApp(App[None]):
         ("ctrl+6", "focus_db_tab", "Focus DB"),
         ("ctrl+7", "focus_curl_tab", "Focus Curl"),
         ("ctrl+t", "focus_terminal", "Focus Terminal"),
+        ("ctrl+]", "focus_next_panel", "Focus Next Panel"),
         ("ctrl+r", "restart_terminal", "Restart Terminal"),
         ("f8", "restart_selected_docker", "Restart Container"),
         ("f9", "stop_selected_docker", "Stop Container"),
         ("f10", "remove_selected_docker", "Remove Container"),
+        ("ctrl+alt+o", "toggle_layout_orientation", "Toggle Layout Orientation"),
+        ("ctrl+alt+=", "grow_layout_split", "Grow Layout Split"),
+        ("ctrl+alt+-", "shrink_layout_split", "Shrink Layout Split"),
     ]
 
     def __init__(
@@ -163,6 +167,16 @@ class CockpitApp(App[None]):
             )
         )
 
+    def action_focus_next_panel(self) -> None:
+        self._dispatch_command(
+            Command(
+                id=make_id("cmd"),
+                source=CommandSource.KEYBINDING,
+                name="panel.focus_next",
+                context=self._command_context(),
+            )
+        )
+
     def action_focus_work_tab(self) -> None:
         self._dispatch_command(
             Command(
@@ -250,6 +264,36 @@ class CockpitApp(App[None]):
             )
         )
 
+    def action_toggle_layout_orientation(self) -> None:
+        self._dispatch_command(
+            Command(
+                id=make_id("cmd"),
+                source=CommandSource.KEYBINDING,
+                name="layout.toggle_orientation",
+                context=self._command_context(),
+            )
+        )
+
+    def action_grow_layout_split(self) -> None:
+        self._dispatch_command(
+            Command(
+                id=make_id("cmd"),
+                source=CommandSource.KEYBINDING,
+                name="layout.grow",
+                context=self._command_context(),
+            )
+        )
+
+    def action_shrink_layout_split(self) -> None:
+        self._dispatch_command(
+            Command(
+                id=make_id("cmd"),
+                source=CommandSource.KEYBINDING,
+                name="layout.shrink",
+                context=self._command_context(),
+            )
+        )
+
     def action_restart_selected_docker(self) -> None:
         self._dispatch_command(
             Command(
@@ -304,6 +348,10 @@ class CockpitApp(App[None]):
             "session.restore",
             "tab.focus",
             "layout.apply_default",
+            "layout.toggle_orientation",
+            "layout.grow",
+            "layout.shrink",
+            "panel.focus_next",
             "terminal.focus",
             "terminal.restart",
             "docker.restart",
@@ -359,6 +407,19 @@ class CockpitApp(App[None]):
     def _apply_command_result(self, command_name: str, data: dict[str, object]) -> None:
         if data.get("confirmation_required") is True:
             self._set_pending_confirmation(data)
+            return
+        if isinstance(data.get("tabs"), list):
+            panel_host = self.query_one(PanelHost)
+            active_tab_id = data.get("active_tab_id")
+            panel_host.apply_tabs(
+                data["tabs"],
+                active_tab_id=active_tab_id if isinstance(active_tab_id, str) else panel_host.active_tab_id(),
+                focus=False,
+            )
+            self.query_one(TabBar).set_tabs(panel_host.available_tabs())
+        focus_panel_id = data.get("focus_panel_id")
+        if isinstance(focus_panel_id, str) and focus_panel_id:
+            self.query_one(PanelHost).focus_panel(focus_panel_id)
             return
         result_panel_id = data.get("result_panel_id")
         result_payload = data.get("result_payload")
@@ -524,6 +585,22 @@ class CockpitApp(App[None]):
             "layout.apply_default": (
                 "Apply Default Layout",
                 "layout apply_default",
+            ),
+            "layout.toggle_orientation": (
+                "Toggle Layout Orientation",
+                "layout toggle_orientation",
+            ),
+            "layout.grow": (
+                "Grow Active Split",
+                "layout grow",
+            ),
+            "layout.shrink": (
+                "Shrink Active Split",
+                "layout shrink",
+            ),
+            "panel.focus_next": (
+                "Focus Next Panel",
+                "panel focus_next",
             ),
             "db.run_query": (
                 "Run Example DB Query",

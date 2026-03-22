@@ -134,6 +134,29 @@ cockpit open @prod:/srv/app/releases/current
 The second and third forms use the same path syntax the slash command layer
 understands, so CLI and in-app commands stay aligned.
 
+## Plugin System
+
+External plugin modules can register additional panels and commands through
+`config/plugins.yaml`.
+
+Example:
+
+```yaml
+plugins:
+  - module: cockpit.plugins.notes_plugin
+    enabled: true
+```
+
+The module must expose `register_plugin(context)`. Inside that hook a plugin may
+register:
+
+- additional `PanelSpec` entries
+- additional command handlers
+
+The example file [plugins.example.yaml](/home/damien/Dokumente/cockpit/config/plugins.example.yaml)
+shows the expected shape, and [notes_plugin.py](/home/damien/Dokumente/cockpit/src/cockpit/plugins/notes_plugin.py)
+demonstrates the registration contract.
+
 ## Core Commands
 
 Slash commands, palette commands, and keybindings all route through the same

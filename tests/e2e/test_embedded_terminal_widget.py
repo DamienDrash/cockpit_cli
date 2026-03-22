@@ -82,6 +82,34 @@ class EmbeddedTerminalWidgetTests(unittest.IsolatedAsyncioTestCase):
             self.assertIn("hello", terminal.current_output())
             self.assertIn("hello", self._rendered_text(terminal))
 
+    async def test_csi_clear_line_erases_the_previous_tail(self) -> None:
+        app = TerminalWidgetTestApp()
+
+        async with app.run_test(size=(80, 8)) as pilot:
+            terminal = app.query_one(EmbeddedTerminal)
+            terminal.clear("ready")
+            terminal.append_output("alpha beta\x1b[1G\x1b[0Komega\n")
+            await pilot.pause()
+
+            self.assertIn("omega", terminal.current_output())
+            self.assertNotIn("alpha beta", terminal.current_output())
+
+    async def test_alternate_screen_restores_primary_buffer(self) -> None:
+        app = TerminalWidgetTestApp()
+
+        async with app.run_test(size=(80, 8)) as pilot:
+            terminal = app.query_one(EmbeddedTerminal)
+            terminal.clear("ready")
+            terminal.append_output("primary\n")
+            terminal.append_output("\x1b[?1049h")
+            terminal.append_output("alternate\n")
+            terminal.append_output("\x1b[?1049l")
+            await pilot.pause()
+
+            rendered = terminal.current_output()
+            self.assertIn("primary", rendered)
+            self.assertNotIn("alternate", rendered)
+
     @staticmethod
     def _rendered_text(widget: object) -> str:
         renderable = getattr(widget, "renderable", None)

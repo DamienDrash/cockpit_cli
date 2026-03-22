@@ -27,6 +27,7 @@ def _navigation_result_data(state: object) -> dict[str, object]:
         snapshot.get("selected_path", workspace_root),
     )
     selected_path = snapshot.get("selected_path", workspace_root)
+    snapshot_tabs = snapshot.get("tabs")
     return {
         "workspace_name": workspace.name,
         "workspace_id": workspace.id,
@@ -35,7 +36,11 @@ def _navigation_result_data(state: object) -> dict[str, object]:
         "target_ref": workspace.target.ref,
         "session_id": session.id,
         "layout_id": layout.id,
-        "tabs": layout_tabs_payload(layout),
+        "tabs": (
+            snapshot_tabs
+            if isinstance(snapshot_tabs, list)
+            else layout_tabs_payload(layout)
+        ),
         "active_tab_id": session.active_tab_id or "work",
         "focused_panel_id": session.focused_panel_id,
         "cwd": getattr(state, "cwd"),

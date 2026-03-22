@@ -2,14 +2,9 @@
 
 from __future__ import annotations
 
-import re
-
 from textual.widgets import Static
 
-
-ANSI_RE = re.compile(r"\x1b\[[0-9;?]*[ -/]*[@-~]")
-OSC_RE = re.compile(r"\x1b\][^\x07]*(?:\x07|\x1b\\)")
-CONTROL_RE = re.compile(r"[\x00-\x07\x0b-\x0c\x0e-\x1a\x1c-\x1f]")
+from cockpit.ui.widgets.terminal_buffer import TerminalBuffer
 
 
 class EmbeddedTerminal(Static):
@@ -19,23 +14,22 @@ class EmbeddedTerminal(Static):
 
     def __init__(self) -> None:
         super().__init__("Terminal idle. Focus here and type to send input.", id="embedded-terminal")
-        self._buffer = ""
+        self._buffer = TerminalBuffer()
         self._max_chars = 16_000
         self._placeholder = "Terminal idle. Focus here and type to send input."
         self._viewport_offset = 0
 
     def clear(self, message: str = "Launching terminal...") -> None:
-        self._buffer = ""
+        self._buffer.reset()
         self._placeholder = message
         self._viewport_offset = 0
         self.update(message)
 
     def append_output(self, chunk: str) -> None:
-        sanitized = self._sanitize(chunk)
-        if not sanitized:
+        if not chunk:
             return
         follow_output = self._viewport_offset == 0
-        self._buffer = self._apply_stream_update(self._buffer, sanitized)[-self._max_chars :]
+        self._buffer.feed(chunk)
         if follow_output:
             self._viewport_offset = 0
         self._refresh_view()
@@ -44,7 +38,7 @@ class EmbeddedTerminal(Static):
         self.append_output(message)
 
     def current_output(self) -> str:
-        return self._buffer
+        return self._trimmed_buffer()
 
     def page_up(self) -> None:
         lines = self._buffer_lines()
@@ -71,41 +65,27 @@ class EmbeddedTerminal(Static):
     def viewport_offset(self) -> int:
         return self._viewport_offset
 
-    def _sanitize(self, chunk: str) -> str:
-        without_osc = OSC_RE.sub("", chunk)
-        without_ansi = ANSI_RE.sub("", without_osc)
-        normalized = without_ansi.replace("\r\n", "\n")
-        return CONTROL_RE.sub("", normalized)
-
-    def _apply_stream_update(self, buffer: str, chunk: str) -> str:
-        result = buffer
-        for character in chunk:
-            if character == "\r":
-                last_newline = result.rfind("\n")
-                result = result[: last_newline + 1] if last_newline >= 0 else ""
-                continue
-            if character in {"\b", "\x7f"}:
-                if result and result[-1] != "\n":
-                    result = result[:-1]
-                continue
-            result = f"{result}{character}"
-        return result
-
     def _refresh_view(self) -> None:
-        if not self._buffer:
+        buffer_text = self._trimmed_buffer()
+        if not buffer_text:
             self.update(self._placeholder)
             return
-        lines = self._buffer_lines()
+        lines = self._buffer_lines(buffer_text)
         end = len(lines) - self._viewport_offset if self._viewport_offset else len(lines)
         start = max(0, end - self._viewport_step())
         visible = lines[start:end]
         self.update("\n".join(visible))
 
-    def _buffer_lines(self) -> list[str]:
-        lines = self._buffer.split("\n")
+    def _buffer_lines(self, buffer_text: str | None = None) -> list[str]:
+        if buffer_text is None:
+            buffer_text = self._trimmed_buffer()
+        lines = buffer_text.split("\n")
         if lines and lines[-1] == "":
             return lines[:-1] or [""]
         return lines
+
+    def _trimmed_buffer(self) -> str:
+        return self._buffer.render_text()[-self._max_chars :]
 
     def _viewport_step(self) -> int:
         size = getattr(self, "size", None)

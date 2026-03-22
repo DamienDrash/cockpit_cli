@@ -29,6 +29,10 @@ class ConfigLoaderTests(unittest.TestCase):
                 "connections:\n  dev:\n    target: dev@example.com\n",
                 encoding="utf-8",
             )
+            (root / "config" / "plugins.yaml").write_text(
+                "plugins:\n  - module: cockpit.plugins.notes_plugin\n",
+                encoding="utf-8",
+            )
             (root / "config" / "themes" / "default.tcss").write_text(
                 "Screen { layout: vertical; }\n",
                 encoding="utf-8",
@@ -42,6 +46,10 @@ class ConfigLoaderTests(unittest.TestCase):
             self.assertEqual(
                 loader.load_connections()["connections"]["dev"]["target"],
                 "dev@example.com",
+            )
+            self.assertEqual(
+                loader.load_plugins()["plugins"][0]["module"],
+                "cockpit.plugins.notes_plugin",
             )
             self.assertIn("layout: vertical", loader.load_theme())
 

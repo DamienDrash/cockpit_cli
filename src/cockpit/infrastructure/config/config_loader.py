@@ -28,6 +28,9 @@ class ConfigLoader:
     def load_connections(self) -> dict[str, object]:
         return self._load_yaml(config_dir(self._start) / "connections.yaml", required=False)
 
+    def load_plugins(self) -> dict[str, object]:
+        return self._load_yaml(config_dir(self._start) / "plugins.yaml", required=False)
+
     def load_theme(self, theme_name: str = "default") -> str:
         path = themes_dir(self._start) / f"{theme_name}.tcss"
         return path.read_text(encoding="utf-8")

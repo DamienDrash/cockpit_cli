@@ -4,6 +4,10 @@ commands:
   - session.restore
   - tab.focus
   - layout.apply_default
+  - layout.toggle_orientation
+  - layout.grow
+  - layout.shrink
+  - panel.focus_next
   - terminal.focus
   - terminal.restart
   - docker.restart

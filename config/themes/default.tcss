@@ -25,6 +25,15 @@ Screen {
   margin: 1 0;
 }
 
+#panel-surface {
+  height: 1fr;
+  width: 1fr;
+}
+
+#panel-parking {
+  display: none;
+}
+
 .tab-root {
   height: 1fr;
 }

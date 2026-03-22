@@ -1,0 +1,3 @@
+plugins:
+  - module: cockpit.plugins.notes_plugin
+    enabled: true

@@ -90,6 +90,8 @@ class WorkPanel(BasePanel):
                 panel_type=self.PANEL_TYPE,
             )
         )
+        if self._workspace_root or self._cwd:
+            self._sync_explorer()
         self._render_context()
 
     def initialize(self, context: dict[str, object]) -> None:
@@ -204,11 +206,16 @@ class WorkPanel(BasePanel):
             "selected_path": self._selected_path or self._workspace_root,
         }
 
+    def resume(self) -> None:
+        self._render_context()
+        self._restore_terminal_buffer()
+        try:
+            self.query_one(FileExplorer).focus()
+        except NoMatches:
+            return
+
     def dispose(self) -> None:
         self._pty_manager.stop_session(self.PANEL_ID)
-
-    def on_unmount(self) -> None:
-        self.dispose()
 
     def _render_context(self) -> None:
         self.query_one(FileContext).update_context(
@@ -482,6 +489,15 @@ class WorkPanel(BasePanel):
             )
         except NoMatches:
             return None
+
+    def _restore_terminal_buffer(self) -> None:
+        widgets = self._runtime_widgets()
+        if widgets is None:
+            return
+        terminal, _note = widgets
+        buffered = self._stream_router.get_buffer(self.PANEL_ID)
+        if buffered and not terminal.current_output():
+            terminal.append_output(buffered)
 
     def _sync_terminal_size(self) -> None:
         widgets = self._runtime_widgets()

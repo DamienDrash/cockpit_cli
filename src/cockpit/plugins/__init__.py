@@ -1,0 +1,1 @@
+"""Cockpit plugin support."""

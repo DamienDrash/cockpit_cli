@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+import copy
 from collections.abc import Iterable
 
 from textual.app import ComposeResult
-from textual.containers import Vertical
+from textual.containers import Horizontal, Vertical
 
 from cockpit.bootstrap import ApplicationContainer
 from cockpit.domain.models.panel_state import PanelState
@@ -19,8 +20,12 @@ class PanelHost(Vertical):
         super().__init__(id="panel-host")
         self._container = container
         self._panels_by_id = self._container.panel_registry.create_panels(container)
+        self._surface = Vertical(id="panel-surface")
+        self._parking = Vertical(id="panel-parking")
         self._active_tab_id = "work"
         self._layout_id = "default"
+        self._layout_render_scheduled = False
+        self._pending_focus_panel_id: str | None = None
         self._tabs: list[dict[str, object]] = [
             {
                 "id": "work",
@@ -41,8 +46,13 @@ class PanelHost(Vertical):
         ]
 
     def compose(self) -> ComposeResult:
-        for panel in self._panels_by_id.values():
-            yield panel
+        yield self._surface
+        yield self._parking
+
+    async def on_mount(self) -> None:
+        self._parking.display = False
+        await self._parking.mount(*self._panels_by_id.values())
+        self._queue_layout_render()
 
     def load_workspace(self, context: dict[str, object]) -> None:
         layout_id = context.get("layout_id")
@@ -74,6 +84,9 @@ class PanelHost(Vertical):
         context["layout_id"] = self._layout_id
         context["active_tab_id"] = self._active_tab_id
         context["available_tab_ids"] = [str(tab["id"]) for tab in self._tabs]
+        context["tabs"] = copy.deepcopy(self._tabs)
+        context["visible_panel_ids"] = self._panel_ids_for_tab(self._active_tab_id)
+        context["focused_panel_id"] = self._active_panel().PANEL_ID
         return context
 
     def snapshot_state(self) -> PanelState:
@@ -91,6 +104,7 @@ class PanelHost(Vertical):
             snapshot["browser_path"] = work_snapshot["browser_path"]
         snapshot["panels"] = panel_snapshots
         snapshot["active_tab_id"] = self._active_tab_id
+        snapshot["tabs"] = copy.deepcopy(self._tabs)
         return PanelState(
             panel_id=active_state.panel_id,
             panel_type=active_state.panel_type,
@@ -100,19 +114,11 @@ class PanelHost(Vertical):
         )
 
     def set_active_tab(self, tab_id: str, *, focus: bool = True) -> str:
-        visible_map = self._tab_panels()
-        next_tab = tab_id if tab_id in visible_map else str(self._tabs[0]["id"])
+        next_tab = tab_id if tab_id in {str(tab["id"]) for tab in self._tabs} else str(self._tabs[0]["id"])
         self._active_tab_id = next_tab
-        visible_panel_ids = set(self._panel_ids_for_tab(next_tab))
-        for panel in self._panels():
-            panel.display = panel.PANEL_ID in visible_panel_ids
-            if panel.PANEL_ID in visible_panel_ids:
-                panel.resume()
-            else:
-                panel.suspend()
         if focus:
-            primary_panel = visible_map[next_tab]
-            primary_panel.focus()
+            self._pending_focus_panel_id = self._panel_ids_for_tab(next_tab)[0]
+        self._queue_layout_render()
         return next_tab
 
     def active_tab_id(self) -> str:
@@ -125,6 +131,21 @@ class PanelHost(Vertical):
     def available_tabs(self) -> list[tuple[str, str]]:
         return [(str(tab["id"]), str(tab["name"])) for tab in self._tabs]
 
+    def apply_tabs(
+        self,
+        tabs: list[dict[str, object]],
+        *,
+        active_tab_id: str | None = None,
+        focus: bool = False,
+    ) -> None:
+        self._tabs = self._normalize_tabs(tabs)
+        if isinstance(active_tab_id, str) and active_tab_id:
+            self._active_tab_id = active_tab_id
+        if focus:
+            visible = self._panel_ids_for_tab(self._active_tab_id)
+            self._pending_focus_panel_id = visible[0] if visible else None
+        self._queue_layout_render()
+
     def refresh_panel(self, panel_id: str) -> None:
         panel = self._panels_by_id.get(panel_id)
         if panel is not None:
@@ -135,11 +156,30 @@ class PanelHost(Vertical):
         if panel is not None:
             panel.apply_command_result(payload)
 
+    def focus_panel(self, panel_id: str) -> None:
+        panel = self._panels_by_id.get(panel_id)
+        if panel is None:
+            return
+        self._pending_focus_panel_id = panel_id
+        self._queue_layout_render()
+
+    def focus_next_panel(self) -> None:
+        visible_panel_ids = self._panel_ids_for_tab(self._active_tab_id)
+        if not visible_panel_ids:
+            return
+        current_id = self._active_panel().PANEL_ID
+        if current_id in visible_panel_ids:
+            next_index = (visible_panel_ids.index(current_id) + 1) % len(visible_panel_ids)
+        else:
+            next_index = 0
+        self.focus_panel(visible_panel_ids[next_index])
+
     def _active_panel(self) -> PanelContract:
         panel = self._focused_panel()
         if panel is not None:
             return panel
-        active_panel_id = self._tab_panel_id(self._active_tab_id)
+        visible_panel_ids = self._panel_ids_for_tab(self._active_tab_id)
+        active_panel_id = visible_panel_ids[0] if visible_panel_ids else self._tab_panel_id(self._active_tab_id)
         panel = self._panels_by_id.get(active_panel_id)
         if panel is not None:
             return panel
@@ -203,7 +243,8 @@ class PanelHost(Vertical):
     def _tab_panels(self) -> dict[str, PanelContract]:
         tabs: dict[str, PanelContract] = {}
         for tab in self._tabs:
-            panel = self._panels_by_id.get(str(tab["panel_id"]))
+            panel_id = self._tab_panel_id(str(tab["id"]))
+            panel = self._panels_by_id.get(panel_id)
             if panel is not None:
                 tabs[str(tab["id"])] = panel
         if "work" not in tabs:
@@ -213,9 +254,9 @@ class PanelHost(Vertical):
         return tabs
 
     def _tab_panel_id(self, tab_id: str) -> str:
-        for tab in self._tabs:
-            if tab["id"] == tab_id:
-                return str(tab["panel_id"])
+        panel_ids = self._panel_ids_for_tab(tab_id)
+        if panel_ids:
+            return panel_ids[0]
         return "work-panel"
 
     def _focused_panel(self) -> PanelContract | None:
@@ -246,3 +287,99 @@ class PanelHost(Vertical):
                 continue
             panel_ids.extend(self._panel_ids_from_node(child))
         return panel_ids
+
+    def _queue_layout_render(self) -> None:
+        if not self.is_mounted or self._layout_render_scheduled:
+            return
+        self._layout_render_scheduled = True
+        self.run_worker(self._render_active_layout(), exclusive=True, group="panel-layout")
+
+    async def _render_active_layout(self) -> None:
+        try:
+            await self._surface.remove_children()
+            visible_panel_ids = set(self._panel_ids_for_tab(self._active_tab_id))
+            for panel in self._panels():
+                if panel.PANEL_ID not in visible_panel_ids:
+                    if panel.parent is not None and panel.parent is not self._parking:
+                        await panel.remove()
+                        await self._parking.mount(panel)
+                    panel.display = False
+                    panel.suspend()
+            root_split = self._root_split_for_tab(self._active_tab_id)
+            if root_split is None:
+                return
+            await self._mount_node(self._surface, root_split)
+            for panel_id in visible_panel_ids:
+                panel = self._panels_by_id.get(panel_id)
+                if panel is None:
+                    continue
+                panel.display = True
+                panel.resume()
+            if self._pending_focus_panel_id:
+                panel = self._panels_by_id.get(self._pending_focus_panel_id)
+                if panel is not None and panel.PANEL_ID in visible_panel_ids:
+                    panel.focus()
+            self._pending_focus_panel_id = None
+        finally:
+            self._layout_render_scheduled = False
+
+    async def _mount_node(
+        self,
+        parent: Vertical | Horizontal,
+        raw_node: dict[str, object],
+    ):
+        panel_id = raw_node.get("panel_id")
+        if isinstance(panel_id, str):
+            panel = self._panels_by_id[panel_id]
+            if panel.parent is not None:
+                await panel.remove()
+            await parent.mount(panel)
+            return panel
+
+        orientation = str(raw_node.get("orientation", "vertical"))
+        children = raw_node.get("children", [])
+        if not isinstance(children, list):
+            children = []
+        if len(children) == 1 and isinstance(children[0], dict) and isinstance(children[0].get("panel_id"), str):
+            return await self._mount_node(parent, children[0])
+
+        container = Horizontal(classes="split-node") if orientation == "horizontal" else Vertical(classes="split-node")
+        await parent.mount(container)
+        mounted_children = []
+        for child in children:
+            if isinstance(child, dict):
+                mounted_child = await self._mount_node(container, child)
+                if mounted_child is not None:
+                    mounted_children.append(mounted_child)
+        self._apply_child_ratios(container, mounted_children, raw_node)
+        return container
+
+    def _apply_child_ratios(self, container: Vertical | Horizontal, children: list[object], raw_node: dict[str, object]) -> None:
+        if len(children) != 2:
+            return
+        ratio = raw_node.get("ratio", 0.5)
+        try:
+            first_ratio = float(ratio)
+        except (TypeError, ValueError):
+            first_ratio = 0.5
+        first_ratio = max(0.2, min(0.8, first_ratio))
+        second_ratio = max(0.2, min(0.8, round(1.0 - first_ratio, 2)))
+        first, second = children
+        if raw_node.get("orientation") == "horizontal":
+            getattr(first, "styles").width = f"{int(first_ratio * 100)}%"
+            getattr(second, "styles").width = f"{int(second_ratio * 100)}%"
+            getattr(first, "styles").height = "1fr"
+            getattr(second, "styles").height = "1fr"
+        else:
+            getattr(first, "styles").height = f"{int(first_ratio * 100)}%"
+            getattr(second, "styles").height = f"{int(second_ratio * 100)}%"
+            getattr(first, "styles").width = "1fr"
+            getattr(second, "styles").width = "1fr"
+
+    def _root_split_for_tab(self, tab_id: str) -> dict[str, object] | None:
+        for tab in self._tabs:
+            if tab["id"] == tab_id:
+                root_split = tab.get("root_split")
+                if isinstance(root_split, dict):
+                    return root_split
+        return None

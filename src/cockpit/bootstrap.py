@@ -16,7 +16,12 @@ from cockpit.application.handlers.docker_handlers import (
     RestartDockerContainerHandler,
     StopDockerContainerHandler,
 )
-from cockpit.application.handlers.layout_handlers import ApplyDefaultLayoutHandler
+from cockpit.application.handlers.layout_handlers import (
+    AdjustActiveLayoutRatioHandler,
+    ApplyDefaultLayoutHandler,
+    FocusNextPanelHandler,
+    ToggleActiveLayoutOrientationHandler,
+)
 from cockpit.application.handlers.session_handlers import RestoreSessionHandler
 from cockpit.application.handlers.tab_handlers import FocusTabHandler
 from cockpit.application.handlers.terminal_handlers import (
@@ -62,6 +67,7 @@ from cockpit.infrastructure.shell.local_shell_adapter import LocalShellAdapter
 from cockpit.infrastructure.shell.shell_adapter_router import ShellAdapterRouter
 from cockpit.infrastructure.ssh.command_runner import SSHCommandRunner
 from cockpit.infrastructure.ssh.ssh_shell_adapter import SSHShellAdapter
+from cockpit.plugins.loader import PluginBootstrapContext, PluginLoader
 from cockpit.runtime.pty_manager import PTYManager
 from cockpit.runtime.stream_router import StreamRouter
 from cockpit.runtime.task_supervisor import TaskSupervisor
@@ -124,11 +130,11 @@ def build_container(
     connection_service = ConnectionService(config_loader)
     command_catalog_payload = config_loader.load_command_catalog()
     raw_commands = command_catalog_payload.get("commands", [])
-    command_catalog = tuple(
+    command_catalog_entries = [
         command_name
         for command_name in raw_commands
         if isinstance(command_name, str) and command_name
-    )
+    ]
     workspace_repository = WorkspaceRepository(store)
     layout_repository = LayoutRepository(store)
     session_repository = SessionRepository(store)
@@ -288,6 +294,19 @@ def build_container(
         "layout.apply_default", ApplyDefaultLayoutHandler(event_bus)
     )
     command_dispatcher.register(
+        "layout.toggle_orientation",
+        ToggleActiveLayoutOrientationHandler(),
+    )
+    command_dispatcher.register(
+        "layout.grow",
+        AdjustActiveLayoutRatioHandler(delta=0.1),
+    )
+    command_dispatcher.register(
+        "layout.shrink",
+        AdjustActiveLayoutRatioHandler(delta=-0.1),
+    )
+    command_dispatcher.register("panel.focus_next", FocusNextPanelHandler())
+    command_dispatcher.register(
         "terminal.focus", FocusTerminalHandler(event_bus)
     )
     command_dispatcher.register(
@@ -313,9 +332,20 @@ def build_container(
         "curl.send", SendHttpRequestHandler(http_adapter)
     )
 
+    plugin_loader = PluginLoader()
+    plugin_loader.load_from_config(
+        config_loader.load_plugins(),
+        context=PluginBootstrapContext(
+            project_root=project_root,
+            panel_registry=panel_registry,
+            command_dispatcher=command_dispatcher,
+            command_catalog=command_catalog_entries,
+        ),
+    )
+
     return ApplicationContainer(
         project_root=project_root,
-        command_catalog=command_catalog,
+        command_catalog=tuple(command_catalog_entries),
         event_bus=event_bus,
         command_parser=command_parser,
         command_dispatcher=command_dispatcher,
