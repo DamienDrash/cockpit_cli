@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pathlib import PurePosixPath
 from threading import get_ident
 
 from textual import events
@@ -11,16 +12,21 @@ from textual.widgets import Static
 
 from cockpit.application.dispatch.event_bus import EventBus
 from cockpit.domain.events.runtime_events import (
+    PanelMounted,
     PanelStateChanged,
+    ProcessOutputReceived,
     PTYStarted,
     PTYStartupFailed,
-    PanelMounted,
-    ProcessOutputReceived,
     TerminalExited,
 )
 from cockpit.domain.models.panel_state import PanelState
+from cockpit.infrastructure.filesystem.remote_filesystem_adapter import (
+    RemoteFilesystemAdapter,
+    RemotePathEntry,
+)
 from cockpit.runtime.pty_manager import PTYManager
 from cockpit.runtime.stream_router import StreamRouter
+from cockpit.shared.enums import SessionTargetKind
 from cockpit.ui.panels.base_panel import BasePanel
 from cockpit.ui.widgets.embedded_terminal import EmbeddedTerminal
 from cockpit.ui.widgets.file_context import FileContext
@@ -39,19 +45,26 @@ class WorkPanel(BasePanel):
         event_bus: EventBus,
         pty_manager: PTYManager,
         stream_router: StreamRouter,
+        remote_filesystem_adapter: RemoteFilesystemAdapter,
     ) -> None:
         super().__init__(id=self.PANEL_ID)
         self._event_bus = event_bus
         self._pty_manager = pty_manager
         self._stream_router = stream_router
+        self._remote_filesystem_adapter = remote_filesystem_adapter
         self._main_thread_id = get_ident()
         self._workspace_name = "No workspace"
         self._workspace_root = ""
         self._workspace_id: str | None = None
         self._session_id: str | None = None
+        self._target_kind = SessionTargetKind.LOCAL
+        self._target_ref: str | None = None
         self._cwd = ""
         self._browser_path = ""
         self._selected_path = ""
+        self._remote_entries: list[RemotePathEntry] = []
+        self._remote_selected_index = 0
+        self._remote_listing_message: str | None = None
         self._restored = False
         self._recovery_message: str | None = None
 
@@ -80,6 +93,8 @@ class WorkPanel(BasePanel):
         self._workspace_root = str(context.get("workspace_root", ""))
         self._workspace_id = self._optional_str(context.get("workspace_id"))
         self._session_id = self._optional_str(context.get("session_id"))
+        self._target_kind = self._target_kind_from_context(context.get("target_kind"))
+        self._target_ref = self._optional_str(context.get("target_ref"))
         self._cwd = str(context.get("cwd", self._workspace_root))
         self._browser_path = str(
             context.get("browser_path", context.get("selected_path", self._workspace_root))
@@ -125,7 +140,12 @@ class WorkPanel(BasePanel):
         )
         if not self._cwd:
             return
-        self._pty_manager.start_session(self.PANEL_ID, self._cwd)
+        self._pty_manager.start_session(
+            self.PANEL_ID,
+            self._cwd,
+            target_kind=self._target_kind,
+            target_ref=self._target_ref,
+        )
 
     def focus_terminal(self) -> None:
         self.query_one(EmbeddedTerminal).focus()
@@ -137,26 +157,10 @@ class WorkPanel(BasePanel):
         terminal = self.query_one(EmbeddedTerminal)
         if not terminal.has_focus:
             if self.query_one(FileExplorer).has_focus:
-                if event.key == "up":
-                    self._apply_explorer_selection(
-                        self.query_one(FileExplorer).move_selection(-1)
-                    )
-                    event.stop()
-                elif event.key == "down":
-                    self._apply_explorer_selection(
-                        self.query_one(FileExplorer).move_selection(1)
-                    )
-                    event.stop()
-                elif event.key == "enter":
-                    self._apply_explorer_selection(
-                        self.query_one(FileExplorer).open_selection()
-                    )
-                    event.stop()
-                elif event.key == "backspace":
-                    self._apply_explorer_selection(
-                        self.query_one(FileExplorer).go_parent()
-                    )
-                    event.stop()
+                if self._target_kind is SessionTargetKind.SSH:
+                    self._handle_remote_explorer_key(event)
+                    return
+                self._handle_local_explorer_key(event)
             return
         if event.key == "pageup":
             terminal.page_up()
@@ -186,6 +190,8 @@ class WorkPanel(BasePanel):
             "panel_id": self.PANEL_ID,
             "workspace_id": self._workspace_id,
             "session_id": self._session_id,
+            "target_kind": self._target_kind.value,
+            "target_ref": self._target_ref,
             "workspace_root": self._workspace_root,
             "cwd": self._cwd or self._workspace_root,
             "browser_path": self._browser_path or self._workspace_root,
@@ -205,6 +211,7 @@ class WorkPanel(BasePanel):
             cwd=self._cwd or "(none)",
             selected_path=self._selected_path or self._workspace_root or "(none)",
             restored=self._restored,
+            target_label=self._target_label(),
             recovery_message=self._recovery_message,
         )
 
@@ -245,6 +252,13 @@ class WorkPanel(BasePanel):
         return value if isinstance(value, str) else None
 
     def _sync_explorer(self) -> None:
+        if self._target_kind is SessionTargetKind.SSH:
+            self._load_remote_directory(
+                self._browser_path or self._workspace_root,
+                desired_selected=self._selected_path or self._cwd or self._workspace_root,
+            )
+            return
+
         explorer = self.query_one(FileExplorer)
         selection = explorer.load(
             root_path=self._workspace_root or self._cwd,
@@ -256,6 +270,150 @@ class WorkPanel(BasePanel):
         if selection.recovery_message:
             self._recovery_message = self._merge_recovery_message(selection.recovery_message)
             self.query_one("#work-panel-note", Static).update(selection.recovery_message)
+
+    def _handle_local_explorer_key(self, event: events.Key) -> None:
+        if event.key == "up":
+            self._apply_explorer_selection(self.query_one(FileExplorer).move_selection(-1))
+            event.stop()
+        elif event.key == "down":
+            self._apply_explorer_selection(self.query_one(FileExplorer).move_selection(1))
+            event.stop()
+        elif event.key == "enter":
+            self._apply_explorer_selection(self.query_one(FileExplorer).open_selection())
+            event.stop()
+        elif event.key == "backspace":
+            self._apply_explorer_selection(self.query_one(FileExplorer).go_parent())
+            event.stop()
+
+    def _handle_remote_explorer_key(self, event: events.Key) -> None:
+        if event.key == "up":
+            self._move_remote_selection(-1)
+            event.stop()
+        elif event.key == "down":
+            self._move_remote_selection(1)
+            event.stop()
+        elif event.key == "enter":
+            self._open_remote_selection()
+            event.stop()
+        elif event.key == "backspace":
+            self._go_remote_parent()
+            event.stop()
+
+    def _load_remote_directory(
+        self,
+        browser_path: str,
+        *,
+        desired_selected: str | None = None,
+    ) -> None:
+        snapshot = self._remote_filesystem_adapter.list_directory(
+            target_ref=self._target_ref,
+            root_path=self._workspace_root or browser_path or ".",
+            browser_path=browser_path or self._workspace_root,
+        )
+        self._browser_path = snapshot.browser_path or browser_path or self._workspace_root
+        self._remote_entries = snapshot.entries
+        self._remote_listing_message = snapshot.message
+        self._sync_remote_selected_path(desired_selected)
+        self._render_remote_explorer()
+        note = self.query_one("#work-panel-note", Static)
+        if snapshot.message:
+            note.update(snapshot.message)
+        else:
+            note.update(
+                "Remote explorer active. Use arrows to move, Enter to open, Backspace to go up."
+            )
+
+    def _sync_remote_selected_path(self, desired_selected: str | None) -> None:
+        if not self._remote_entries:
+            self._remote_selected_index = 0
+            self._selected_path = self._browser_path or desired_selected or self._workspace_root
+            return
+        entry_paths = [entry.path for entry in self._remote_entries]
+        if desired_selected in entry_paths:
+            self._remote_selected_index = entry_paths.index(str(desired_selected))
+        else:
+            self._remote_selected_index = 0
+        self._selected_path = self._remote_entries[self._remote_selected_index].path
+
+    def _render_remote_explorer(self) -> None:
+        explorer = self.query_one(FileExplorer)
+        lines = [
+            f"Explorer: remote {self._target_ref or '(ssh)'}:{self._browser_path or self._workspace_root}",
+        ]
+        if not self._remote_entries:
+            lines.append(f"  {self._remote_listing_message or '(empty)'}")
+        else:
+            for is_selected, entry in self._windowed_remote_entries():
+                marker = ">" if is_selected else " "
+                label = f"{entry.name}/" if entry.is_dir else entry.name
+                lines.append(f"{marker} {label}")
+        if self._remote_listing_message and self._remote_entries:
+            lines.extend(["", self._remote_listing_message])
+        explorer.update("\n".join(lines))
+        self._render_context()
+
+    def _windowed_remote_entries(self) -> list[tuple[bool, RemotePathEntry]]:
+        if not self._remote_entries:
+            return []
+        window = 10
+        start = max(0, self._remote_selected_index - window // 2)
+        end = min(len(self._remote_entries), start + window)
+        start = max(0, end - window)
+        return [
+            (index == self._remote_selected_index, self._remote_entries[index])
+            for index in range(start, end)
+        ]
+
+    def _move_remote_selection(self, delta: int) -> None:
+        if not self._remote_entries:
+            return
+        self._remote_selected_index = max(
+            0,
+            min(len(self._remote_entries) - 1, self._remote_selected_index + delta),
+        )
+        self._selected_path = self._remote_entries[self._remote_selected_index].path
+        self._render_remote_explorer()
+        self._publish_panel_state()
+
+    def _open_remote_selection(self) -> None:
+        entry = self._selected_remote_entry()
+        if entry is None:
+            return
+        if entry.is_dir:
+            self._load_remote_directory(entry.path, desired_selected=entry.path)
+        else:
+            self._selected_path = entry.path
+            self._render_remote_explorer()
+        self._publish_panel_state()
+
+    def _go_remote_parent(self) -> None:
+        current = self._browser_path or self._workspace_root
+        if not current:
+            return
+        current_path = PurePosixPath(current)
+        workspace_root = PurePosixPath(self._workspace_root or current)
+        if current_path == workspace_root:
+            self._render_remote_explorer()
+            return
+        parent = str(current_path.parent)
+        if not self._remote_within_workspace(parent):
+            parent = self._workspace_root or current
+        self._load_remote_directory(parent, desired_selected=parent)
+        self._publish_panel_state()
+
+    def _selected_remote_entry(self) -> RemotePathEntry | None:
+        if not self._remote_entries:
+            return None
+        if self._remote_selected_index >= len(self._remote_entries):
+            self._remote_selected_index = 0
+        return self._remote_entries[self._remote_selected_index]
+
+    def _remote_within_workspace(self, path_text: str) -> bool:
+        if not self._workspace_root or self._workspace_root == ".":
+            return True
+        candidate = PurePosixPath(path_text)
+        workspace_root = PurePosixPath(self._workspace_root)
+        return candidate == workspace_root or workspace_root in candidate.parents
 
     def _apply_explorer_selection(self, selection: object) -> None:
         if not hasattr(selection, "browser_path") or not hasattr(selection, "selected_path"):
@@ -275,6 +433,9 @@ class WorkPanel(BasePanel):
                 "Explorer active. Use arrows to move, Enter to open, Backspace to go up."
             )
         self._render_context()
+        self._publish_panel_state()
+
+    def _publish_panel_state(self) -> None:
         self._event_bus.publish(
             PanelStateChanged(
                 panel_id=self.PANEL_ID,
@@ -346,3 +507,21 @@ class WorkPanel(BasePanel):
         if event.character and event.character.isprintable():
             return event.character
         return None
+
+    @staticmethod
+    def _target_kind_from_context(value: object) -> SessionTargetKind:
+        if isinstance(value, SessionTargetKind):
+            return value
+        if isinstance(value, str):
+            try:
+                return SessionTargetKind(value)
+            except ValueError:
+                return SessionTargetKind.LOCAL
+        return SessionTargetKind.LOCAL
+
+    def _target_label(self) -> str | None:
+        if self._target_kind is SessionTargetKind.LOCAL:
+            return "local"
+        if self._target_ref:
+            return f"{self._target_kind.value}:{self._target_ref}"
+        return self._target_kind.value

@@ -22,10 +22,10 @@ from cockpit.domain.events.runtime_events import (
     StatusMessagePublished,
     TerminalExited,
 )
-from cockpit.infrastructure.shell.local_shell_adapter import LocalShellAdapter
+from cockpit.infrastructure.shell.base import ShellAdapter
 from cockpit.runtime.stream_router import StreamRouter
 from cockpit.runtime.task_supervisor import BackgroundTask, TaskSupervisor
-from cockpit.shared.enums import StatusLevel
+from cockpit.shared.enums import SessionTargetKind, StatusLevel
 
 
 @dataclass(slots=True)
@@ -46,7 +46,7 @@ class PTYManager:
         self,
         *,
         event_bus: EventBus,
-        shell_adapter: LocalShellAdapter,
+        shell_adapter: ShellAdapter,
         stream_router: StreamRouter,
         task_supervisor: TaskSupervisor,
     ) -> None:
@@ -63,12 +63,19 @@ class PTYManager:
         cwd: str,
         *,
         command: list[str] | tuple[str, ...] | None = None,
+        target_kind: SessionTargetKind = SessionTargetKind.LOCAL,
+        target_ref: str | None = None,
     ) -> TerminalSession | None:
         self.stop_session(panel_id)
         master_fd = -1
         slave_fd = -1
         try:
-            launch = self._shell_adapter.build_launch_config(cwd, command=command)
+            launch = self._shell_adapter.build_launch_config(
+                cwd,
+                command=command,
+                target_kind=target_kind,
+                target_ref=target_ref,
+            )
             master_fd, slave_fd = pty.openpty()
             process = subprocess.Popen(
                 launch.command,
@@ -163,8 +170,16 @@ class PTYManager:
         cwd: str,
         *,
         command: list[str] | tuple[str, ...] | None = None,
+        target_kind: SessionTargetKind = SessionTargetKind.LOCAL,
+        target_ref: str | None = None,
     ) -> TerminalSession | None:
-        return self.start_session(panel_id, cwd, command=command)
+        return self.start_session(
+            panel_id,
+            cwd,
+            command=command,
+            target_kind=target_kind,
+            target_ref=target_ref,
+        )
 
     def send_input(self, panel_id: str, data: str) -> None:
         session = self.get_session(panel_id)

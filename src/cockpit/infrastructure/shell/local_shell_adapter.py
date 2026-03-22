@@ -2,16 +2,11 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 import os
 from pathlib import Path
 
-
-@dataclass(slots=True, frozen=True)
-class ShellLaunchConfig:
-    command: tuple[str, ...]
-    cwd: str
-    env: dict[str, str]
+from cockpit.infrastructure.shell.base import ShellLaunchConfig
+from cockpit.shared.enums import SessionTargetKind
 
 
 class LocalShellAdapter:
@@ -25,7 +20,15 @@ class LocalShellAdapter:
         cwd: str,
         *,
         command: list[str] | tuple[str, ...] | None = None,
+        target_kind: SessionTargetKind = SessionTargetKind.LOCAL,
+        target_ref: str | None = None,
     ) -> ShellLaunchConfig:
+        if target_kind is not SessionTargetKind.LOCAL:
+            raise ValueError(
+                f"LocalShellAdapter cannot launch target kind '{target_kind.value}'."
+            )
+        if target_ref is not None:
+            raise ValueError("LocalShellAdapter does not accept a remote target reference.")
         path = Path(cwd).expanduser().resolve()
         if not path.exists():
             raise FileNotFoundError(f"Shell cwd '{path}' does not exist.")

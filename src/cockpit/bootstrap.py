@@ -33,6 +33,9 @@ from cockpit.domain.events.domain_events import (
 )
 from cockpit.domain.events.runtime_events import PTYStarted, PTYStartupFailed, TerminalExited
 from cockpit.infrastructure.config.config_loader import ConfigLoader
+from cockpit.infrastructure.cron.cron_adapter import CronAdapter
+from cockpit.infrastructure.docker.docker_adapter import DockerAdapter
+from cockpit.infrastructure.filesystem.remote_filesystem_adapter import RemoteFilesystemAdapter
 from cockpit.infrastructure.git.git_adapter import GitAdapter
 from cockpit.infrastructure.persistence.repositories import (
     AuditLogRepository,
@@ -43,11 +46,21 @@ from cockpit.infrastructure.persistence.repositories import (
     WorkspaceRepository,
 )
 from cockpit.infrastructure.persistence.sqlite_store import SQLiteStore
+from cockpit.infrastructure.shell.base import ShellAdapter
 from cockpit.infrastructure.shell.local_shell_adapter import LocalShellAdapter
+from cockpit.infrastructure.shell.shell_adapter_router import ShellAdapterRouter
+from cockpit.infrastructure.ssh.command_runner import SSHCommandRunner
+from cockpit.infrastructure.ssh.ssh_shell_adapter import SSHShellAdapter
 from cockpit.runtime.pty_manager import PTYManager
 from cockpit.runtime.stream_router import StreamRouter
 from cockpit.runtime.task_supervisor import TaskSupervisor
 from cockpit.shared.config import default_db_path, discover_project_root
+from cockpit.ui.panels.git_panel import GitPanel
+from cockpit.ui.panels.docker_panel import DockerPanel
+from cockpit.ui.panels.cron_panel import CronPanel
+from cockpit.ui.panels.logs_panel import LogsPanel
+from cockpit.ui.panels.registry import PanelRegistry, PanelSpec
+from cockpit.ui.panels.work_panel import WorkPanel
 
 
 @dataclass(slots=True)
@@ -64,7 +77,11 @@ class ApplicationContainer:
     activity_log_service: ActivityLogService
     stream_router: StreamRouter
     pty_manager: PTYManager
+    cron_adapter: CronAdapter
+    docker_adapter: DockerAdapter
     git_adapter: GitAdapter
+    remote_filesystem_adapter: RemoteFilesystemAdapter
+    panel_registry: PanelRegistry
     store: SQLiteStore
 
     def shutdown(self) -> None:
@@ -75,7 +92,9 @@ class ApplicationContainer:
 def build_container(
     *,
     start: Path | None = None,
-    shell_adapter: LocalShellAdapter | None = None,
+    shell_adapter: ShellAdapter | None = None,
+    ssh_command_runner: SSHCommandRunner | None = None,
+    cron_adapter: CronAdapter | None = None,
 ) -> ApplicationContainer:
     """Create the minimum runnable application dependency graph."""
     project_root = discover_project_root(start)
@@ -99,8 +118,15 @@ def build_container(
     audit_repository = AuditLogRepository(store)
     stream_router = StreamRouter()
     task_supervisor = TaskSupervisor()
-    shell_adapter = shell_adapter or LocalShellAdapter()
-    git_adapter = GitAdapter()
+    ssh_command_runner = ssh_command_runner or SSHCommandRunner()
+    shell_adapter = shell_adapter or ShellAdapterRouter(
+        local_adapter=LocalShellAdapter(),
+        ssh_adapter=SSHShellAdapter(),
+    )
+    cron_adapter = cron_adapter or CronAdapter(ssh_command_runner=ssh_command_runner)
+    docker_adapter = DockerAdapter(ssh_command_runner=ssh_command_runner)
+    git_adapter = GitAdapter(ssh_command_runner=ssh_command_runner)
+    remote_filesystem_adapter = RemoteFilesystemAdapter(ssh_command_runner)
     pty_manager = PTYManager(
         event_bus=event_bus,
         shell_adapter=shell_adapter,
@@ -113,6 +139,64 @@ def build_container(
     activity_log_service = ActivityLogService(
         history_repository=history_repository,
         audit_repository=audit_repository,
+    )
+    panel_registry = PanelRegistry()
+    panel_registry.register(
+        PanelSpec(
+            panel_type=WorkPanel.PANEL_TYPE,
+            panel_id=WorkPanel.PANEL_ID,
+            display_name="Work",
+            factory=lambda container: WorkPanel(
+                event_bus=container.event_bus,
+                pty_manager=container.pty_manager,
+                stream_router=container.stream_router,
+                remote_filesystem_adapter=container.remote_filesystem_adapter,
+            ),
+        )
+    )
+    panel_registry.register(
+        PanelSpec(
+            panel_type=GitPanel.PANEL_TYPE,
+            panel_id=GitPanel.PANEL_ID,
+            display_name="Git",
+            factory=lambda container: GitPanel(
+                event_bus=container.event_bus,
+                git_adapter=container.git_adapter,
+            ),
+        )
+    )
+    panel_registry.register(
+        PanelSpec(
+            panel_type=DockerPanel.PANEL_TYPE,
+            panel_id=DockerPanel.PANEL_ID,
+            display_name="Docker",
+            factory=lambda container: DockerPanel(
+                event_bus=container.event_bus,
+                docker_adapter=container.docker_adapter,
+            ),
+        )
+    )
+    panel_registry.register(
+        PanelSpec(
+            panel_type=CronPanel.PANEL_TYPE,
+            panel_id=CronPanel.PANEL_ID,
+            display_name="Cron",
+            factory=lambda container: CronPanel(
+                event_bus=container.event_bus,
+                cron_adapter=container.cron_adapter,
+            ),
+        )
+    )
+    panel_registry.register(
+        PanelSpec(
+            panel_type=LogsPanel.PANEL_TYPE,
+            panel_id=LogsPanel.PANEL_ID,
+            display_name="Logs",
+            factory=lambda container: LogsPanel(
+                event_bus=container.event_bus,
+                activity_log_service=container.activity_log_service,
+            ),
+        )
     )
     navigation_controller = NavigationController(
         event_bus=event_bus,
@@ -176,6 +260,10 @@ def build_container(
         activity_log_service=activity_log_service,
         stream_router=stream_router,
         pty_manager=pty_manager,
+        cron_adapter=cron_adapter,
+        docker_adapter=docker_adapter,
         git_adapter=git_adapter,
+        remote_filesystem_adapter=remote_filesystem_adapter,
+        panel_registry=panel_registry,
         store=store,
     )

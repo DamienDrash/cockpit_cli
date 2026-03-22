@@ -7,11 +7,7 @@ from textual.containers import Vertical
 
 from cockpit.bootstrap import ApplicationContainer
 from cockpit.domain.models.panel_state import PanelState
-from cockpit.ui.panels.git_panel import GitPanel
-from cockpit.ui.panels.logs_panel import LogsPanel
-from cockpit.ui.panels.work_panel import WorkPanel
-
-PanelWidget = WorkPanel | GitPanel | LogsPanel
+from cockpit.ui.panels.registry import PanelContract
 
 
 class PanelHost(Vertical):
@@ -20,53 +16,33 @@ class PanelHost(Vertical):
     def __init__(self, *, container: ApplicationContainer) -> None:
         super().__init__(id="panel-host")
         self._container = container
+        self._panels_by_id = self._container.panel_registry.create_panels(container)
         self._active_tab_id = "work"
         self._layout_id = "default"
         self._tabs: list[dict[str, str]] = [
             {
                 "id": "work",
                 "name": "Work",
-                "panel_id": WorkPanel.PANEL_ID,
-                "panel_type": WorkPanel.PANEL_TYPE,
+                "panel_id": "work-panel",
+                "panel_type": "work",
             }
         ]
 
     def compose(self) -> ComposeResult:
-        yield WorkPanel(
-            event_bus=self._container.event_bus,
-            pty_manager=self._container.pty_manager,
-            stream_router=self._container.stream_router,
-        )
-        yield GitPanel(
-            event_bus=self._container.event_bus,
-            git_adapter=self._container.git_adapter,
-        )
-        yield LogsPanel(
-            event_bus=self._container.event_bus,
-            activity_log_service=self._container.activity_log_service,
-        )
+        for panel in self._panels_by_id.values():
+            yield panel
 
     def load_workspace(self, context: dict[str, object]) -> None:
-        work_panel = self.query_one(WorkPanel)
-        git_panel = self.query_one(GitPanel)
-        logs_panel = self.query_one(LogsPanel)
         layout_id = context.get("layout_id")
         if isinstance(layout_id, str) and layout_id:
             self._layout_id = layout_id
         self._tabs = self._normalize_tabs(context.get("tabs"))
         snapshot = context.get("snapshot")
         panel_snapshots = self._panel_snapshots(snapshot if isinstance(snapshot, dict) else {})
-
-        work_context = dict(context)
-        work_context.update(panel_snapshots.get(WorkPanel.PANEL_ID, {}))
-        git_context = dict(context)
-        git_context.update(panel_snapshots.get(GitPanel.PANEL_ID, {}))
-        logs_context = dict(context)
-        logs_context.update(panel_snapshots.get(LogsPanel.PANEL_ID, {}))
-
-        work_panel.initialize(work_context)
-        git_panel.initialize(git_context)
-        logs_panel.initialize(logs_context)
+        for panel_id, panel in self._panels_by_id.items():
+            panel_context = dict(context)
+            panel_context.update(panel_snapshots.get(panel_id, {}))
+            panel.initialize(panel_context)
         active_tab_id = context.get("active_tab_id")
         self.set_active_tab(
             str(active_tab_id) if isinstance(active_tab_id, str) and active_tab_id else "work",
@@ -74,7 +50,10 @@ class PanelHost(Vertical):
         )
 
     def focus_terminal(self) -> None:
-        self.query_one(WorkPanel).focus_terminal()
+        panel = self._panels_by_id.get("work-panel")
+        focus_terminal = getattr(panel, "focus_terminal", None)
+        if callable(focus_terminal):
+            focus_terminal()
 
     def command_context(self) -> dict[str, object]:
         context = self._active_panel().command_context()
@@ -90,7 +69,7 @@ class PanelHost(Vertical):
             panel.PANEL_ID: panel.snapshot_state().snapshot
             for panel in panels
         }
-        work_snapshot = panel_snapshots.get(WorkPanel.PANEL_ID, {})
+        work_snapshot = panel_snapshots.get("work-panel", {})
         snapshot = dict(active_state.snapshot)
         if "cwd" in work_snapshot:
             snapshot["cwd"] = work_snapshot["cwd"]
@@ -128,15 +107,15 @@ class PanelHost(Vertical):
     def available_tabs(self) -> list[tuple[str, str]]:
         return [(tab["id"], tab["name"]) for tab in self._tabs]
 
-    def _active_panel(self) -> PanelWidget:
-        if self._active_tab_id == "git":
-            return self.query_one(GitPanel)
-        if self._active_tab_id == "logs":
-            return self.query_one(LogsPanel)
-        return self.query_one(WorkPanel)
+    def _active_panel(self) -> PanelContract:
+        active_panel_id = self._tab_panel_id(self._active_tab_id)
+        panel = self._panels_by_id.get(active_panel_id)
+        if panel is not None:
+            return panel
+        return next(iter(self._panels_by_id.values()))
 
-    def _panels(self) -> list[PanelWidget]:
-        return [self.query_one(WorkPanel), self.query_one(GitPanel), self.query_one(LogsPanel)]
+    def _panels(self) -> list[PanelContract]:
+        return list(self._panels_by_id.values())
 
     def _panel_snapshots(self, snapshot: dict[str, object]) -> dict[str, dict[str, object]]:
         raw_panels = snapshot.get("panels", {})
@@ -146,8 +125,8 @@ class PanelHost(Vertical):
         for panel_id, payload in raw_panels.items():
             if isinstance(panel_id, str) and isinstance(payload, dict):
                 panel_snapshots[panel_id] = payload
-        if WorkPanel.PANEL_ID not in panel_snapshots:
-            panel_snapshots[WorkPanel.PANEL_ID] = {
+        if "work-panel" not in panel_snapshots:
+            panel_snapshots["work-panel"] = {
                 key: value
                 for key, value in snapshot.items()
                 if key in {"cwd", "browser_path", "selected_path"}
@@ -176,17 +155,20 @@ class PanelHost(Vertical):
             )
         return tabs or list(self._tabs)
 
-    def _tab_panels(self) -> dict[str, PanelWidget]:
-        all_panels = {
-            WorkPanel.PANEL_ID: self.query_one(WorkPanel),
-            GitPanel.PANEL_ID: self.query_one(GitPanel),
-            LogsPanel.PANEL_ID: self.query_one(LogsPanel),
-        }
-        tabs: dict[str, PanelWidget] = {}
+    def _tab_panels(self) -> dict[str, PanelContract]:
+        tabs: dict[str, PanelContract] = {}
         for tab in self._tabs:
-            panel = all_panels.get(tab["panel_id"])
+            panel = self._panels_by_id.get(tab["panel_id"])
             if panel is not None:
                 tabs[tab["id"]] = panel
         if "work" not in tabs:
-            tabs["work"] = all_panels[WorkPanel.PANEL_ID]
+            work_panel = self._panels_by_id.get("work-panel")
+            if work_panel is not None:
+                tabs["work"] = work_panel
         return tabs
+
+    def _tab_panel_id(self, tab_id: str) -> str:
+        for tab in self._tabs:
+            if tab["id"] == tab_id:
+                return tab["panel_id"]
+        return "work-panel"

@@ -7,6 +7,7 @@ from cockpit.application.handlers.base import CommandContextError, DispatchResul
 from cockpit.domain.commands.command import Command
 from cockpit.domain.events.runtime_events import PanelFocused
 from cockpit.runtime.pty_manager import PTYManager
+from cockpit.shared.enums import SessionTargetKind
 
 
 class FocusTerminalHandler:
@@ -47,7 +48,26 @@ class RestartTerminalHandler:
         if not isinstance(cwd, str):
             raise CommandContextError("No cwd is available for terminal restart.")
 
-        session = self._pty_manager.restart_session(panel_id, cwd)
+        target_kind = command.context.get("target_kind", SessionTargetKind.LOCAL)
+        if isinstance(target_kind, str):
+            try:
+                target_kind = SessionTargetKind(target_kind)
+            except ValueError as exc:
+                raise CommandContextError(
+                    "target_kind context must be a valid session target kind."
+                ) from exc
+        if not isinstance(target_kind, SessionTargetKind):
+            raise CommandContextError("target_kind context must be a valid session target kind.")
+        target_ref = command.context.get("target_ref")
+        if target_ref is not None and not isinstance(target_ref, str):
+            raise CommandContextError("target_ref context must be a string.")
+
+        session = self._pty_manager.restart_session(
+            panel_id,
+            cwd,
+            target_kind=target_kind,
+            target_ref=target_ref,
+        )
         if session is None:
             raise CommandContextError("Terminal restart failed.")
         return DispatchResult(

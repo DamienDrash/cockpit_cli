@@ -39,6 +39,20 @@ Screen {
   background: $panel;
 }
 
+#docker-panel {
+  height: 1fr;
+  border: round $accent;
+  padding: 1;
+  background: $panel;
+}
+
+#cron-panel {
+  height: 1fr;
+  border: round $accent;
+  padding: 1;
+  background: $panel;
+}
+
 #logs-panel {
   height: 1fr;
   border: round $accent;

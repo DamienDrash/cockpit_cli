@@ -12,7 +12,7 @@ from cockpit.infrastructure.persistence.repositories import (
     SessionRepository,
     SnapshotRepository,
 )
-from cockpit.shared.enums import SessionStatus, SnapshotKind
+from cockpit.shared.enums import SessionStatus, SessionTargetKind, SnapshotKind
 from cockpit.shared.utils import make_id, utc_now
 
 
@@ -132,14 +132,17 @@ class SessionService:
                 snapshot_payload = decoded.envelope.payload
                 requested_cwd = snapshot_payload.get("cwd")
                 if isinstance(requested_cwd, str):
-                    requested_path = Path(requested_cwd).expanduser()
-                    if requested_path.exists() and requested_path.is_dir():
-                        cwd = str(requested_path.resolve())
+                    if workspace.target.kind is SessionTargetKind.SSH:
+                        cwd = requested_cwd
                     else:
-                        recovery_message = (
-                            f"Saved cwd '{requested_cwd}' is unavailable. "
-                            "Falling back to workspace root."
-                        )
+                        requested_path = Path(requested_cwd).expanduser()
+                        if requested_path.exists() and requested_path.is_dir():
+                            cwd = str(requested_path.resolve())
+                        else:
+                            recovery_message = (
+                                f"Saved cwd '{requested_cwd}' is unavailable. "
+                                "Falling back to workspace root."
+                            )
             else:
                 recovery_message = decoded.error or "Saved snapshot could not be restored."
 

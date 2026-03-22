@@ -183,6 +183,32 @@ class NavigationControllerTests(unittest.TestCase):
             self.assertEqual(result.data["selected_path"], str(selected_file.resolve()))
             store.close()
 
+    def test_open_remote_workspace_creates_ssh_target_and_preserves_remote_cwd(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._write_project_fixture(root)
+            controller, store, _bus, session_repo, snapshot_repo = self._build_controller(
+                root
+            )
+
+            remote_uri = "ssh://dev@example.com/srv/app"
+            created = controller.open_workspace(remote_uri)
+            snapshot_ref = snapshot_repo.save(
+                session_id=created.session.id,
+                snapshot_kind=SnapshotKind.RESUME,
+                payload={"cwd": "/srv/app/current"},
+            )
+            created.session.snapshot_ref = snapshot_ref
+            session_repo.save(created.session)
+
+            restored = controller.restore_session(created.workspace.id)
+
+            self.assertEqual(created.workspace.target.kind.value, "ssh")
+            self.assertEqual(created.workspace.target.ref, "dev@example.com")
+            self.assertEqual(created.workspace.root_path, "/srv/app")
+            self.assertEqual(restored.cwd, "/srv/app/current")
+            store.close()
+
     def test_invalid_workspace_path_returns_recoverable_failure(self) -> None:
         with TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)

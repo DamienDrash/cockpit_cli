@@ -30,6 +30,8 @@ def _navigation_result_data(state: object) -> dict[str, object]:
         "workspace_name": workspace.name,
         "workspace_id": workspace.id,
         "workspace_root": workspace_root,
+        "target_kind": workspace.target.kind.value,
+        "target_ref": workspace.target.ref,
         "session_id": session.id,
         "layout_id": layout.id,
         "tabs": _layout_tabs(layout),

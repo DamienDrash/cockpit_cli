@@ -47,14 +47,22 @@ class CockpitApp(App[None]):
         ("ctrl+1", "focus_work_tab", "Focus Work"),
         ("ctrl+2", "focus_git_tab", "Focus Git"),
         ("ctrl+3", "focus_logs_tab", "Focus Logs"),
+        ("ctrl+4", "focus_docker_tab", "Focus Docker"),
+        ("ctrl+5", "focus_cron_tab", "Focus Cron"),
         ("ctrl+t", "focus_terminal", "Focus Terminal"),
         ("ctrl+r", "restart_terminal", "Restart Terminal"),
     ]
 
-    def __init__(self, container: ApplicationContainer | None = None) -> None:
+    def __init__(
+        self,
+        container: ApplicationContainer | None = None,
+        *,
+        startup_command_text: str | None = None,
+    ) -> None:
         super().__init__()
         self.container = container or build_container()
         self._main_thread_id = get_ident()
+        self._startup_command_text = startup_command_text
 
     def compose(self) -> ComposeResult:
         yield CockpitHeader(show_clock=False)
@@ -75,7 +83,7 @@ class CockpitApp(App[None]):
         self.container.event_bus.subscribe(PTYStarted, self._on_event)
         self.container.event_bus.subscribe(PTYStartupFailed, self._on_event)
         self.container.event_bus.subscribe(TerminalExited, self._on_event)
-        self._restore_last_session_if_available()
+        self._run_startup_flow()
 
     def on_key(self, event: events.Key) -> None:
         palette = self.query_one(CommandPalette)
@@ -165,6 +173,28 @@ class CockpitApp(App[None]):
                 source=CommandSource.KEYBINDING,
                 name="tab.focus",
                 args={"argv": ["logs"]},
+                context=self._command_context(),
+            )
+        )
+
+    def action_focus_docker_tab(self) -> None:
+        self._dispatch_command(
+            Command(
+                id=make_id("cmd"),
+                source=CommandSource.KEYBINDING,
+                name="tab.focus",
+                args={"argv": ["docker"]},
+                context=self._command_context(),
+            )
+        )
+
+    def action_focus_cron_tab(self) -> None:
+        self._dispatch_command(
+            Command(
+                id=make_id("cmd"),
+                source=CommandSource.KEYBINDING,
+                name="tab.focus",
+                args={"argv": ["cron"]},
                 context=self._command_context(),
             )
         )
@@ -271,6 +301,8 @@ class CockpitApp(App[None]):
                 "workspace_name": str(data.get("workspace_name", "Workspace")),
                 "workspace_id": data.get("workspace_id"),
                 "workspace_root": workspace_root,
+                "target_kind": data.get("target_kind"),
+                "target_ref": data.get("target_ref"),
                 "session_id": data.get("session_id"),
                 "tabs": data.get("tabs"),
                 "cwd": str(data.get("cwd", workspace_root)),
@@ -331,6 +363,24 @@ class CockpitApp(App[None]):
                 context={"workspace_id": latest_session.workspace_id},
             )
         )
+
+    def _run_startup_flow(self) -> None:
+        if self._startup_command_text:
+            self._dispatch_startup_command(self._startup_command_text)
+            return
+        self._restore_last_session_if_available()
+
+    def _dispatch_startup_command(self, command_text: str) -> None:
+        try:
+            command = self.container.command_parser.parse(
+                command_text,
+                source=CommandSource.PANEL_ACTION,
+                context=self._command_context(),
+            )
+        except CommandParseError as exc:
+            self._set_status(str(exc), StatusLevel.ERROR)
+            return
+        self._dispatch_command(command)
 
     def _dispatch_palette_selection(self) -> None:
         palette = self.query_one(CommandPalette)

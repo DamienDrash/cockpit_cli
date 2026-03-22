@@ -31,6 +31,8 @@ def _navigation_result_data(state: object) -> dict[str, object]:
         "workspace_name": workspace.name,
         "workspace_id": workspace.id,
         "workspace_root": workspace_root,
+        "target_kind": workspace.target.kind.value,
+        "target_ref": workspace.target.ref,
         "session_id": session.id,
         "layout_id": layout.id,
         "tabs": _layout_tabs(layout),
@@ -116,7 +118,7 @@ class OpenWorkspaceHandler:
             raise CommandContextError("Workspace path must be a string.")
         try:
             state = self._navigation_controller.open_workspace(path)
-        except (FileNotFoundError, NotADirectoryError, LookupError) as exc:
+        except (FileNotFoundError, NotADirectoryError, LookupError, ValueError) as exc:
             raise CommandContextError(str(exc)) from exc
         return DispatchResult(
             success=True,
