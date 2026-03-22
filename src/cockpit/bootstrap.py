@@ -8,8 +8,9 @@ from pathlib import Path
 from cockpit.application.dispatch.command_dispatcher import CommandDispatcher
 from cockpit.application.dispatch.command_parser import CommandParser
 from cockpit.application.dispatch.event_bus import EventBus
-from cockpit.application.handlers.base import NoOpHandler
+from cockpit.application.handlers.layout_handlers import ApplyDefaultLayoutHandler
 from cockpit.application.handlers.session_handlers import RestoreSessionHandler
+from cockpit.application.handlers.tab_handlers import FocusTabHandler
 from cockpit.application.handlers.terminal_handlers import (
     FocusTerminalHandler,
     RestartTerminalHandler,
@@ -32,6 +33,7 @@ from cockpit.domain.events.domain_events import (
 )
 from cockpit.domain.events.runtime_events import PTYStarted, PTYStartupFailed, TerminalExited
 from cockpit.infrastructure.config.config_loader import ConfigLoader
+from cockpit.infrastructure.git.git_adapter import GitAdapter
 from cockpit.infrastructure.persistence.repositories import (
     AuditLogRepository,
     CommandHistoryRepository,
@@ -59,8 +61,10 @@ class ApplicationContainer:
     command_dispatcher: CommandDispatcher
     navigation_controller: NavigationController
     session_service: SessionService
+    activity_log_service: ActivityLogService
     stream_router: StreamRouter
     pty_manager: PTYManager
+    git_adapter: GitAdapter
     store: SQLiteStore
 
     def shutdown(self) -> None:
@@ -96,6 +100,7 @@ def build_container(
     stream_router = StreamRouter()
     task_supervisor = TaskSupervisor()
     shell_adapter = shell_adapter or LocalShellAdapter()
+    git_adapter = GitAdapter()
     pty_manager = PTYManager(
         event_bus=event_bus,
         shell_adapter=shell_adapter,
@@ -149,8 +154,9 @@ def build_container(
             navigation_controller=navigation_controller,
         ),
     )
+    command_dispatcher.register("tab.focus", FocusTabHandler())
     command_dispatcher.register(
-        "layout.apply_default", NoOpHandler("Default layout application requested.")
+        "layout.apply_default", ApplyDefaultLayoutHandler(event_bus)
     )
     command_dispatcher.register(
         "terminal.focus", FocusTerminalHandler(event_bus)
@@ -167,7 +173,9 @@ def build_container(
         command_dispatcher=command_dispatcher,
         navigation_controller=navigation_controller,
         session_service=session_service,
+        activity_log_service=activity_log_service,
         stream_router=stream_router,
         pty_manager=pty_manager,
+        git_adapter=git_adapter,
         store=store,
     )

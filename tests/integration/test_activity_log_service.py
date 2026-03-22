@@ -74,6 +74,68 @@ class ActivityLogServiceTests(unittest.TestCase):
             self.assertIn("terminal.start_failed", actions)
             store.close()
 
+    def test_recent_entries_merge_and_scope_results(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            store = SQLiteStore(Path(temp_dir) / "cockpit.db")
+            history_repository = CommandHistoryRepository(store)
+            audit_repository = AuditLogRepository(store)
+            service = ActivityLogService(
+                history_repository=history_repository,
+                audit_repository=audit_repository,
+            )
+
+            service.record_command(
+                Command(
+                    id="cmd_1",
+                    source=CommandSource.SLASH,
+                    name="terminal.restart",
+                    args={"argv": []},
+                    context={
+                        "workspace_id": "ws_1",
+                        "session_id": "sess_1",
+                        "workspace_root": "/tmp/project",
+                    },
+                ),
+                DispatchResult(success=True, message="terminal restarted"),
+            )
+            service.record_command(
+                Command(
+                    id="cmd_2",
+                    source=CommandSource.SLASH,
+                    name="workspace.open",
+                    args={"argv": []},
+                    context={
+                        "workspace_id": "ws_2",
+                        "session_id": "sess_2",
+                        "workspace_root": "/tmp/other",
+                    },
+                ),
+                DispatchResult(success=True, message="opened other workspace"),
+            )
+            service.record_event(
+                WorkspaceOpened(
+                    workspace_id="ws_1",
+                    name="Project",
+                    root_path="/tmp/project",
+                    target_kind=SessionTargetKind.LOCAL,
+                )
+            )
+
+            scoped_entries = service.recent_entries(
+                limit=10,
+                workspace_id="ws_1",
+                session_id="sess_1",
+                workspace_root="/tmp/project",
+            )
+
+            self.assertGreaterEqual(len(scoped_entries), 2)
+            self.assertEqual(scoped_entries[0].category, "audit")
+            titles = {entry.title for entry in scoped_entries}
+            self.assertIn("workspace.opened", titles)
+            self.assertIn("terminal.restart", titles)
+            self.assertNotIn("workspace.open", titles)
+            store.close()
+
 
 if __name__ == "__main__":
     unittest.main()

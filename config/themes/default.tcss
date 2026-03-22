@@ -32,6 +32,20 @@ Screen {
   background: $panel;
 }
 
+#git-panel {
+  height: 1fr;
+  border: round $accent;
+  padding: 1;
+  background: $panel;
+}
+
+#logs-panel {
+  height: 1fr;
+  border: round $accent;
+  padding: 1;
+  background: $panel;
+}
+
 #file-context {
   margin: 0 0 1 0;
   padding: 1;
@@ -53,6 +67,23 @@ Screen {
 #work-panel-note {
   color: $text-muted;
   margin: 0 0 1 0;
+}
+
+#git-summary,
+#git-files,
+#git-panel-note {
+  margin: 0 0 1 0;
+}
+
+#git-files {
+  height: 1fr;
+  padding: 1;
+  background: $surface-lighten-1;
+  border: round $primary;
+}
+
+#git-panel-note {
+  color: $text-muted;
 }
 
 #embedded-terminal {

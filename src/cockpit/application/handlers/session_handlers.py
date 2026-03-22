@@ -9,6 +9,7 @@ from cockpit.application.handlers.base import CommandContextError, DispatchResul
 from cockpit.application.services.navigation_controller import NavigationController
 from cockpit.domain.commands.command import Command
 from cockpit.domain.events.domain_events import SessionRestored
+from cockpit.domain.models.layout import Layout, PanelRef, SplitNode
 from cockpit.domain.models.session import Session
 
 SessionResolver = Callable[[Command], Session | None]
@@ -31,6 +32,9 @@ def _navigation_result_data(state: object) -> dict[str, object]:
         "workspace_root": workspace_root,
         "session_id": session.id,
         "layout_id": layout.id,
+        "tabs": _layout_tabs(layout),
+        "active_tab_id": session.active_tab_id or "work",
+        "focused_panel_id": session.focused_panel_id,
         "cwd": getattr(state, "cwd"),
         "browser_path": str(browser_path),
         "selected_path": str(selected_path),
@@ -38,6 +42,32 @@ def _navigation_result_data(state: object) -> dict[str, object]:
         "restored": getattr(state, "restored"),
         "recovery_message": getattr(state, "recovery_message"),
     }
+
+
+def _layout_tabs(layout: Layout) -> list[dict[str, str]]:
+    tabs: list[dict[str, str]] = []
+    for tab in layout.tabs:
+        panel = _first_panel_ref(tab.root_split)
+        tabs.append(
+            {
+                "id": tab.id,
+                "name": tab.name,
+                "panel_id": panel.panel_id if panel is not None else f"{tab.id}-panel",
+                "panel_type": panel.panel_type if panel is not None else tab.id,
+            }
+        )
+    return tabs
+
+
+def _first_panel_ref(node: SplitNode) -> PanelRef | None:
+    for child in node.children:
+        if isinstance(child, PanelRef):
+            return child
+        if isinstance(child, SplitNode):
+            panel = _first_panel_ref(child)
+            if panel is not None:
+                return panel
+    return None
 
 
 class RestoreSessionHandler:

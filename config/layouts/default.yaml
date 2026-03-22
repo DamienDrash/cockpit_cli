@@ -9,7 +9,22 @@ tabs:
       children:
         - panel_id: work-panel
           panel_type: work
+  - id: git
+    name: Git
+    root_split:
+      orientation: vertical
+      ratio: 1.0
+      children:
+        - panel_id: git-panel
+          panel_type: git
+  - id: logs
+    name: Logs
+    root_split:
+      orientation: vertical
+      ratio: 1.0
+      children:
+        - panel_id: logs-panel
+          panel_type: logs
 focus_path:
   - work
   - work-panel
-

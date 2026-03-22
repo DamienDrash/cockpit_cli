@@ -1,6 +1,8 @@
 import importlib.util
 import os
 from pathlib import Path
+from shutil import which
+from subprocess import run
 from tempfile import TemporaryDirectory
 import unittest
 
@@ -12,6 +14,8 @@ if TEXTUAL_AVAILABLE:
         LocalShellAdapter,
         ShellLaunchConfig,
     )
+    from cockpit.ui.panels.git_panel import GitPanel
+    from cockpit.ui.panels.logs_panel import LogsPanel
     from cockpit.ui.screens.app_shell import CockpitApp
     from cockpit.ui.widgets.command_palette import CommandPalette
     from cockpit.ui.widgets.file_context import FileContext
@@ -126,6 +130,82 @@ class CockpitAppE2ETests(unittest.IsolatedAsyncioTestCase):
                 self.assertIn(f"Workspace: {root.name}", tab_text)
                 self.assertIn(f"Root: {root.resolve()}", context_text)
 
+    @unittest.skipUnless(which("git"), "git must be installed for git panel e2e")
+    async def test_git_tab_displays_repository_status_and_restores_active_tab(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            root, workspace_dir, _nested_dir, _selected_file = self._write_project_fixture(
+                Path(temp_dir)
+            )
+            self._init_git_repo(workspace_dir)
+            tracked = workspace_dir / "tracked.txt"
+            tracked.write_text("changed\n", encoding="utf-8")
+
+            first_app = self._build_app(root)
+            async with first_app.run_test() as pilot:
+                await self._open_workspace(first_app, pilot, workspace_dir)
+                await self._run_slash_command(first_app, pilot, "/tab focus git")
+
+                tab_text = self._rendered_text(first_app.query_one(TabBar))
+                git_text = self._rendered_text(first_app.query_one(GitPanel))
+
+                self.assertIn("[Git]", tab_text)
+                self.assertIn("tracked.txt", git_text)
+                self.assertIn("Branch:", git_text)
+
+            second_app = self._build_app(root)
+            async with second_app.run_test() as pilot:
+                await pilot.pause()
+
+                tab_text = self._rendered_text(second_app.query_one(TabBar))
+                git_text = self._rendered_text(second_app.query_one(GitPanel))
+
+                self.assertIn("[Git]", tab_text)
+                self.assertIn("tracked.txt", git_text)
+
+    async def test_logs_tab_displays_recent_activity_and_restores_active_tab(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            root, workspace_dir, _nested_dir, _selected_file = self._write_project_fixture(
+                Path(temp_dir)
+            )
+
+            first_app = self._build_app(root)
+            async with first_app.run_test() as pilot:
+                await self._open_workspace(first_app, pilot, workspace_dir)
+                await self._run_slash_command(first_app, pilot, "/tab focus logs")
+
+                tab_text = self._rendered_text(first_app.query_one(TabBar))
+                logs_text = self._rendered_text(first_app.query_one(LogsPanel))
+
+                self.assertIn("[Logs]", tab_text)
+                self.assertIn("workspace.opened", logs_text)
+                self.assertIn("layout.applied", logs_text)
+
+            second_app = self._build_app(root)
+            async with second_app.run_test() as pilot:
+                await pilot.pause()
+
+                tab_text = self._rendered_text(second_app.query_one(TabBar))
+                logs_text = self._rendered_text(second_app.query_one(LogsPanel))
+
+                self.assertIn("[Logs]", tab_text)
+                self.assertIn("session.restored", logs_text)
+
+    async def test_apply_default_layout_resets_focus_to_first_tab(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            root, workspace_dir, _nested_dir, _selected_file = self._write_project_fixture(
+                Path(temp_dir)
+            )
+
+            app = self._build_app(root)
+            async with app.run_test() as pilot:
+                await self._open_workspace(app, pilot, workspace_dir)
+                await self._run_slash_command(app, pilot, "/tab focus logs")
+                await self._run_slash_command(app, pilot, "/layout apply_default")
+
+                tab_text = self._rendered_text(app.query_one(TabBar))
+
+                self.assertIn("[Work]", tab_text)
+
     def _build_app(self, root: Path) -> "CockpitApp":
         container = build_container(
             start=root,
@@ -142,6 +222,13 @@ class CockpitAppE2ETests(unittest.IsolatedAsyncioTestCase):
         slash_input = app.query_one(SlashInput)
         slash_input.focus()
         slash_input.value = f"/workspace open {workspace_dir}"
+        await getattr(pilot, "press")("enter")
+        await getattr(pilot, "pause")()
+
+    async def _run_slash_command(self, app: "CockpitApp", pilot: object, command: str) -> None:
+        slash_input = app.query_one(SlashInput)
+        slash_input.focus()
+        slash_input.value = command
         await getattr(pilot, "press")("enter")
         await getattr(pilot, "pause")()
 
@@ -167,6 +254,22 @@ class CockpitAppE2ETests(unittest.IsolatedAsyncioTestCase):
                     "      children:",
                     "        - panel_id: work-panel",
                     "          panel_type: work",
+                    "  - id: git",
+                    "    name: Git",
+                    "    root_split:",
+                    "      orientation: vertical",
+                    "      ratio: 1.0",
+                    "      children:",
+                    "        - panel_id: git-panel",
+                    "          panel_type: git",
+                    "  - id: logs",
+                    "    name: Logs",
+                    "    root_split:",
+                    "      orientation: vertical",
+                    "      ratio: 1.0",
+                    "      children:",
+                    "        - panel_id: logs-panel",
+                    "          panel_type: logs",
                     "focus_path:",
                     "  - work",
                     "  - work-panel",
@@ -182,6 +285,7 @@ class CockpitAppE2ETests(unittest.IsolatedAsyncioTestCase):
                     "  - workspace.open",
                     "  - workspace.reopen_last",
                     "  - session.restore",
+                    "  - tab.focus",
                     "  - layout.apply_default",
                     "  - terminal.focus",
                     "  - terminal.restart",
@@ -207,6 +311,27 @@ class CockpitAppE2ETests(unittest.IsolatedAsyncioTestCase):
         if renderable is not None:
             return str(renderable)
         return str(getattr(widget, "render")())
+
+    def _init_git_repo(self, repo: Path) -> None:
+        self._git(repo, "init")
+        self._git(repo, "config", "user.name", "Cockpit Tests")
+        self._git(repo, "config", "user.email", "tests@example.com")
+        tracked = repo / "tracked.txt"
+        tracked.write_text("initial\n", encoding="utf-8")
+        self._git(repo, "add", "tracked.txt")
+        self._git(repo, "commit", "-m", "Initial commit")
+
+    def _git(self, repo: Path, *args: str) -> None:
+        completed = run(
+            ("git", "-C", str(repo), *args),
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            check=False,
+        )
+        if completed.returncode != 0:
+            raise AssertionError(completed.stderr or completed.stdout)
 
 
 if __name__ == "__main__":

@@ -2,7 +2,7 @@ commands:
   - workspace.open
   - workspace.reopen_last
   - session.restore
+  - tab.focus
   - layout.apply_default
   - terminal.focus
   - terminal.restart
-

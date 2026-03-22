@@ -44,6 +44,9 @@ class CockpitApp(App[None]):
     CSS = (themes_dir() / "default.tcss").read_text(encoding="utf-8")
     BINDINGS = [
         ("ctrl+k", "toggle_palette", "Command Palette"),
+        ("ctrl+1", "focus_work_tab", "Focus Work"),
+        ("ctrl+2", "focus_git_tab", "Focus Git"),
+        ("ctrl+3", "focus_logs_tab", "Focus Logs"),
         ("ctrl+t", "focus_terminal", "Focus Terminal"),
         ("ctrl+r", "restart_terminal", "Restart Terminal"),
     ]
@@ -133,6 +136,39 @@ class CockpitApp(App[None]):
             )
         )
 
+    def action_focus_work_tab(self) -> None:
+        self._dispatch_command(
+            Command(
+                id=make_id("cmd"),
+                source=CommandSource.KEYBINDING,
+                name="tab.focus",
+                args={"argv": ["work"]},
+                context=self._command_context(),
+            )
+        )
+
+    def action_focus_git_tab(self) -> None:
+        self._dispatch_command(
+            Command(
+                id=make_id("cmd"),
+                source=CommandSource.KEYBINDING,
+                name="tab.focus",
+                args={"argv": ["git"]},
+                context=self._command_context(),
+            )
+        )
+
+    def action_focus_logs_tab(self) -> None:
+        self._dispatch_command(
+            Command(
+                id=make_id("cmd"),
+                source=CommandSource.KEYBINDING,
+                name="tab.focus",
+                args={"argv": ["logs"]},
+                context=self._command_context(),
+            )
+        )
+
     def action_restart_terminal(self) -> None:
         self._dispatch_command(
             Command(
@@ -163,6 +199,8 @@ class CockpitApp(App[None]):
             "workspace.open",
             "workspace.reopen_last",
             "session.restore",
+            "tab.focus",
+            "layout.apply_default",
             "terminal.focus",
             "terminal.restart",
         }:
@@ -213,7 +251,16 @@ class CockpitApp(App[None]):
             "workspace.open",
             "workspace.reopen_last",
             "session.restore",
+            "tab.focus",
+            "layout.apply_default",
         }:
+            return
+        if command_name in {"tab.focus", "layout.apply_default"}:
+            active_tab_id = data.get("active_tab_id")
+            if isinstance(active_tab_id, str):
+                panel_host = self.query_one(PanelHost)
+                active_tab = panel_host.set_active_tab(active_tab_id)
+                self.query_one(TabBar).set_active_tab(active_tab)
             return
         if "workspace_root" not in data:
             return
@@ -225,16 +272,20 @@ class CockpitApp(App[None]):
                 "workspace_id": data.get("workspace_id"),
                 "workspace_root": workspace_root,
                 "session_id": data.get("session_id"),
+                "tabs": data.get("tabs"),
                 "cwd": str(data.get("cwd", workspace_root)),
                 "browser_path": str(data.get("browser_path", workspace_root)),
                 "selected_path": str(data.get("selected_path", workspace_root)),
+                "active_tab_id": str(data.get("active_tab_id", "work")),
                 "snapshot": data.get("snapshot"),
                 "restored": bool(data.get("restored", False)),
                 "recovery_message": data.get("recovery_message"),
             }
         )
+        self.query_one(TabBar).set_tabs(panel_host.available_tabs())
         self.query_one(TabBar).set_workspace(
             str(data.get("workspace_name", "Workspace")),
+            active_tab_id=str(data.get("active_tab_id", "work")),
             restored=bool(data.get("restored", False)),
         )
 
@@ -264,7 +315,7 @@ class CockpitApp(App[None]):
         self.container.session_service.save_resume_snapshot(
             session_id=session_id,
             payload=snapshot,
-            active_tab_id="work",
+            active_tab_id=panel_host.active_tab_id(),
             focused_panel_id=snapshot_state.panel_id,
         )
 
@@ -337,6 +388,16 @@ class CockpitApp(App[None]):
         }
         items: list[PaletteItem] = []
         for command_name in self.container.command_catalog:
+            if command_name == "tab.focus":
+                for tab_id, tab_name in self.query_one(PanelHost).available_tabs():
+                    items.append(
+                        PaletteItem(
+                            label=f"Focus {tab_name} Tab",
+                            command_text=f"tab focus {tab_id}",
+                            description=command_name,
+                        )
+                    )
+                continue
             label_command = labels.get(command_name)
             if label_command is None:
                 continue
