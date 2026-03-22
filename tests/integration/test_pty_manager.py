@@ -1,6 +1,7 @@
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from threading import Event
+import time
 import unittest
 
 from cockpit.application.dispatch.event_bus import EventBus
@@ -110,6 +111,61 @@ class PTYManagerTests(unittest.TestCase):
             self.assertIn("missing-shell", captured[0].reason)
             manager.shutdown()
 
+    def test_resize_session_reaches_running_process(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            manager, bus, router = self._build_manager()
+            first_output = Event()
+            resized_output = Event()
+
+            def on_output(event: ProcessOutputReceived) -> None:
+                if event.panel_id != "work-panel":
+                    return
+                buffer = router.get_buffer("work-panel")
+                if "\n" in buffer:
+                    first_output.set()
+                if "33 120" in buffer:
+                    resized_output.set()
+
+            bus.subscribe(ProcessOutputReceived, on_output)
+
+            session = manager.start_session(
+                "work-panel",
+                temp_dir,
+                command=["/bin/sh", "-lc", "stty size; sleep 2; stty size; sleep 30"],
+            )
+
+            self.assertIsNotNone(session)
+            self.assertTrue(first_output.wait(2.0))
+            manager.resize_session("work-panel", rows=33, cols=120)
+
+            self.assertTrue(resized_output.wait(3.0))
+            self.assertEqual(manager.get_session("work-panel").rows, 33)
+            self.assertEqual(manager.get_session("work-panel").cols, 120)
+            manager.stop_session("work-panel")
+            manager.shutdown()
+
+    def test_exited_session_is_removed_from_registry(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            manager, bus, _router = self._build_manager()
+            exited = Event()
+
+            def on_exit(event: TerminalExited) -> None:
+                if event.panel_id == "work-panel":
+                    exited.set()
+
+            bus.subscribe(TerminalExited, on_exit)
+
+            session = manager.start_session(
+                "work-panel",
+                temp_dir,
+                command=["/bin/sh", "-lc", "printf 'bye\\n'"],
+            )
+
+            self.assertIsNotNone(session)
+            self.assertTrue(exited.wait(2.0))
+            self.assertTrue(self._wait_for(lambda: manager.get_session("work-panel") is None))
+            manager.shutdown()
+
     def _build_manager(self) -> tuple[PTYManager, EventBus, StreamRouter]:
         bus = EventBus()
         router = StreamRouter()
@@ -120,6 +176,14 @@ class PTYManagerTests(unittest.TestCase):
             task_supervisor=TaskSupervisor(),
         )
         return manager, bus, router
+
+    def _wait_for(self, predicate: object, timeout: float = 2.0) -> bool:
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            if predicate():
+                return True
+            time.sleep(0.05)
+        return bool(predicate())
 
 
 if __name__ == "__main__":

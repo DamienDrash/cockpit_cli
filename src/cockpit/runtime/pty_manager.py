@@ -4,10 +4,14 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import errno
+import fcntl
 import os
 import pty
 import select
+import signal
 import subprocess
+import struct
+import termios
 from threading import Lock
 
 from cockpit.application.dispatch.event_bus import EventBus
@@ -31,6 +35,8 @@ class TerminalSession:
     process: subprocess.Popen[bytes]
     master_fd: int
     task: BackgroundTask
+    rows: int | None = None
+    cols: int | None = None
 
 
 class PTYManager:
@@ -166,6 +172,20 @@ class PTYManager:
             raise LookupError(f"No PTY session exists for panel '{panel_id}'.")
         os.write(session.master_fd, data.encode("utf-8"))
 
+    def resize_session(self, panel_id: str, *, rows: int, cols: int) -> None:
+        session = self.get_session(panel_id)
+        if session is None:
+            raise LookupError(f"No PTY session exists for panel '{panel_id}'.")
+
+        normalized_rows = max(1, int(rows))
+        normalized_cols = max(1, int(cols))
+        winsize = struct.pack("HHHH", normalized_rows, normalized_cols, 0, 0)
+        fcntl.ioctl(session.master_fd, termios.TIOCSWINSZ, winsize)
+        session.rows = normalized_rows
+        session.cols = normalized_cols
+        if session.process.poll() is None:
+            session.process.send_signal(signal.SIGWINCH)
+
     def get_session(self, panel_id: str) -> TerminalSession | None:
         with self._lock:
             return self._sessions.get(panel_id)
@@ -221,6 +241,10 @@ class PTYManager:
                 exit_code=exit_code if exit_code is not None else -1,
             )
         )
+        with self._lock:
+            current = self._sessions.get(panel_id)
+            if current is not None and current.master_fd == master_fd:
+                self._sessions.pop(panel_id, None)
         try:
             os.close(master_fd)
         except OSError:

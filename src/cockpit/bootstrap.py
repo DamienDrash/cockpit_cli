@@ -45,13 +45,15 @@ from cockpit.infrastructure.shell.local_shell_adapter import LocalShellAdapter
 from cockpit.runtime.pty_manager import PTYManager
 from cockpit.runtime.stream_router import StreamRouter
 from cockpit.runtime.task_supervisor import TaskSupervisor
-from cockpit.shared.config import default_db_path
+from cockpit.shared.config import default_db_path, discover_project_root
 
 
 @dataclass(slots=True)
 class ApplicationContainer:
     """Holds the bootstrap-time application dependencies."""
 
+    project_root: Path
+    command_catalog: tuple[str, ...]
     event_bus: EventBus
     command_parser: CommandParser
     command_dispatcher: CommandDispatcher
@@ -72,11 +74,19 @@ def build_container(
     shell_adapter: LocalShellAdapter | None = None,
 ) -> ApplicationContainer:
     """Create the minimum runnable application dependency graph."""
+    project_root = discover_project_root(start)
     event_bus = EventBus()
     command_parser = CommandParser()
     command_dispatcher = CommandDispatcher(event_bus=event_bus)
-    store = SQLiteStore(default_db_path(start))
+    store = SQLiteStore(default_db_path(project_root))
     config_loader = ConfigLoader(start=start)
+    command_catalog_payload = config_loader.load_command_catalog()
+    raw_commands = command_catalog_payload.get("commands", [])
+    command_catalog = tuple(
+        command_name
+        for command_name in raw_commands
+        if isinstance(command_name, str) and command_name
+    )
     workspace_repository = WorkspaceRepository(store)
     layout_repository = LayoutRepository(store)
     session_repository = SessionRepository(store)
@@ -150,6 +160,8 @@ def build_container(
     )
 
     return ApplicationContainer(
+        project_root=project_root,
+        command_catalog=command_catalog,
         event_bus=event_bus,
         command_parser=command_parser,
         command_dispatcher=command_dispatcher,

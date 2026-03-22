@@ -67,6 +67,21 @@ Screen {
   border: tall $success;
 }
 
+#command-palette {
+  margin: 1 0 0 0;
+  padding: 1;
+  border: round $accent;
+  background: $surface-lighten-1;
+}
+
+#command-palette-input {
+  margin: 0 0 1 0;
+}
+
+#command-palette-results {
+  color: $text;
+}
+
 #slash-input {
   margin: 1 0 0 0;
 }

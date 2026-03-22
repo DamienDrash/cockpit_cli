@@ -20,16 +20,20 @@ class ConfigLoader:
         return self._load_yaml(path)
 
     def load_keybindings(self) -> dict[str, object]:
-        return self._load_yaml(config_dir(self._start) / "keybindings.yaml")
+        return self._load_yaml(config_dir(self._start) / "keybindings.yaml", required=False)
 
     def load_command_catalog(self) -> dict[str, object]:
-        return self._load_yaml(config_dir(self._start) / "commands.yaml")
+        return self._load_yaml(config_dir(self._start) / "commands.yaml", required=False)
 
     def load_theme(self, theme_name: str = "default") -> str:
         path = themes_dir(self._start) / f"{theme_name}.tcss"
         return path.read_text(encoding="utf-8")
 
-    def _load_yaml(self, path: Path) -> dict[str, object]:
+    def _load_yaml(self, path: Path, *, required: bool = True) -> dict[str, object]:
+        if not path.exists():
+            if required:
+                raise FileNotFoundError(path)
+            return {}
         payload = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
         if not isinstance(payload, dict):
             msg = f"Expected mapping payload in '{path}'."

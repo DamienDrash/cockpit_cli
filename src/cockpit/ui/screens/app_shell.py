@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import shlex
 from threading import get_ident
 
+from textual import events
 from textual.app import App, ComposeResult
 from textual.containers import Vertical
 from textual.css.query import NoMatches
@@ -27,6 +29,7 @@ from cockpit.shared.config import themes_dir
 from cockpit.shared.enums import CommandSource, StatusLevel
 from cockpit.shared.utils import make_id
 from cockpit.ui.panels.panel_host import PanelHost
+from cockpit.ui.widgets.command_palette import CommandPalette, PaletteItem
 from cockpit.ui.widgets.header import CockpitHeader
 from cockpit.ui.widgets.slash_input import SlashInput
 from cockpit.ui.widgets.status_bar import StatusBar
@@ -40,6 +43,7 @@ class CockpitApp(App[None]):
     SUB_TITLE = "Core Platform Spine"
     CSS = (themes_dir() / "default.tcss").read_text(encoding="utf-8")
     BINDINGS = [
+        ("ctrl+k", "toggle_palette", "Command Palette"),
         ("ctrl+t", "focus_terminal", "Focus Terminal"),
         ("ctrl+r", "restart_terminal", "Restart Terminal"),
     ]
@@ -54,6 +58,7 @@ class CockpitApp(App[None]):
         with Vertical(id="app-body"):
             yield TabBar()
             yield PanelHost(container=self.container)
+            yield CommandPalette()
             yield SlashInput()
         yield StatusBar()
         yield Footer()
@@ -69,7 +74,32 @@ class CockpitApp(App[None]):
         self.container.event_bus.subscribe(TerminalExited, self._on_event)
         self._restore_last_session_if_available()
 
+    def on_key(self, event: events.Key) -> None:
+        palette = self.query_one(CommandPalette)
+        if not palette.is_open:
+            return
+        if event.key == "escape":
+            palette.close()
+            self.query_one(SlashInput).focus()
+            event.stop()
+            return
+        if event.key == "up":
+            palette.move_selection(-1)
+            event.stop()
+            return
+        if event.key == "down":
+            palette.move_selection(1)
+            event.stop()
+
+    def on_input_changed(self, event: Input.Changed) -> None:
+        if event.input.id != "command-palette-input":
+            return
+        self.query_one(CommandPalette).filter(event.value)
+
     def on_input_submitted(self, event: Input.Submitted) -> None:
+        if event.input.id == "command-palette-input":
+            self._dispatch_palette_selection()
+            return
         if event.input.id != "slash-input":
             return
 
@@ -112,6 +142,14 @@ class CockpitApp(App[None]):
                 context=self._command_context(),
             )
         )
+
+    def action_toggle_palette(self) -> None:
+        palette = self.query_one(CommandPalette)
+        if palette.is_open:
+            palette.close()
+            self.query_one(SlashInput).focus()
+            return
+        palette.open(self._palette_items())
 
     def _dispatch_command(self, command: Command) -> None:
         try:
@@ -242,3 +280,72 @@ class CockpitApp(App[None]):
                 context={"workspace_id": latest_session.workspace_id},
             )
         )
+
+    def _dispatch_palette_selection(self) -> None:
+        palette = self.query_one(CommandPalette)
+        item = palette.selected_item()
+        if item is None:
+            self._set_status("No palette command is available to execute.", StatusLevel.WARNING)
+            return
+        try:
+            command = self.container.command_parser.parse(
+                item.command_text,
+                source=CommandSource.PALETTE,
+                context=self._command_context(),
+            )
+        except CommandParseError as exc:
+            self._set_status(str(exc), StatusLevel.ERROR)
+            return
+        palette.close()
+        self._dispatch_command(command)
+        self.query_one(SlashInput).focus()
+
+    def _palette_items(self) -> list[PaletteItem]:
+        context = self._command_context()
+        workspace_root = context.get("workspace_root")
+        open_path = (
+            workspace_root
+            if isinstance(workspace_root, str) and workspace_root
+            else str(self.container.project_root)
+        )
+        quoted_open_path = shlex.quote(open_path)
+        labels: dict[str, tuple[str, str]] = {
+            "workspace.open": (
+                "Open Workspace Root",
+                f"workspace open {quoted_open_path}",
+            ),
+            "workspace.reopen_last": (
+                "Reopen Last Workspace",
+                "workspace reopen_last",
+            ),
+            "session.restore": (
+                "Restore Session",
+                "session restore",
+            ),
+            "layout.apply_default": (
+                "Apply Default Layout",
+                "layout apply_default",
+            ),
+            "terminal.focus": (
+                "Focus Terminal",
+                "terminal focus",
+            ),
+            "terminal.restart": (
+                "Restart Terminal",
+                "terminal restart",
+            ),
+        }
+        items: list[PaletteItem] = []
+        for command_name in self.container.command_catalog:
+            label_command = labels.get(command_name)
+            if label_command is None:
+                continue
+            label, command_text = label_command
+            items.append(
+                PaletteItem(
+                    label=label,
+                    command_text=command_text,
+                    description=command_name,
+                )
+            )
+        return items

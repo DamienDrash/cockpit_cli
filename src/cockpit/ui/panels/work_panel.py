@@ -130,6 +130,9 @@ class WorkPanel(BasePanel):
     def focus_terminal(self) -> None:
         self.query_one(EmbeddedTerminal).focus()
 
+    def on_resize(self, _event: events.Resize) -> None:
+        self._sync_terminal_size()
+
     def on_key(self, event: events.Key) -> None:
         terminal = self.query_one(EmbeddedTerminal)
         if not terminal.has_focus:
@@ -154,6 +157,18 @@ class WorkPanel(BasePanel):
                         self.query_one(FileExplorer).go_parent()
                     )
                     event.stop()
+            return
+        if event.key == "pageup":
+            terminal.page_up()
+            event.stop()
+            return
+        if event.key == "pagedown":
+            terminal.page_down()
+            event.stop()
+            return
+        if event.key == "end":
+            terminal.scroll_to_end()
+            event.stop()
             return
         payload = self._terminal_payload_for_key(event)
         if payload is None:
@@ -212,6 +227,7 @@ class WorkPanel(BasePanel):
         if isinstance(event, PTYStarted):
             terminal.clear(f"Terminal running in {event.cwd}")
             note.update("Terminal active. Focus the terminal region to type.")
+            self._sync_terminal_size()
             buffered = self._stream_router.get_buffer(self.PANEL_ID)
             if buffered:
                 terminal.append_output(buffered)
@@ -283,6 +299,32 @@ class WorkPanel(BasePanel):
             )
         except NoMatches:
             return None
+
+    def _sync_terminal_size(self) -> None:
+        widgets = self._runtime_widgets()
+        if widgets is None:
+            return
+        terminal, _note = widgets
+        session = self._pty_manager.get_session(self.PANEL_ID)
+        if session is None:
+            return
+        content_size = getattr(terminal, "content_size", None)
+        cols = getattr(content_size, "width", 0) if content_size is not None else 0
+        rows = getattr(content_size, "height", 0) if content_size is not None else 0
+        if rows <= 0 or cols <= 0:
+            size = getattr(terminal, "size", None)
+            cols = getattr(size, "width", 0) if size is not None else cols
+            rows = getattr(size, "height", 0) if size is not None else rows
+        if rows <= 0 or cols <= 0:
+            return
+        try:
+            self._pty_manager.resize_session(
+                self.PANEL_ID,
+                rows=max(1, int(rows)),
+                cols=max(1, int(cols)),
+            )
+        except (LookupError, OSError, ValueError):
+            return
 
     @staticmethod
     def _terminal_payload_for_key(event: events.Key) -> str | None:

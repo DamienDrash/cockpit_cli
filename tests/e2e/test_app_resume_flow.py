@@ -13,6 +13,7 @@ if TEXTUAL_AVAILABLE:
         ShellLaunchConfig,
     )
     from cockpit.ui.screens.app_shell import CockpitApp
+    from cockpit.ui.widgets.command_palette import CommandPalette
     from cockpit.ui.widgets.file_context import FileContext
     from cockpit.ui.widgets.file_explorer import FileExplorer
     from cockpit.ui.widgets.slash_input import SlashInput
@@ -100,6 +101,31 @@ class CockpitAppE2ETests(unittest.IsolatedAsyncioTestCase):
                 self.assertIn(f"Explorer: {nested_dir.resolve()}", explorer_text)
                 self.assertIn("> target.txt", explorer_text)
 
+    async def test_command_palette_dispatches_workspace_open(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            root, _workspace_dir, _nested_dir, _selected_file = self._write_project_fixture(
+                Path(temp_dir)
+            )
+            app = self._build_app(root)
+
+            async with app.run_test() as pilot:
+                app.action_toggle_palette()
+                await pilot.pause()
+
+                palette = app.query_one(CommandPalette)
+                self.assertTrue(palette.is_open)
+
+                palette_input = app.query_one("#command-palette-input")
+                palette_input.value = "open"
+                await pilot.press("enter")
+                await pilot.pause()
+
+                tab_text = self._rendered_text(app.query_one(TabBar))
+                context_text = self._rendered_text(app.query_one(FileContext))
+
+                self.assertIn(f"Workspace: {root.name}", tab_text)
+                self.assertIn(f"Root: {root.resolve()}", context_text)
+
     def _build_app(self, root: Path) -> "CockpitApp":
         container = build_container(
             start=root,
@@ -144,6 +170,21 @@ class CockpitAppE2ETests(unittest.IsolatedAsyncioTestCase):
                     "focus_path:",
                     "  - work",
                     "  - work-panel",
+                ]
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        (root / "config" / "commands.yaml").write_text(
+            "\n".join(
+                [
+                    "commands:",
+                    "  - workspace.open",
+                    "  - workspace.reopen_last",
+                    "  - session.restore",
+                    "  - layout.apply_default",
+                    "  - terminal.focus",
+                    "  - terminal.restart",
                 ]
             )
             + "\n",
