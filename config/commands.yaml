@@ -7,5 +7,9 @@ commands:
   - terminal.focus
   - terminal.restart
   - docker.restart
+  - docker.stop
+  - docker.remove
+  - cron.enable
+  - cron.disable
   - db.run_query
   - curl.send

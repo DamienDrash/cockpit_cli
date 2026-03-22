@@ -9,8 +9,8 @@ class SlashInput(Input):
     def __init__(self) -> None:
         super().__init__(
             placeholder=(
-                'Type /workspace open ., /db run_query "SELECT 1", '
-                "/curl send GET https://example.com, or /session restore"
+                'Type /workspace open @prod, /db run_query "SELECT 1", '
+                "/cron disable, /curl send GET https://example.com, or /session restore"
             ),
             id="slash-input",
         )

@@ -8,6 +8,7 @@ from cockpit.application.handlers.session_handlers import RestoreSessionHandler
 from cockpit.application.handlers.workspace_handlers import OpenWorkspaceHandler
 from cockpit.application.handlers.base import DispatchResult
 from cockpit.domain.commands.command import Command
+from cockpit.application.services.connection_service import ConnectionService
 from cockpit.application.services.layout_service import LayoutService
 from cockpit.application.services.navigation_controller import NavigationController
 from cockpit.application.services.session_service import SessionService
@@ -209,6 +210,34 @@ class NavigationControllerTests(unittest.TestCase):
             self.assertEqual(restored.cwd, "/srv/app/current")
             store.close()
 
+    def test_open_profile_workspace_uses_configured_connection_alias(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._write_project_fixture(root)
+            (root / "config" / "connections.yaml").write_text(
+                "\n".join(
+                    [
+                        "connections:",
+                        "  prod:",
+                        "    target: deploy@example.com",
+                        "    default_path: /srv/platform",
+                    ]
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            controller, store, _bus, _session_repo, _snapshot_repo = self._build_controller(
+                root
+            )
+
+            created = controller.open_workspace("@prod")
+
+            self.assertEqual(created.workspace.target.kind.value, "ssh")
+            self.assertEqual(created.workspace.target.ref, "deploy@example.com")
+            self.assertEqual(created.workspace.root_path, "/srv/platform")
+            self.assertEqual(created.cwd, "/srv/platform")
+            store.close()
+
     def test_invalid_workspace_path_returns_recoverable_failure(self) -> None:
         with TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
@@ -268,10 +297,14 @@ class NavigationControllerTests(unittest.TestCase):
         layout_repo = LayoutRepository(store)
         session_repo = SessionRepository(store)
         snapshot_repo = SnapshotRepository(store)
+        config_loader = ConfigLoader(start=root)
         controller = NavigationController(
             event_bus=bus,
-            workspace_service=WorkspaceService(workspace_repo),
-            layout_service=LayoutService(layout_repo, ConfigLoader(start=root)),
+            workspace_service=WorkspaceService(
+                workspace_repo,
+                connection_service=ConnectionService(config_loader),
+            ),
+            layout_service=LayoutService(layout_repo, config_loader),
             session_service=SessionService(session_repo, snapshot_repo),
         )
         return controller, store, bus, session_repo, snapshot_repo

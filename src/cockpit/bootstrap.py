@@ -9,8 +9,13 @@ from cockpit.application.dispatch.command_dispatcher import CommandDispatcher
 from cockpit.application.dispatch.command_parser import CommandParser
 from cockpit.application.dispatch.event_bus import EventBus
 from cockpit.application.handlers.curl_handlers import SendHttpRequestHandler
+from cockpit.application.handlers.cron_handlers import SetCronJobEnabledHandler
 from cockpit.application.handlers.db_handlers import RunDatabaseQueryHandler
-from cockpit.application.handlers.docker_handlers import RestartDockerContainerHandler
+from cockpit.application.handlers.docker_handlers import (
+    RemoveDockerContainerHandler,
+    RestartDockerContainerHandler,
+    StopDockerContainerHandler,
+)
 from cockpit.application.handlers.layout_handlers import ApplyDefaultLayoutHandler
 from cockpit.application.handlers.session_handlers import RestoreSessionHandler
 from cockpit.application.handlers.tab_handlers import FocusTabHandler
@@ -23,6 +28,7 @@ from cockpit.application.handlers.workspace_handlers import (
     ReopenLastWorkspaceHandler,
 )
 from cockpit.application.services.activity_log_service import ActivityLogService
+from cockpit.application.services.connection_service import ConnectionService
 from cockpit.application.services.layout_service import LayoutService
 from cockpit.application.services.navigation_controller import NavigationController
 from cockpit.application.services.session_service import SessionService
@@ -115,6 +121,7 @@ def build_container(
     command_dispatcher = CommandDispatcher(event_bus=event_bus)
     store = SQLiteStore(default_db_path(project_root))
     config_loader = ConfigLoader(start=start)
+    connection_service = ConnectionService(config_loader)
     command_catalog_payload = config_loader.load_command_catalog()
     raw_commands = command_catalog_payload.get("commands", [])
     command_catalog = tuple(
@@ -137,7 +144,7 @@ def build_container(
     )
     cron_adapter = cron_adapter or CronAdapter(ssh_command_runner=ssh_command_runner)
     docker_adapter = docker_adapter or DockerAdapter(ssh_command_runner=ssh_command_runner)
-    database_adapter = database_adapter or DatabaseAdapter()
+    database_adapter = database_adapter or DatabaseAdapter(ssh_command_runner=ssh_command_runner)
     http_adapter = http_adapter or HttpAdapter()
     git_adapter = GitAdapter(ssh_command_runner=ssh_command_runner)
     remote_filesystem_adapter = RemoteFilesystemAdapter(ssh_command_runner)
@@ -147,7 +154,10 @@ def build_container(
         stream_router=stream_router,
         task_supervisor=task_supervisor,
     )
-    workspace_service = WorkspaceService(workspace_repository)
+    workspace_service = WorkspaceService(
+        workspace_repository,
+        connection_service=connection_service,
+    )
     layout_service = LayoutService(layout_repository, config_loader)
     session_service = SessionService(session_repository, snapshot_repository)
     activity_log_service = ActivityLogService(
@@ -285,6 +295,16 @@ def build_container(
     )
     command_dispatcher.register(
         "docker.restart", RestartDockerContainerHandler(docker_adapter)
+    )
+    command_dispatcher.register("docker.stop", StopDockerContainerHandler(docker_adapter))
+    command_dispatcher.register("docker.remove", RemoveDockerContainerHandler(docker_adapter))
+    command_dispatcher.register(
+        "cron.enable",
+        SetCronJobEnabledHandler(cron_adapter, enabled=True),
+    )
+    command_dispatcher.register(
+        "cron.disable",
+        SetCronJobEnabledHandler(cron_adapter, enabled=False),
     )
     command_dispatcher.register(
         "db.run_query", RunDatabaseQueryHandler(database_adapter)

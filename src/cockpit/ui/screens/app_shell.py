@@ -56,6 +56,8 @@ class CockpitApp(App[None]):
         ("ctrl+t", "focus_terminal", "Focus Terminal"),
         ("ctrl+r", "restart_terminal", "Restart Terminal"),
         ("f8", "restart_selected_docker", "Restart Container"),
+        ("f9", "stop_selected_docker", "Stop Container"),
+        ("f10", "remove_selected_docker", "Remove Container"),
     ]
 
     def __init__(
@@ -258,6 +260,26 @@ class CockpitApp(App[None]):
             )
         )
 
+    def action_stop_selected_docker(self) -> None:
+        self._dispatch_command(
+            Command(
+                id=make_id("cmd"),
+                source=CommandSource.KEYBINDING,
+                name="docker.stop",
+                context=self._command_context(),
+            )
+        )
+
+    def action_remove_selected_docker(self) -> None:
+        self._dispatch_command(
+            Command(
+                id=make_id("cmd"),
+                source=CommandSource.KEYBINDING,
+                name="docker.remove",
+                context=self._command_context(),
+            )
+        )
+
     def action_toggle_palette(self) -> None:
         palette = self.query_one(CommandPalette)
         if palette.is_open:
@@ -285,6 +307,10 @@ class CockpitApp(App[None]):
             "terminal.focus",
             "terminal.restart",
             "docker.restart",
+            "docker.stop",
+            "docker.remove",
+            "cron.enable",
+            "cron.disable",
             "db.run_query",
             "curl.send",
         }:
@@ -533,13 +559,49 @@ class CockpitApp(App[None]):
                 selected_container_name = context.get("selected_container_name")
                 if not isinstance(selected_container_id, str) or not selected_container_id:
                     continue
-                label = "Restart Selected Container"
-                if isinstance(selected_container_name, str) and selected_container_name:
-                    label = f"Restart {selected_container_name}"
+                selected_name = (
+                    selected_container_name
+                    if isinstance(selected_container_name, str) and selected_container_name
+                    else selected_container_id
+                )
                 items.append(
                     PaletteItem(
-                        label=label,
+                        label=f"Restart {selected_name}",
                         command_text=f"docker restart {shlex.quote(selected_container_id)}",
+                        description=command_name,
+                    )
+                )
+                continue
+            if command_name in {"docker.stop", "docker.remove"}:
+                selected_container_id = context.get("selected_container_id")
+                selected_container_name = context.get("selected_container_name")
+                if not isinstance(selected_container_id, str) or not selected_container_id:
+                    continue
+                selected_name = (
+                    selected_container_name
+                    if isinstance(selected_container_name, str) and selected_container_name
+                    else selected_container_id
+                )
+                verb = "Stop" if command_name == "docker.stop" else "Remove"
+                subcommand = "stop" if command_name == "docker.stop" else "remove"
+                items.append(
+                    PaletteItem(
+                        label=f"{verb} {selected_name}",
+                        command_text=f"docker {subcommand} {shlex.quote(selected_container_id)}",
+                        description=command_name,
+                    )
+                )
+                continue
+            if command_name in {"cron.enable", "cron.disable"}:
+                selected_cron_command = context.get("selected_cron_command")
+                if not isinstance(selected_cron_command, str) or not selected_cron_command:
+                    continue
+                verb = "Enable" if command_name == "cron.enable" else "Disable"
+                subcommand = "enable" if command_name == "cron.enable" else "disable"
+                items.append(
+                    PaletteItem(
+                        label=f"{verb} Selected Cron Job",
+                        command_text=f"cron {subcommand} {shlex.quote(selected_cron_command)}",
                         description=command_name,
                     )
                 )

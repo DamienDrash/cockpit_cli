@@ -157,7 +157,12 @@ class CronPanel(Static):
             lines.append(f"enabled={'yes' if selected.enabled else 'no'}")
             if selected.comment:
                 lines.append(f"comment={selected.comment}")
-        lines.extend(["", "Use Up/Down to inspect jobs. Press r to refresh."])
+        lines.extend(
+            [
+                "",
+                "Use Up/Down to inspect jobs. Press r to refresh. Use /cron enable or /cron disable for the selected job.",
+            ]
+        )
         return "\n".join(lines)
 
     def _selected_job(self) -> CronJob | None:

@@ -26,6 +26,7 @@ class SSHCommandRunner:
         command: str,
         *,
         timeout_seconds: int = 5,
+        input_text: str | None = None,
     ) -> SSHCommandResult:
         try:
             completed = subprocess.run(
@@ -44,6 +45,7 @@ class SSHCommandRunner:
                 text=True,
                 encoding="utf-8",
                 errors="replace",
+                input=input_text,
                 check=False,
                 timeout=max(1, timeout_seconds),
             )

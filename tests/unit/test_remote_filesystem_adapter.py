@@ -10,7 +10,15 @@ class FakeSSHCommandRunner:
     def __init__(self, result: SSHCommandResult) -> None:
         self._result = result
 
-    def run(self, target_ref: str, command: str, *, timeout_seconds: int = 5) -> SSHCommandResult:
+    def run(
+        self,
+        target_ref: str,
+        command: str,
+        *,
+        timeout_seconds: int = 5,
+        input_text: str | None = None,
+    ) -> SSHCommandResult:
+        del timeout_seconds, input_text
         return SSHCommandResult(
             target_ref=target_ref,
             command=command,

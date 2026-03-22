@@ -6,7 +6,7 @@ build-backend = "hatchling.build"
 name = "cockpit"
 version = "0.1.0"
 description = "Keyboard-first TUI platform for developer workspaces."
-readme = "docs/superpowers/specs/2026-03-22-core-platform-spine-design.md"
+readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
   "PyYAML>=6.0",
@@ -22,4 +22,3 @@ packages = ["src/cockpit"]
 [tool.pytest.ini_options]
 pythonpath = ["src"]
 testpaths = ["tests"]
-

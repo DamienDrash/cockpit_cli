@@ -6,6 +6,7 @@ from hashlib import sha1
 from pathlib import Path
 from urllib.parse import urlparse
 
+from cockpit.application.services.connection_service import ConnectionService
 from cockpit.domain.models.workspace import SessionTarget, Workspace
 from cockpit.infrastructure.persistence.repositories import WorkspaceRepository
 from cockpit.shared.enums import SessionTargetKind
@@ -14,8 +15,13 @@ from cockpit.shared.enums import SessionTargetKind
 class WorkspaceService:
     """Resolves local workspace metadata and persistence."""
 
-    def __init__(self, workspace_repository: WorkspaceRepository) -> None:
+    def __init__(
+        self,
+        workspace_repository: WorkspaceRepository,
+        connection_service: ConnectionService | None = None,
+    ) -> None:
         self._workspace_repository = workspace_repository
+        self._connection_service = connection_service
 
     def open_path(self, raw_path: str) -> Workspace:
         target, root_path, workspace_name = self._resolve_workspace_target(raw_path)
@@ -40,6 +46,10 @@ class WorkspaceService:
         return self._workspace_repository.get(workspace_id)
 
     def _resolve_workspace_target(self, raw_path: str) -> tuple[SessionTarget, str, str]:
+        profile_target = self._resolve_profile_target(raw_path)
+        if profile_target is not None:
+            return profile_target
+
         parsed = urlparse(raw_path)
         if parsed.scheme == "ssh":
             if not parsed.netloc:
@@ -56,6 +66,27 @@ class WorkspaceService:
             raise NotADirectoryError(f"Workspace path '{path}' is not a directory.")
         target = SessionTarget(kind=SessionTargetKind.LOCAL)
         return target, str(path), path.name or str(path)
+
+    def _resolve_profile_target(self, raw_path: str) -> tuple[SessionTarget, str, str] | None:
+        if not raw_path.startswith("@"):
+            return None
+        if self._connection_service is None:
+            raise ValueError("Connection profiles are not configured for this workspace.")
+
+        alias_expression = raw_path[1:]
+        alias, separator, override_path = alias_expression.partition(":")
+        if not alias:
+            raise ValueError("Connection profile paths must look like '@alias' or '@alias:/path'.")
+
+        profile = self._connection_service.get(alias)
+        if profile is None:
+            raise FileNotFoundError(f"Connection profile '{alias}' is not configured.")
+
+        remote_path = override_path if separator else profile.default_path
+        remote_path = remote_path or "."
+        target = SessionTarget(kind=SessionTargetKind.SSH, ref=profile.target_ref)
+        workspace_name = Path(remote_path).name or alias
+        return target, remote_path, workspace_name
 
     @staticmethod
     def _workspace_id_for_target(target: SessionTarget, root_path: str) -> str:

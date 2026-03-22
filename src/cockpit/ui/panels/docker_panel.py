@@ -175,7 +175,7 @@ class DockerPanel(Static):
         lines.extend(
             [
                 "",
-                "Use Up/Down to inspect containers. Press r to refresh. Press F8 to restart the selected container.",
+                "Use Up/Down to inspect containers. Press r to refresh. Press F8/F9/F10 to restart, stop, or remove the selected container.",
             ]
         )
         return "\n".join(lines)

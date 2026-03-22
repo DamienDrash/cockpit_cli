@@ -1,7 +1,11 @@
 import unittest
 
 from cockpit.application.handlers.base import ConfirmationRequiredError
-from cockpit.application.handlers.docker_handlers import RestartDockerContainerHandler
+from cockpit.application.handlers.docker_handlers import (
+    RemoveDockerContainerHandler,
+    RestartDockerContainerHandler,
+    StopDockerContainerHandler,
+)
 from cockpit.domain.commands.command import Command
 from cockpit.infrastructure.docker.docker_adapter import DockerActionResult
 from cockpit.shared.enums import CommandSource, SessionTargetKind
@@ -9,7 +13,7 @@ from cockpit.shared.enums import CommandSource, SessionTargetKind
 
 class FakeDockerAdapter:
     def __init__(self) -> None:
-        self.calls: list[tuple[str, SessionTargetKind, str | None]] = []
+        self.calls: list[tuple[str, str, SessionTargetKind, str | None]] = []
 
     def restart_container(
         self,
@@ -18,8 +22,28 @@ class FakeDockerAdapter:
         target_kind: SessionTargetKind = SessionTargetKind.LOCAL,
         target_ref: str | None = None,
     ) -> DockerActionResult:
-        self.calls.append((container_id, target_kind, target_ref))
+        self.calls.append(("restart", container_id, target_kind, target_ref))
         return DockerActionResult(success=True, message=f"restarted {container_id}")
+
+    def stop_container(
+        self,
+        container_id: str,
+        *,
+        target_kind: SessionTargetKind = SessionTargetKind.LOCAL,
+        target_ref: str | None = None,
+    ) -> DockerActionResult:
+        self.calls.append(("stop", container_id, target_kind, target_ref))
+        return DockerActionResult(success=True, message=f"stopped {container_id}")
+
+    def remove_container(
+        self,
+        container_id: str,
+        *,
+        target_kind: SessionTargetKind = SessionTargetKind.LOCAL,
+        target_ref: str | None = None,
+    ) -> DockerActionResult:
+        self.calls.append(("remove", container_id, target_kind, target_ref))
+        return DockerActionResult(success=True, message=f"removed {container_id}")
 
 
 class RestartDockerContainerHandlerTests(unittest.TestCase):
@@ -70,10 +94,50 @@ class RestartDockerContainerHandlerTests(unittest.TestCase):
         self.assertTrue(result.success)
         self.assertEqual(
             adapter.calls,
-            [("abc123", SessionTargetKind.SSH, "dev@example.com")],
+            [("restart", "abc123", SessionTargetKind.SSH, "dev@example.com")],
         )
         self.assertEqual(result.data["refresh_panel_id"], "docker-panel")
         self.assertEqual(result.data["restarted_container_id"], "abc123")
+
+    def test_stops_selected_container_after_confirmation(self) -> None:
+        adapter = FakeDockerAdapter()
+        handler = StopDockerContainerHandler(adapter)
+        command = Command(
+            id="cmd_3",
+            source=CommandSource.KEYBINDING,
+            name="docker.stop",
+            args={"confirmed": True},
+            context={"selected_container_id": "abc123"},
+        )
+
+        result = handler(command)
+
+        self.assertTrue(result.success)
+        self.assertEqual(
+            adapter.calls,
+            [("stop", "abc123", SessionTargetKind.LOCAL, None)],
+        )
+        self.assertEqual(result.data["stopped_container_id"], "abc123")
+
+    def test_removes_selected_container_after_confirmation(self) -> None:
+        adapter = FakeDockerAdapter()
+        handler = RemoveDockerContainerHandler(adapter)
+        command = Command(
+            id="cmd_4",
+            source=CommandSource.KEYBINDING,
+            name="docker.remove",
+            args={"confirmed": True},
+            context={"selected_container_id": "abc123"},
+        )
+
+        result = handler(command)
+
+        self.assertTrue(result.success)
+        self.assertEqual(
+            adapter.calls,
+            [("remove", "abc123", SessionTargetKind.LOCAL, None)],
+        )
+        self.assertEqual(result.data["removed_container_id"], "abc123")
 
 
 if __name__ == "__main__":

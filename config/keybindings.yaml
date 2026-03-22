@@ -21,3 +21,7 @@ bindings:
     action: terminal.focus
   - key: f8
     action: docker.restart
+  - key: f9
+    action: docker.stop
+  - key: f10
+    action: docker.remove

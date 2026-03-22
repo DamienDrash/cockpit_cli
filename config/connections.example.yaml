@@ -1,0 +1,9 @@
+connections:
+  prod:
+    target: deploy@example.com
+    default_path: /srv/app
+    description: Production deployment target
+  stage:
+    target: stage@example.com
+    default_path: /srv/app
+    description: Staging deployment target

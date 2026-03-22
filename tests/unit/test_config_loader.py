@@ -25,6 +25,10 @@ class ConfigLoaderTests(unittest.TestCase):
                 "commands:\n  - workspace.open\n",
                 encoding="utf-8",
             )
+            (root / "config" / "connections.yaml").write_text(
+                "connections:\n  dev:\n    target: dev@example.com\n",
+                encoding="utf-8",
+            )
             (root / "config" / "themes" / "default.tcss").write_text(
                 "Screen { layout: vertical; }\n",
                 encoding="utf-8",
@@ -35,6 +39,10 @@ class ConfigLoaderTests(unittest.TestCase):
             self.assertEqual(loader.load_layout_definition()["id"], "default")
             self.assertEqual(loader.load_keybindings()["bindings"][0]["key"], "ctrl+k")
             self.assertEqual(loader.load_command_catalog()["commands"][0], "workspace.open")
+            self.assertEqual(
+                loader.load_connections()["connections"]["dev"]["target"],
+                "dev@example.com",
+            )
             self.assertIn("layout: vertical", loader.load_theme())
 
 

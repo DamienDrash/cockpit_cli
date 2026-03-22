@@ -9,7 +9,15 @@ class FakeSSHCommandRunner:
     def __init__(self, results: list[SSHCommandResult]) -> None:
         self._results = list(results)
 
-    def run(self, target_ref: str, command: str, *, timeout_seconds: int = 5) -> SSHCommandResult:
+    def run(
+        self,
+        target_ref: str,
+        command: str,
+        *,
+        timeout_seconds: int = 5,
+        input_text: str | None = None,
+    ) -> SSHCommandResult:
+        del timeout_seconds, input_text
         if not self._results:
             raise AssertionError("No fake SSH result remaining.")
         result = self._results.pop(0)

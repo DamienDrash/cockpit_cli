@@ -8,18 +8,31 @@ from cockpit.shared.enums import SessionTargetKind
 
 
 class FakeSSHCommandRunner:
-    def __init__(self, result: SSHCommandResult) -> None:
-        self._result = result
+    def __init__(self, results: list[SSHCommandResult]) -> None:
+        self._results = list(results)
+        self.inputs: list[str | None] = []
 
-    def run(self, target_ref: str, command: str, *, timeout_seconds: int = 5) -> SSHCommandResult:
+    def run(
+        self,
+        target_ref: str,
+        command: str,
+        *,
+        timeout_seconds: int = 5,
+        input_text: str | None = None,
+    ) -> SSHCommandResult:
+        del timeout_seconds
+        self.inputs.append(input_text)
+        if not self._results:
+            raise AssertionError("No fake SSH result remaining.")
+        result = self._results.pop(0)
         return SSHCommandResult(
             target_ref=target_ref,
             command=command,
-            returncode=self._result.returncode,
-            stdout=self._result.stdout,
-            stderr=self._result.stderr,
-            is_available=self._result.is_available,
-            message=self._result.message,
+            returncode=result.returncode,
+            stdout=result.stdout,
+            stderr=result.stderr,
+            is_available=result.is_available,
+            message=result.message,
         )
 
 
@@ -63,13 +76,15 @@ class CronAdapterTests(unittest.TestCase):
     def test_parses_remote_crontab_listing(self) -> None:
         adapter = CronAdapter(
             ssh_command_runner=FakeSSHCommandRunner(
-                SSHCommandResult(
+                [
+                    SSHCommandResult(
                     target_ref="dev@example.com",
                     command="crontab -l",
                     returncode=0,
                     stdout="@daily /usr/local/bin/cleanup\n",
                     stderr="",
                 )
+                ]
             )
         )
 
@@ -81,6 +96,37 @@ class CronAdapterTests(unittest.TestCase):
         self.assertEqual(len(snapshot.jobs), 1)
         self.assertEqual(snapshot.jobs[0].schedule, "@daily")
         self.assertEqual(snapshot.jobs[0].command, "/usr/local/bin/cleanup")
+
+    def test_can_disable_remote_job(self) -> None:
+        runner = FakeSSHCommandRunner(
+            [
+                SSHCommandResult(
+                    target_ref="dev@example.com",
+                    command="crontab -l",
+                    returncode=0,
+                    stdout="0 2 * * * /usr/local/bin/backup\n",
+                    stderr="",
+                ),
+                SSHCommandResult(
+                    target_ref="dev@example.com",
+                    command="cat | crontab -",
+                    returncode=0,
+                    stdout="",
+                    stderr="",
+                ),
+            ]
+        )
+        adapter = CronAdapter(ssh_command_runner=runner)
+
+        result = adapter.set_job_enabled(
+            "/usr/local/bin/backup",
+            enabled=False,
+            target_kind=SessionTargetKind.SSH,
+            target_ref="dev@example.com",
+        )
+
+        self.assertTrue(result.success)
+        self.assertEqual(runner.inputs[-1], "# 0 2 * * * /usr/local/bin/backup\n")
 
 
 if __name__ == "__main__":

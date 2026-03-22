@@ -2,22 +2,34 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 from cockpit.application.handlers.base import (
     CommandContextError,
     ConfirmationRequiredError,
     DispatchResult,
 )
 from cockpit.domain.commands.command import Command
-from cockpit.infrastructure.docker.docker_adapter import DockerAdapter
+from cockpit.infrastructure.docker.docker_adapter import DockerActionResult, DockerAdapter
 from cockpit.shared.enums import SessionTargetKind
 from cockpit.shared.risk import classify_target_risk, risk_presentation
 
 
-class RestartDockerContainerHandler:
-    """Restart the selected docker container with an explicit confirmation step."""
+@dataclass(slots=True, frozen=True)
+class DockerActionSpec:
+    command_name: str
+    action_name: str
+    confirmation_verb: str
+    success_key: str
+    success_message: str
 
-    def __init__(self, docker_adapter: DockerAdapter) -> None:
+
+class DockerContainerActionHandler:
+    """Run a guarded mutating action for the selected docker container."""
+
+    def __init__(self, docker_adapter: DockerAdapter, spec: DockerActionSpec) -> None:
         self._docker_adapter = docker_adapter
+        self._spec = spec
 
     def __call__(self, command: Command) -> DispatchResult:
         container_id = self._resolve_container_id(command)
@@ -37,19 +49,19 @@ class RestartDockerContainerHandler:
             )
             risk_label = risk_presentation(risk_level).label
             raise ConfirmationRequiredError(
-                f"Confirm docker restart for {display_name} on {risk_label}.",
+                f"Confirm docker {self._spec.action_name} for {display_name} on {risk_label}.",
                 payload={
                     "pending_command_name": command.name,
                     "pending_args": dict(command.args),
                     "pending_context": dict(command.context),
                     "confirmation_message": (
-                        f"Restart container {display_name}? "
+                        f"{self._spec.confirmation_verb} container {display_name}? "
                         "Press Enter/Y to confirm or Esc/N to cancel."
                     ),
                 },
             )
 
-        result = self._docker_adapter.restart_container(
+        result = self._run_action(
             container_id,
             target_kind=target_kind,
             target_ref=target_ref,
@@ -59,9 +71,36 @@ class RestartDockerContainerHandler:
             message=result.message,
             data={
                 "refresh_panel_id": "docker-panel",
-                "restarted_container_id": container_id,
+                self._spec.success_key: container_id,
             },
         )
+
+    def _run_action(
+        self,
+        container_id: str,
+        *,
+        target_kind: SessionTargetKind,
+        target_ref: str | None,
+    ) -> DockerActionResult:
+        if self._spec.action_name == "restart":
+            return self._docker_adapter.restart_container(
+                container_id,
+                target_kind=target_kind,
+                target_ref=target_ref,
+            )
+        if self._spec.action_name == "stop":
+            return self._docker_adapter.stop_container(
+                container_id,
+                target_kind=target_kind,
+                target_ref=target_ref,
+            )
+        if self._spec.action_name == "remove":
+            return self._docker_adapter.remove_container(
+                container_id,
+                target_kind=target_kind,
+                target_ref=target_ref,
+            )
+        raise CommandContextError(f"Unsupported docker action '{self._spec.action_name}'.")
 
     def _resolve_container_id(self, command: Command) -> str:
         argv = command.args.get("argv", [])
@@ -91,3 +130,45 @@ class RestartDockerContainerHandler:
             except ValueError:
                 return SessionTargetKind.LOCAL
         return SessionTargetKind.LOCAL
+
+
+class RestartDockerContainerHandler(DockerContainerActionHandler):
+    def __init__(self, docker_adapter: DockerAdapter) -> None:
+        super().__init__(
+            docker_adapter,
+            DockerActionSpec(
+                command_name="docker.restart",
+                action_name="restart",
+                confirmation_verb="Restart",
+                success_key="restarted_container_id",
+                success_message="Restarted",
+            ),
+        )
+
+
+class StopDockerContainerHandler(DockerContainerActionHandler):
+    def __init__(self, docker_adapter: DockerAdapter) -> None:
+        super().__init__(
+            docker_adapter,
+            DockerActionSpec(
+                command_name="docker.stop",
+                action_name="stop",
+                confirmation_verb="Stop",
+                success_key="stopped_container_id",
+                success_message="Stopped",
+            ),
+        )
+
+
+class RemoveDockerContainerHandler(DockerContainerActionHandler):
+    def __init__(self, docker_adapter: DockerAdapter) -> None:
+        super().__init__(
+            docker_adapter,
+            DockerActionSpec(
+                command_name="docker.remove",
+                action_name="remove",
+                confirmation_verb="Remove",
+                success_key="removed_container_id",
+                success_message="Removed",
+            ),
+        )

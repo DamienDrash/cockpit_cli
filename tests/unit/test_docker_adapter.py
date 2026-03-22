@@ -11,7 +11,15 @@ class FakeSSHCommandRunner:
     def __init__(self, result: SSHCommandResult) -> None:
         self._result = result
 
-    def run(self, target_ref: str, command: str, *, timeout_seconds: int = 5) -> SSHCommandResult:
+    def run(
+        self,
+        target_ref: str,
+        command: str,
+        *,
+        timeout_seconds: int = 5,
+        input_text: str | None = None,
+    ) -> SSHCommandResult:
+        del timeout_seconds, input_text
         return SSHCommandResult(
             target_ref=target_ref,
             command=command,
@@ -137,6 +145,50 @@ class DockerAdapterTests(unittest.TestCase):
         )
 
         result = adapter.restart_container(
+            "abc123",
+            target_kind=SessionTargetKind.SSH,
+            target_ref="dev@example.com",
+        )
+
+        self.assertTrue(result.success)
+        self.assertEqual(result.message, "abc123")
+
+    def test_stops_remote_container(self) -> None:
+        adapter = DockerAdapter(
+            ssh_command_runner=FakeSSHCommandRunner(
+                SSHCommandResult(
+                    target_ref="dev@example.com",
+                    command="docker stop abc123",
+                    returncode=0,
+                    stdout="abc123\n",
+                    stderr="",
+                )
+            )
+        )
+
+        result = adapter.stop_container(
+            "abc123",
+            target_kind=SessionTargetKind.SSH,
+            target_ref="dev@example.com",
+        )
+
+        self.assertTrue(result.success)
+        self.assertEqual(result.message, "abc123")
+
+    def test_removes_remote_container(self) -> None:
+        adapter = DockerAdapter(
+            ssh_command_runner=FakeSSHCommandRunner(
+                SSHCommandResult(
+                    target_ref="dev@example.com",
+                    command="docker rm abc123",
+                    returncode=0,
+                    stdout="abc123\n",
+                    stderr="",
+                )
+            )
+        )
+
+        result = adapter.remove_container(
             "abc123",
             target_kind=SessionTargetKind.SSH,
             target_ref="dev@example.com",

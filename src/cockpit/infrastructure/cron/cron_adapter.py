@@ -25,8 +25,14 @@ class CronSnapshot:
     message: str | None = None
 
 
+@dataclass(slots=True, frozen=True)
+class CronWriteResult:
+    success: bool
+    message: str
+
+
 class CronAdapter:
-    """Read crontab entries from local or SSH-backed targets."""
+    """Read and cautiously rewrite crontab entries for local or SSH-backed targets."""
 
     def __init__(self, ssh_command_runner: SSHCommandRunner | None = None) -> None:
         self._ssh_command_runner = ssh_command_runner
@@ -192,3 +198,156 @@ class CronAdapter:
             return True
         first_token = line.split(maxsplit=1)[0]
         return "=" in first_token
+
+    def set_job_enabled(
+        self,
+        command: str,
+        *,
+        enabled: bool,
+        target_kind: SessionTargetKind = SessionTargetKind.LOCAL,
+        target_ref: str | None = None,
+    ) -> CronWriteResult:
+        if target_kind is SessionTargetKind.SSH:
+            return self._set_remote_job_enabled(command, enabled=enabled, target_ref=target_ref)
+        return self._set_local_job_enabled(command, enabled=enabled)
+
+    def _set_local_job_enabled(self, command: str, *, enabled: bool) -> CronWriteResult:
+        try:
+            read_result = subprocess.run(
+                ("crontab", "-l"),
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                check=False,
+            )
+        except FileNotFoundError:
+            return CronWriteResult(
+                success=False,
+                message="The crontab executable is not available in this environment.",
+            )
+        if read_result.returncode != 0 and "no crontab" not in read_result.stderr.lower():
+            return CronWriteResult(
+                success=False,
+                message=read_result.stderr.strip() or "crontab -l failed.",
+            )
+        updated_text, changed = self._rewrite_job_enabled(read_result.stdout, command, enabled=enabled)
+        if not changed:
+            state = "enabled" if enabled else "disabled"
+            return CronWriteResult(
+                success=False,
+                message=f"Cron job '{command}' is already {state} or was not found.",
+            )
+        write_result = subprocess.run(
+            ("crontab", "-"),
+            input=updated_text,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            check=False,
+        )
+        if write_result.returncode != 0:
+            return CronWriteResult(
+                success=False,
+                message=write_result.stderr.strip() or "Failed to write updated crontab.",
+            )
+        state = "Enabled" if enabled else "Disabled"
+        return CronWriteResult(success=True, message=f"{state} cron job {command}.")
+
+    def _set_remote_job_enabled(
+        self,
+        command: str,
+        *,
+        enabled: bool,
+        target_ref: str | None,
+    ) -> CronWriteResult:
+        if not target_ref:
+            return CronWriteResult(
+                success=False,
+                message="No SSH target is configured for this workspace.",
+            )
+        if self._ssh_command_runner is None:
+            return CronWriteResult(
+                success=False,
+                message="SSH crontab inspection is not configured.",
+            )
+        read_result = self._ssh_command_runner.run(target_ref, "crontab -l")
+        if not read_result.is_available:
+            return CronWriteResult(
+                success=False,
+                message=read_result.message or "SSH is unavailable.",
+            )
+        if read_result.returncode != 0 and "no crontab" not in read_result.stderr.lower():
+            return CronWriteResult(
+                success=False,
+                message=read_result.stderr.strip() or "crontab -l failed.",
+            )
+        updated_text, changed = self._rewrite_job_enabled(read_result.stdout, command, enabled=enabled)
+        if not changed:
+            state = "enabled" if enabled else "disabled"
+            return CronWriteResult(
+                success=False,
+                message=f"Cron job '{command}' is already {state} or was not found.",
+            )
+        write_result = self._ssh_command_runner.run(
+            target_ref,
+            "cat | crontab -",
+            timeout_seconds=10,
+            input_text=updated_text,
+        )
+        if not write_result.is_available:
+            return CronWriteResult(
+                success=False,
+                message=write_result.message or "SSH is unavailable.",
+            )
+        if write_result.returncode != 0:
+            return CronWriteResult(
+                success=False,
+                message=write_result.stderr.strip() or "Failed to write updated remote crontab.",
+            )
+        state = "Enabled" if enabled else "Disabled"
+        return CronWriteResult(success=True, message=f"{state} cron job {command}.")
+
+    def _rewrite_job_enabled(
+        self,
+        raw_output: str,
+        command: str,
+        *,
+        enabled: bool,
+    ) -> tuple[str, bool]:
+        updated_lines: list[str] = []
+        changed = False
+        for raw_line in raw_output.splitlines():
+            rewritten, line_changed = self._rewrite_line(raw_line, command, enabled=enabled)
+            updated_lines.append(rewritten)
+            changed = changed or line_changed
+        return ("\n".join(updated_lines) + ("\n" if updated_lines else "")), changed
+
+    def _rewrite_line(self, raw_line: str, command: str, *, enabled: bool) -> tuple[str, bool]:
+        stripped = raw_line.strip()
+        if not stripped:
+            return raw_line, False
+
+        candidate = stripped[1:].strip() if stripped.startswith("#") else stripped
+        if not self._looks_like_job(candidate):
+            return raw_line, False
+        parsed = self._parse_job_line(
+            candidate,
+            enabled=not stripped.startswith("#"),
+            comment=None,
+        )
+        if parsed is None or parsed.command != command:
+            return raw_line, False
+        if parsed.enabled == enabled:
+            return raw_line, False
+
+        leading = raw_line[: len(raw_line) - len(raw_line.lstrip())]
+        if enabled:
+            remainder = raw_line.lstrip()
+            if remainder.startswith("#"):
+                remainder = remainder[1:]
+            if remainder.startswith(" "):
+                remainder = remainder[1:]
+            return f"{leading}{remainder}", True
+        return f"{leading}# {candidate}", True

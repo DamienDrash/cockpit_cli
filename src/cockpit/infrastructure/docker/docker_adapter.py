@@ -178,6 +178,34 @@ class DockerAdapter:
             message=result.stdout.strip() or f"Restarted docker container {container_id}.",
         )
 
+    def stop_container(
+        self,
+        container_id: str,
+        *,
+        target_kind: SessionTargetKind = SessionTargetKind.LOCAL,
+        target_ref: str | None = None,
+    ) -> DockerActionResult:
+        return self._run_container_action(
+            "stop",
+            container_id,
+            target_kind=target_kind,
+            target_ref=target_ref,
+        )
+
+    def remove_container(
+        self,
+        container_id: str,
+        *,
+        target_kind: SessionTargetKind = SessionTargetKind.LOCAL,
+        target_ref: str | None = None,
+    ) -> DockerActionResult:
+        return self._run_container_action(
+            "rm",
+            container_id,
+            target_kind=target_kind,
+            target_ref=target_ref,
+        )
+
     def _restart_remote_container(
         self,
         container_id: str,
@@ -210,4 +238,73 @@ class DockerAdapter:
         return DockerActionResult(
             success=True,
             message=result.stdout.strip() or f"Restarted docker container {container_id}.",
+        )
+
+    def _run_container_action(
+        self,
+        action: str,
+        container_id: str,
+        *,
+        target_kind: SessionTargetKind,
+        target_ref: str | None,
+    ) -> DockerActionResult:
+        verb = {
+            "stop": "Stopped",
+            "rm": "Removed",
+        }.get(action, action.title())
+        if target_kind is SessionTargetKind.SSH:
+            return self._run_remote_container_action(action, container_id, target_ref, verb=verb)
+
+        try:
+            result = self._run_docker(action, container_id)
+        except FileNotFoundError:
+            return DockerActionResult(
+                success=False,
+                message="The docker executable is not available in this environment.",
+            )
+        if result.returncode != 0:
+            return DockerActionResult(
+                success=False,
+                message=result.stderr.strip() or f"Docker {action} failed for {container_id}.",
+            )
+        return DockerActionResult(
+            success=True,
+            message=result.stdout.strip() or f"{verb} docker container {container_id}.",
+        )
+
+    def _run_remote_container_action(
+        self,
+        action: str,
+        container_id: str,
+        target_ref: str | None,
+        *,
+        verb: str,
+    ) -> DockerActionResult:
+        if not target_ref:
+            return DockerActionResult(
+                success=False,
+                message="No SSH target is configured for this workspace.",
+            )
+        if self._ssh_command_runner is None:
+            return DockerActionResult(
+                success=False,
+                message="SSH docker inspection is not configured.",
+            )
+        result = self._ssh_command_runner.run(
+            target_ref,
+            f"docker {action} {shlex.quote(container_id)}",
+        )
+        if not result.is_available:
+            return DockerActionResult(
+                success=False,
+                message=result.message or "SSH is unavailable.",
+            )
+        if result.returncode != 0:
+            return DockerActionResult(
+                success=False,
+                message=result.stderr.strip() or f"Docker {action} failed for {container_id}.",
+            )
+        return DockerActionResult(
+            success=True,
+            message=result.stdout.strip() or f"{verb} docker container {container_id}.",
         )
