@@ -72,6 +72,7 @@ class TerminalBuffer:
             return
         if character == "\n":
             state.row += 1
+            state.col = 0
             self._ensure_row(state, state.row)
             return
         if character in {"\b", "\x7f"}:

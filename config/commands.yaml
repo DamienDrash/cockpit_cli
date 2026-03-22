@@ -10,6 +10,10 @@ commands:
   - panel.focus_next
   - terminal.focus
   - terminal.restart
+  - terminal.search
+  - terminal.search_next
+  - terminal.search_prev
+  - terminal.export
   - docker.restart
   - docker.stop
   - docker.remove

@@ -32,7 +32,7 @@ class CockpitCliTests(unittest.TestCase):
     def test_completion_script_mentions_commands(self) -> None:
         script = completion_script("bash")
 
-        self.assertIn("open resume connections completion", script)
+        self.assertIn("open resume connections datasources admin completion", script)
 
     def test_connections_listing_handles_empty_config(self) -> None:
         text = list_connections_text()

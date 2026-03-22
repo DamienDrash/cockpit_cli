@@ -94,6 +94,7 @@ class PluginLoaderTests(unittest.TestCase):
                 self.assertEqual(loaded, ["fake_plugin"])
                 self.assertIsNotNone(registry.spec_for_panel_id("fake-panel"))
                 self.assertIn("fake.echo", command_catalog)
+                self.assertIsNone(loader.manifest_for_module("fake_plugin"))
             finally:
                 sys.path.remove(str(root))
                 sys.modules.pop("fake_plugin", None)

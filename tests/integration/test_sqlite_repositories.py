@@ -4,15 +4,20 @@ from tempfile import TemporaryDirectory
 import unittest
 
 from cockpit.domain.commands.command import CommandAuditEntry, CommandHistoryEntry
+from cockpit.domain.models.datasource import DataSourceProfile
 from cockpit.domain.models.layout import Layout, PanelRef, SplitNode, TabLayout
+from cockpit.domain.models.plugin import InstalledPlugin
 from cockpit.domain.models.session import Session
 from cockpit.domain.models.workspace import SessionTarget, Workspace
 from cockpit.infrastructure.persistence.repositories import (
     AuditLogRepository,
     CommandHistoryRepository,
+    DataSourceProfileRepository,
+    InstalledPluginRepository,
     LayoutRepository,
     SessionRepository,
     SnapshotRepository,
+    WebAdminStateRepository,
     WorkspaceRepository,
 )
 from cockpit.infrastructure.persistence.sqlite_store import SQLiteStore
@@ -216,6 +221,46 @@ class SQLiteRepositoryTests(unittest.TestCase):
             self.assertTrue(history[0]["success"])
             self.assertEqual(audit[0]["action"], "workspace.open")
             self.assertEqual(audit[0]["metadata"]["root_path"], "/tmp/project")
+            store.close()
+
+    def test_datasource_plugin_and_web_admin_state_round_trip(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            store = SQLiteStore(Path(temp_dir) / "cockpit.db")
+            datasource_repo = DataSourceProfileRepository(store)
+            plugin_repo = InstalledPluginRepository(store)
+            web_admin_repo = WebAdminStateRepository(store)
+
+            datasource_repo.save(
+                DataSourceProfile(
+                    id="pg-main",
+                    name="Main Postgres",
+                    backend="postgres",
+                    connection_url="postgresql://localhost/app",
+                    capabilities=["can_query", "can_mutate"],
+                )
+            )
+            plugin_repo.save(
+                InstalledPlugin(
+                    id="plug_1",
+                    name="Notes Plugin",
+                    module="cockpit.plugins.notes_plugin",
+                    requirement="notes-plugin",
+                    version_pin="1.0.0",
+                    enabled=True,
+                    manifest={"summary": "notes"},
+                )
+            )
+            web_admin_repo.save("web_admin:last_page", {"page": "/plugins"})
+
+            datasource = datasource_repo.get("pg-main")
+            plugins = plugin_repo.list_all()
+            state = web_admin_repo.get("web_admin:last_page")
+
+            self.assertIsNotNone(datasource)
+            assert datasource is not None
+            self.assertEqual(datasource.backend, "postgres")
+            self.assertEqual(plugins[0].version_pin, "1.0.0")
+            self.assertEqual(state, {"page": "/plugins"})
             store.close()
 
 

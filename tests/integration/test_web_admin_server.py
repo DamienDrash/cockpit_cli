@@ -1,0 +1,166 @@
+from dataclasses import dataclass
+from threading import Thread
+from urllib.parse import urlencode
+from urllib.request import Request, urlopen
+import time
+import unittest
+
+from cockpit.infrastructure.web.admin_server import LocalWebAdminServer
+
+
+@dataclass
+class _NamedObject:
+    name: str
+    id: str = "obj-1"
+    backend: str = "sqlite"
+    connection_url: str | None = None
+    target_ref: str | None = None
+    capabilities: list[str] = None  # type: ignore[assignment]
+    manifest: dict[str, object] = None  # type: ignore[assignment]
+    requirement: str = "sample"
+    version_pin: str | None = None
+    enabled: bool = True
+    status: str = "installed"
+
+    def __post_init__(self) -> None:
+        if self.capabilities is None:
+            self.capabilities = ["can_query"]
+        if self.manifest is None:
+            self.manifest = {"summary": "sample"}
+
+
+class FakeWebAdminService:
+    def __init__(self) -> None:
+        self.saved_pages: list[str] = []
+        self.created_datasources: list[dict[str, str]] = []
+
+    def diagnostics(self) -> dict[str, object]:
+        return {
+            "project_root": "/tmp/cockpit",
+            "python": "3.11",
+            "platform": "Linux",
+            "command_count": 4,
+            "panel_types": ["work", "db"],
+            "datasources": {"total_profiles": 0, "enabled_profiles": 0, "backends": []},
+            "plugins": {"count": 0, "enabled": 0, "modules": []},
+            "tools": {"git": True, "docker": True, "ssh": True},
+        }
+
+    def save_last_page(self, page: str) -> None:
+        self.saved_pages.append(page)
+
+    def list_datasources(self):
+        return []
+
+    def create_datasource(self, payload: dict[str, str]):
+        self.created_datasources.append(dict(payload))
+        return _NamedObject(name=payload.get("name", "New datasource"))
+
+    def delete_datasource(self, profile_id: str) -> None:
+        del profile_id
+
+    def inspect_datasource(self, profile_id: str):
+        del profile_id
+        return _NamedObject(name="Inspection")
+
+    def list_plugins(self):
+        return []
+
+    def install_plugin(self, payload: dict[str, str]):
+        del payload
+        return _NamedObject(name="Plugin")
+
+    def update_plugin(self, plugin_id: str):
+        del plugin_id
+        return _NamedObject(name="Plugin")
+
+    def toggle_plugin(self, plugin_id: str, enabled: bool):
+        del plugin_id, enabled
+        return _NamedObject(name="Plugin")
+
+    def pin_plugin(self, plugin_id: str, version_pin: str | None):
+        del plugin_id, version_pin
+        return _NamedObject(name="Plugin")
+
+    def remove_plugin(self, plugin_id: str) -> None:
+        del plugin_id
+
+    def list_layouts(self):
+        return []
+
+    def clone_layout(self, source_layout_id: str, target_layout_id: str, name: str | None = None):
+        del source_layout_id, target_layout_id, name
+        return _NamedObject(name="Layout")
+
+    def toggle_layout_tab(self, layout_id: str, tab_id: str):
+        del layout_id, tab_id
+        return _NamedObject(name="Layout")
+
+    def set_layout_ratio(self, layout_id: str, tab_id: str, ratio: float):
+        del layout_id, tab_id, ratio
+        return _NamedObject(name="Layout")
+
+    def add_panel_to_layout(self, layout_id: str, tab_id: str, panel_id: str, panel_type: str):
+        del layout_id, tab_id, panel_id, panel_type
+        return _NamedObject(name="Layout")
+
+    def remove_panel_from_layout(self, layout_id: str, tab_id: str, panel_id: str):
+        del layout_id, tab_id, panel_id
+        return _NamedObject(name="Layout")
+
+    def replace_panel_in_layout(
+        self,
+        layout_id: str,
+        tab_id: str,
+        existing_panel_id: str,
+        replacement_panel_id: str,
+        replacement_panel_type: str,
+    ):
+        del layout_id, tab_id, existing_panel_id, replacement_panel_id, replacement_panel_type
+        return _NamedObject(name="Layout")
+
+    def available_panels(self):
+        return []
+
+
+class LocalWebAdminServerTests(unittest.TestCase):
+    def test_serves_pages_and_handles_post_actions(self) -> None:
+        service = FakeWebAdminService()
+        server = LocalWebAdminServer(service, host="127.0.0.1", port=0)
+        thread = Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            base_url = None
+            for _ in range(50):
+                base_url = server.listen_url()
+                if base_url:
+                    break
+                time.sleep(0.05)
+            self.assertIsNotNone(base_url)
+            assert base_url is not None
+
+            with urlopen(f"{base_url}/diagnostics") as response:
+                body = response.read().decode("utf-8")
+            self.assertIn("Diagnostics", body)
+
+            request = Request(
+                f"{base_url}/datasources/create",
+                data=urlencode(
+                    {
+                        "name": "PG",
+                        "backend": "postgres",
+                        "connection_url": "postgresql://localhost/app",
+                    }
+                ).encode("utf-8"),
+                method="POST",
+            )
+            with urlopen(request) as response:
+                redirected_body = response.read().decode("utf-8")
+
+            self.assertIn("Created datasource PG.", redirected_body)
+            self.assertEqual(service.created_datasources[0]["backend"], "postgres")
+            self.assertIn("/diagnostics", service.saved_pages)
+            self.assertIn("/datasources", service.saved_pages)
+        finally:
+            server.shutdown()
+            thread.join(timeout=2)

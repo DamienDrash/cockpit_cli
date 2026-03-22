@@ -6,7 +6,9 @@ from datetime import datetime
 import json
 
 from cockpit.domain.commands.command import CommandAuditEntry, CommandHistoryEntry
+from cockpit.domain.models.datasource import DataSourceProfile
 from cockpit.domain.models.layout import Layout, PanelRef, SplitNode, TabLayout
+from cockpit.domain.models.plugin import InstalledPlugin
 from cockpit.domain.models.session import Session
 from cockpit.domain.models.workspace import SessionTarget, Workspace
 from cockpit.infrastructure.persistence.snapshot_codec import (
@@ -120,6 +122,12 @@ class LayoutRepository:
         if row is None:
             return None
         return _layout_from_payload(_load_json(row["payload_json"]))
+
+    def list_all(self) -> list[Layout]:
+        rows = self._store.fetchall(
+            "SELECT payload_json FROM layouts ORDER BY updated_at DESC, name ASC"
+        )
+        return [_layout_from_payload(_load_json(row["payload_json"])) for row in rows]
 
 
 class SessionRepository:
@@ -354,6 +362,185 @@ class AuditLogRepository:
         return [_load_json(row["payload_json"]) for row in rows]
 
 
+class DataSourceProfileRepository:
+    def __init__(self, store: SQLiteStore) -> None:
+        self._store = store
+
+    def save(self, profile: DataSourceProfile) -> None:
+        payload = profile.to_dict()
+        self._store.execute(
+            """
+            INSERT INTO datasource_profiles (
+                id,
+                name,
+                backend,
+                driver,
+                connection_url,
+                target_kind,
+                target_ref,
+                database_name,
+                risk_level,
+                enabled,
+                capabilities_json,
+                options_json,
+                secret_refs_json,
+                payload_json,
+                updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET
+                name = excluded.name,
+                backend = excluded.backend,
+                driver = excluded.driver,
+                connection_url = excluded.connection_url,
+                target_kind = excluded.target_kind,
+                target_ref = excluded.target_ref,
+                database_name = excluded.database_name,
+                risk_level = excluded.risk_level,
+                enabled = excluded.enabled,
+                capabilities_json = excluded.capabilities_json,
+                options_json = excluded.options_json,
+                secret_refs_json = excluded.secret_refs_json,
+                payload_json = excluded.payload_json,
+                updated_at = excluded.updated_at
+            """,
+            (
+                profile.id,
+                profile.name,
+                profile.backend,
+                profile.driver,
+                profile.connection_url,
+                profile.target_kind.value,
+                profile.target_ref,
+                profile.database_name,
+                profile.risk_level,
+                int(profile.enabled),
+                json.dumps(profile.capabilities, sort_keys=True),
+                json.dumps(profile.options, sort_keys=True),
+                json.dumps(profile.secret_refs, sort_keys=True),
+                json.dumps(payload, sort_keys=True),
+                utc_now().isoformat(),
+            ),
+        )
+
+    def get(self, profile_id: str) -> DataSourceProfile | None:
+        row = self._store.fetchone(
+            "SELECT payload_json FROM datasource_profiles WHERE id = ?",
+            (profile_id,),
+        )
+        if row is None:
+            return None
+        return _datasource_from_payload(_load_json(row["payload_json"]))
+
+    def list_all(self) -> list[DataSourceProfile]:
+        rows = self._store.fetchall(
+            "SELECT payload_json FROM datasource_profiles ORDER BY name"
+        )
+        return [_datasource_from_payload(_load_json(row["payload_json"])) for row in rows]
+
+    def delete(self, profile_id: str) -> None:
+        self._store.execute("DELETE FROM datasource_profiles WHERE id = ?", (profile_id,))
+
+
+class InstalledPluginRepository:
+    def __init__(self, store: SQLiteStore) -> None:
+        self._store = store
+
+    def save(self, plugin: InstalledPlugin) -> None:
+        payload = plugin.to_dict()
+        self._store.execute(
+            """
+            INSERT INTO installed_plugins (
+                id,
+                name,
+                module,
+                requirement,
+                version_pin,
+                install_path,
+                enabled,
+                source,
+                status,
+                manifest_json,
+                payload_json,
+                updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET
+                name = excluded.name,
+                module = excluded.module,
+                requirement = excluded.requirement,
+                version_pin = excluded.version_pin,
+                install_path = excluded.install_path,
+                enabled = excluded.enabled,
+                source = excluded.source,
+                status = excluded.status,
+                manifest_json = excluded.manifest_json,
+                payload_json = excluded.payload_json,
+                updated_at = excluded.updated_at
+            """,
+            (
+                plugin.id,
+                plugin.name,
+                plugin.module,
+                plugin.requirement,
+                plugin.version_pin,
+                plugin.install_path,
+                int(plugin.enabled),
+                plugin.source,
+                plugin.status,
+                json.dumps(plugin.manifest, sort_keys=True),
+                json.dumps(payload, sort_keys=True),
+                utc_now().isoformat(),
+            ),
+        )
+
+    def get(self, plugin_id: str) -> InstalledPlugin | None:
+        row = self._store.fetchone(
+            "SELECT payload_json FROM installed_plugins WHERE id = ?",
+            (plugin_id,),
+        )
+        if row is None:
+            return None
+        return _installed_plugin_from_payload(_load_json(row["payload_json"]))
+
+    def list_all(self) -> list[InstalledPlugin]:
+        rows = self._store.fetchall(
+            "SELECT payload_json FROM installed_plugins ORDER BY name"
+        )
+        return [_installed_plugin_from_payload(_load_json(row["payload_json"])) for row in rows]
+
+    def delete(self, plugin_id: str) -> None:
+        self._store.execute("DELETE FROM installed_plugins WHERE id = ?", (plugin_id,))
+
+
+class WebAdminStateRepository:
+    def __init__(self, store: SQLiteStore) -> None:
+        self._store = store
+
+    def save(self, key: str, value: dict[str, object]) -> None:
+        self._store.execute(
+            """
+            INSERT INTO web_admin_state (key, value_json, updated_at)
+            VALUES (?, ?, ?)
+            ON CONFLICT(key) DO UPDATE SET
+                value_json = excluded.value_json,
+                updated_at = excluded.updated_at
+            """,
+            (
+                key,
+                json.dumps(value, sort_keys=True),
+                utc_now().isoformat(),
+            ),
+        )
+
+    def get(self, key: str) -> dict[str, object] | None:
+        row = self._store.fetchone(
+            "SELECT value_json FROM web_admin_state WHERE key = ?",
+            (key,),
+        )
+        if row is None:
+            return None
+        return _load_json(row["value_json"])
+
+
 def _workspace_from_payload(payload: dict[str, object]) -> Workspace:
     target_payload = payload.get("target", {})
     if not isinstance(target_payload, dict):
@@ -461,4 +648,67 @@ def _session_from_payload(payload: dict[str, object]) -> Session:
         created_at=created_at,
         updated_at=updated_at,
         last_opened_at=_decode_datetime(payload.get("last_opened_at")),  # type: ignore[arg-type]
+    )
+
+
+def _datasource_from_payload(payload: dict[str, object]) -> DataSourceProfile:
+    return DataSourceProfile(
+        id=str(payload["id"]),
+        name=str(payload["name"]),
+        backend=str(payload["backend"]),
+        driver=str(payload["driver"]) if payload.get("driver") is not None else None,
+        connection_url=(
+            str(payload["connection_url"])
+            if payload.get("connection_url") is not None
+            else None
+        ),
+        target_kind=SessionTargetKind(str(payload.get("target_kind", "local"))),
+        target_ref=(
+            str(payload["target_ref"])
+            if payload.get("target_ref") is not None
+            else None
+        ),
+        database_name=(
+            str(payload["database_name"])
+            if payload.get("database_name") is not None
+            else None
+        ),
+        risk_level=str(payload.get("risk_level", "dev")),
+        capabilities=[str(item) for item in payload.get("capabilities", [])],
+        options=payload.get("options", {}) if isinstance(payload.get("options"), dict) else {},
+        secret_refs=(
+            payload.get("secret_refs", {})
+            if isinstance(payload.get("secret_refs"), dict)
+            else {}
+        ),
+        tags=[str(item) for item in payload.get("tags", [])],
+        managed_by_plugin=(
+            str(payload["managed_by_plugin"])
+            if payload.get("managed_by_plugin") is not None
+            else None
+        ),
+        enabled=bool(payload.get("enabled", True)),
+    )
+
+
+def _installed_plugin_from_payload(payload: dict[str, object]) -> InstalledPlugin:
+    return InstalledPlugin(
+        id=str(payload["id"]),
+        name=str(payload["name"]),
+        module=str(payload["module"]),
+        requirement=str(payload["requirement"]),
+        version_pin=(
+            str(payload["version_pin"])
+            if payload.get("version_pin") is not None
+            else None
+        ),
+        install_path=(
+            str(payload["install_path"])
+            if payload.get("install_path") is not None
+            else None
+        ),
+        enabled=bool(payload.get("enabled", True)),
+        source=str(payload["source"]) if payload.get("source") is not None else None,
+        manifest=payload.get("manifest", {}) if isinstance(payload.get("manifest"), dict) else {},
+        status=str(payload.get("status", "installed")),
     )

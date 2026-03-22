@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-DATABASE_VERSION = 1
+DATABASE_VERSION = 2
 
 CREATE_MIGRATIONS_TABLE = """
 CREATE TABLE IF NOT EXISTS schema_migrations (
@@ -94,5 +94,58 @@ V1_STATEMENTS: tuple[str, ...] = (
     """
     CREATE INDEX IF NOT EXISTS idx_audit_log_command_id
     ON audit_log(command_id);
+    """,
+)
+
+V2_STATEMENTS: tuple[str, ...] = (
+    """
+    CREATE TABLE IF NOT EXISTS datasource_profiles (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        backend TEXT NOT NULL,
+        driver TEXT,
+        connection_url TEXT,
+        target_kind TEXT NOT NULL,
+        target_ref TEXT,
+        database_name TEXT,
+        risk_level TEXT NOT NULL,
+        enabled INTEGER NOT NULL,
+        capabilities_json TEXT NOT NULL,
+        options_json TEXT NOT NULL,
+        secret_refs_json TEXT NOT NULL,
+        payload_json TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+    );
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS installed_plugins (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        module TEXT NOT NULL,
+        requirement TEXT NOT NULL,
+        version_pin TEXT,
+        install_path TEXT,
+        enabled INTEGER NOT NULL,
+        source TEXT,
+        status TEXT NOT NULL,
+        manifest_json TEXT NOT NULL,
+        payload_json TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+    );
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS web_admin_state (
+        key TEXT PRIMARY KEY,
+        value_json TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+    );
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_datasource_profiles_backend
+    ON datasource_profiles(backend);
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_installed_plugins_module
+    ON installed_plugins(module);
     """,
 )

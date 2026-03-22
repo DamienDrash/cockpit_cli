@@ -1,4 +1,6 @@
 import importlib.util
+from pathlib import Path
+from tempfile import TemporaryDirectory
 import unittest
 
 TEXTUAL_AVAILABLE = importlib.util.find_spec("textual") is not None
@@ -109,6 +111,35 @@ class EmbeddedTerminalWidgetTests(unittest.IsolatedAsyncioTestCase):
             rendered = terminal.current_output()
             self.assertIn("primary", rendered)
             self.assertNotIn("alternate", rendered)
+
+    async def test_search_moves_view_to_matching_line(self) -> None:
+        app = TerminalWidgetTestApp()
+
+        async with app.run_test(size=(80, 8)) as pilot:
+            terminal = app.query_one(EmbeddedTerminal)
+            terminal.clear("ready")
+            terminal.append_output("alpha\nbeta\nerror: failed\nomega\n")
+            await pilot.pause()
+
+            found = terminal.search("error")
+            await pilot.pause()
+
+            self.assertTrue(found)
+            self.assertIn("> error: failed", self._rendered_text(terminal))
+
+    async def test_export_writes_terminal_buffer_to_file(self) -> None:
+        app = TerminalWidgetTestApp()
+
+        async with app.run_test(size=(80, 8)) as pilot:
+            terminal = app.query_one(EmbeddedTerminal)
+            terminal.clear("ready")
+            terminal.append_output("alpha\nbeta\n")
+            await pilot.pause()
+
+            with TemporaryDirectory() as temp_dir:
+                target = Path(temp_dir) / "terminal.txt"
+                terminal.export_text(target)
+                self.assertEqual(target.read_text(encoding="utf-8"), "alpha\nbeta")
 
     @staticmethod
     def _rendered_text(widget: object) -> str:

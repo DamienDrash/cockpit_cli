@@ -77,3 +77,6 @@ class PanelRegistry:
 
     def specs(self) -> tuple[PanelSpec, ...]:
         return tuple(self._specs_by_type.values())
+
+    def specs_by_type(self) -> dict[str, PanelSpec]:
+        return dict(self._specs_by_type)

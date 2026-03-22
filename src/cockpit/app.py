@@ -7,9 +7,11 @@ from collections.abc import Sequence
 from pathlib import Path
 import shlex
 import sys
+import webbrowser
 
 from cockpit.application.services.connection_service import ConnectionService
 from cockpit.infrastructure.config.config_loader import ConfigLoader
+from cockpit.infrastructure.web.admin_server import LocalWebAdminServer
 
 
 def build_arg_parser() -> ArgumentParser:
@@ -27,6 +29,16 @@ def build_arg_parser() -> ArgumentParser:
 
     subparsers.add_parser("resume", help="Resume the most recent workspace/session")
     subparsers.add_parser("connections", help="List configured connection profiles")
+    subparsers.add_parser("datasources", help="List configured datasource profiles")
+
+    admin_parser = subparsers.add_parser("admin", help="Run the local web admin server")
+    admin_parser.add_argument("--host", default="127.0.0.1")
+    admin_parser.add_argument("--port", type=int, default=8765)
+    admin_parser.add_argument(
+        "--open-browser",
+        action="store_true",
+        help="Open the local admin URL in the default browser.",
+    )
 
     completion_parser = subparsers.add_parser(
         "completion",
@@ -82,6 +94,8 @@ def completion_script(shell: str) -> str:
                 "    'open:Open a workspace'",
                 "    'resume:Resume the latest session'",
                 "    'connections:List configured connection profiles'",
+                "    'datasources:List datasource profiles'",
+                "    'admin:Run the local web admin server'",
                 "    'completion:Print completion script'",
                 "  )",
                 "  _arguments \\",
@@ -112,7 +126,7 @@ def completion_script(shell: str) -> str:
             "  local cur prev words cword",
             "  _init_completion || return",
             "  if [[ ${cword} -eq 1 ]]; then",
-            "    COMPREPLY=( $(compgen -W 'open resume connections completion' -- \"$cur\") )",
+            "    COMPREPLY=( $(compgen -W 'open resume connections datasources admin completion' -- \"$cur\") )",
             "    return",
             "  fi",
             "  case \"${words[1]}\" in",
@@ -143,6 +157,38 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = parser.parse_args(list(argv) if argv is not None else None)
     if getattr(args, "subcommand", None) == "connections":
         print(list_connections_text(start=Path.cwd()))
+        return 0
+    if getattr(args, "subcommand", None) == "datasources":
+        from cockpit.bootstrap import build_container
+
+        container = build_container(start=Path.cwd())
+        try:
+            profiles = container.data_source_service.list_profiles()
+            if not profiles:
+                print("No datasource profiles configured.")
+            else:
+                print("Configured datasources:")
+                for profile in profiles:
+                    target = profile.connection_url or profile.target_ref or "(unset)"
+                    print(f"- {profile.name}: {profile.backend} -> {target}")
+        finally:
+            container.shutdown()
+        return 0
+    if getattr(args, "subcommand", None) == "admin":
+        from cockpit.bootstrap import build_container
+
+        container = build_container(start=Path.cwd())
+        server = LocalWebAdminServer(
+            container.web_admin_service,
+            host=args.host,
+            port=args.port,
+        )
+        try:
+            if getattr(args, "open_browser", False):
+                webbrowser.open(f"http://{args.host}:{args.port}", new=0, autoraise=True)
+            server.serve_forever()
+        finally:
+            container.shutdown()
         return 0
     if getattr(args, "subcommand", None) == "completion":
         print(completion_script(args.shell))

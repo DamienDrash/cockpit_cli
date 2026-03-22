@@ -1,0 +1,57 @@
+profiles:
+  - id: local-sqlite
+    name: Local SQLite
+    backend: sqlite
+    connection_url: sqlite+pysqlite:///./workspace.sqlite3
+    risk_level: dev
+  - id: analytics-postgres
+    name: Analytics Postgres
+    backend: postgres
+    connection_url: postgresql+psycopg://user:password@localhost:5432/analytics
+    risk_level: stage
+  - id: app-mysql
+    name: App MySQL
+    backend: mysql
+    connection_url: mysql+pymysql://user:password@localhost:3306/app
+    risk_level: stage
+  - id: finance-mariadb
+    name: Finance MariaDB
+    backend: mariadb
+    connection_url: mariadb+mariadbconnector://user:password@localhost:3306/finance
+    risk_level: prod
+  - id: warehouse-mssql
+    name: Warehouse MSSQL
+    backend: mssql
+    connection_url: mssql+pyodbc://sa:password@localhost:1433/warehouse?driver=ODBC+Driver+18+for+SQL+Server
+    risk_level: prod
+  - id: local-duckdb
+    name: Local DuckDB
+    backend: duckdb
+    connection_url: duckdb:///./analytics.duckdb
+    risk_level: dev
+  - id: cloud-bigquery
+    name: BigQuery
+    backend: bigquery
+    connection_url: bigquery://my-project
+    risk_level: stage
+  - id: corp-snowflake
+    name: Snowflake
+    backend: snowflake
+    connection_url: snowflake://user:password@account/database/schema?warehouse=COMPUTE_WH&role=ANALYST
+    risk_level: prod
+  - id: search-mongo
+    name: MongoDB
+    backend: mongodb
+    connection_url: mongodb://localhost:27017
+    database_name: app
+    risk_level: stage
+  - id: cache-redis
+    name: Redis
+    backend: redis
+    connection_url: redis://localhost:6379/0
+    risk_level: stage
+  - id: vectors-chroma
+    name: ChromaDB
+    backend: chromadb
+    connection_url: http://localhost:8000
+    risk_level: dev

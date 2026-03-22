@@ -8,6 +8,7 @@ from pathlib import Path
 from cockpit.application.dispatch.command_dispatcher import CommandDispatcher
 from cockpit.application.dispatch.command_parser import CommandParser
 from cockpit.application.dispatch.event_bus import EventBus
+from cockpit.application.services.datasource_service import DataSourceService
 from cockpit.application.handlers.curl_handlers import SendHttpRequestHandler
 from cockpit.application.handlers.cron_handlers import SetCronJobEnabledHandler
 from cockpit.application.handlers.db_handlers import RunDatabaseQueryHandler
@@ -25,8 +26,11 @@ from cockpit.application.handlers.layout_handlers import (
 from cockpit.application.handlers.session_handlers import RestoreSessionHandler
 from cockpit.application.handlers.tab_handlers import FocusTabHandler
 from cockpit.application.handlers.terminal_handlers import (
+    ExportTerminalBufferHandler,
     FocusTerminalHandler,
+    NavigateTerminalSearchHandler,
     RestartTerminalHandler,
+    SearchTerminalHandler,
 )
 from cockpit.application.handlers.workspace_handlers import (
     OpenWorkspaceHandler,
@@ -36,7 +40,9 @@ from cockpit.application.services.activity_log_service import ActivityLogService
 from cockpit.application.services.connection_service import ConnectionService
 from cockpit.application.services.layout_service import LayoutService
 from cockpit.application.services.navigation_controller import NavigationController
+from cockpit.application.services.plugin_service import PluginService
 from cockpit.application.services.session_service import SessionService
+from cockpit.application.services.web_admin_service import WebAdminService
 from cockpit.application.services.workspace_service import WorkspaceService
 from cockpit.domain.events.domain_events import (
     LayoutApplied,
@@ -56,9 +62,12 @@ from cockpit.infrastructure.http.http_adapter import HttpAdapter
 from cockpit.infrastructure.persistence.repositories import (
     AuditLogRepository,
     CommandHistoryRepository,
+    DataSourceProfileRepository,
+    InstalledPluginRepository,
     LayoutRepository,
     SessionRepository,
     SnapshotRepository,
+    WebAdminStateRepository,
     WorkspaceRepository,
 )
 from cockpit.infrastructure.persistence.sqlite_store import SQLiteStore
@@ -92,8 +101,12 @@ class ApplicationContainer:
     command_parser: CommandParser
     command_dispatcher: CommandDispatcher
     navigation_controller: NavigationController
+    layout_service: LayoutService
     session_service: SessionService
     activity_log_service: ActivityLogService
+    data_source_service: DataSourceService
+    plugin_service: PluginService
+    web_admin_service: WebAdminService
     stream_router: StreamRouter
     pty_manager: PTYManager
     cron_adapter: CronAdapter
@@ -141,6 +154,9 @@ def build_container(
     snapshot_repository = SnapshotRepository(store)
     history_repository = CommandHistoryRepository(store)
     audit_repository = AuditLogRepository(store)
+    datasource_repository = DataSourceProfileRepository(store)
+    installed_plugin_repository = InstalledPluginRepository(store)
+    web_admin_state_repository = WebAdminStateRepository(store)
     stream_router = StreamRouter()
     task_supervisor = TaskSupervisor()
     ssh_command_runner = ssh_command_runner or SSHCommandRunner()
@@ -166,6 +182,15 @@ def build_container(
     )
     layout_service = LayoutService(layout_repository, config_loader)
     session_service = SessionService(session_repository, snapshot_repository)
+    data_source_service = DataSourceService(
+        datasource_repository,
+        config_loader=config_loader,
+    )
+    plugin_service = PluginService(
+        installed_plugin_repository,
+        start=start,
+    )
+    plugin_service.enable_runtime_paths()
     activity_log_service = ActivityLogService(
         history_repository=history_repository,
         audit_repository=audit_repository,
@@ -225,6 +250,7 @@ def build_container(
             factory=lambda container: DBPanel(
                 event_bus=container.event_bus,
                 database_adapter=container.database_adapter,
+                datasource_service=container.data_source_service,
             ),
         )
     )
@@ -312,6 +338,18 @@ def build_container(
     command_dispatcher.register(
         "terminal.restart", RestartTerminalHandler(pty_manager)
     )
+    command_dispatcher.register("terminal.search", SearchTerminalHandler())
+    command_dispatcher.register(
+        "terminal.search_next",
+        NavigateTerminalSearchHandler(direction="next"),
+    )
+    command_dispatcher.register(
+        "terminal.search_prev",
+        NavigateTerminalSearchHandler(direction="previous"),
+    )
+    command_dispatcher.register(
+        "terminal.export", ExportTerminalBufferHandler()
+    )
     command_dispatcher.register(
         "docker.restart", RestartDockerContainerHandler(docker_adapter)
     )
@@ -326,21 +364,38 @@ def build_container(
         SetCronJobEnabledHandler(cron_adapter, enabled=False),
     )
     command_dispatcher.register(
-        "db.run_query", RunDatabaseQueryHandler(database_adapter)
+        "db.run_query", RunDatabaseQueryHandler(database_adapter, data_source_service)
     )
     command_dispatcher.register(
         "curl.send", SendHttpRequestHandler(http_adapter)
     )
 
     plugin_loader = PluginLoader()
+    plugin_payload = dict(config_loader.load_plugins())
+    combined_plugins = plugin_payload.get("plugins", [])
+    if not isinstance(combined_plugins, list):
+        combined_plugins = []
+    combined_plugins.extend(
+        module_name for module_name in plugin_service.enabled_modules() if module_name not in combined_plugins
+    )
+    plugin_payload["plugins"] = combined_plugins
     plugin_loader.load_from_config(
-        config_loader.load_plugins(),
+        plugin_payload,
         context=PluginBootstrapContext(
             project_root=project_root,
             panel_registry=panel_registry,
             command_dispatcher=command_dispatcher,
             command_catalog=command_catalog_entries,
         ),
+    )
+    web_admin_service = WebAdminService(
+        datasource_service=data_source_service,
+        plugin_service=plugin_service,
+        layout_service=layout_service,
+        panel_registry=panel_registry,
+        state_repository=web_admin_state_repository,
+        command_catalog=tuple(command_catalog_entries),
+        project_root=project_root,
     )
 
     return ApplicationContainer(
@@ -350,8 +405,12 @@ def build_container(
         command_parser=command_parser,
         command_dispatcher=command_dispatcher,
         navigation_controller=navigation_controller,
+        layout_service=layout_service,
         session_service=session_service,
         activity_log_service=activity_log_service,
+        data_source_service=data_source_service,
+        plugin_service=plugin_service,
+        web_admin_service=web_admin_service,
         stream_router=stream_router,
         pty_manager=pty_manager,
         cron_adapter=cron_adapter,

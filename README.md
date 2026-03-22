@@ -1,69 +1,77 @@
 # cockpit
 
-Keyboard-first TUI platform for developer workspaces.
+Keyboard-first developer workspace cockpit for Linux.
 
-`cockpit` is a Textual-based terminal application for opening local or remote
-developer workspaces, restoring them across restarts, and operating common
-developer surfaces from one command and event model. It is built around
-persisted sessions, structured panels, guarded mutating actions, and a
-local-first architecture that also supports SSH-backed workspaces.
+`cockpit` combines a Textual TUI, a local web admin plane, persisted sessions,
+guarded mutating actions, and a plugin-capable datasource platform. The app is
+Linux-first and optimized for local development, SSH-backed environments, and
+operator workflows that need one command/event model across terminal, Git,
+Docker, Cron, DB, HTTP, and layout management.
 
-## Current Feature Set
+## Core Capabilities
 
-- Persistent workspaces and sessions backed by SQLite
-- Resume of the last workspace on restart
-- Local and SSH-backed `Work` panel with embedded PTY terminal
-- `Git`, `Docker`, `Cron`, `DB`, `Curl`, and `Logs` panels
-- Command palette, slash commands, and keyboard bindings sharing one dispatcher
-- Guard rails for mutating Docker, Cron, DB, and HTTP actions
-- Connection profile aliases for remote workspaces
-- Bash and Zsh completion output from the CLI wrapper
+- persisted workspaces and sessions backed by SQLite
+- local and SSH-backed workspaces with resume across restarts
+- Textual TUI with `Work`, `Git`, `Docker`, `Cron`, `DB`, `Curl`, and `Logs`
+- editable split layouts with persisted variants
+- command palette, slash commands, and keybindings through one dispatcher
+- guarded mutating flows for Docker, Cron, DB, and HTTP actions
+- local web admin for datasource profiles, plugin installs, layouts, and diagnostics
+- plugin install/update/pin/remove with repo or package requirements
+- broad datasource support through SQLAlchemy dialects plus non-SQL adapters
+- terminal scrollback, search, and export
+
+## Supported Datasource Families
+
+Built-in datasource profiles support these backends:
+
+- `sqlite`
+- `postgres` / `postgresql`
+- `mysql`
+- `mariadb`
+- `mssql`
+- `duckdb`
+- `bigquery`
+- `snowflake`
+- `mongodb`
+- `redis`
+- `chromadb`
+
+Relational and analytics backends run through SQLAlchemy with external dialects
+where appropriate. Non-SQL backends use dedicated adapters. Additional
+datasources can be supplied by plugins.
 
 ## Tech Stack
 
-- **Language**: Python 3.11+
-- **TUI**: Textual
-- **Config**: YAML and TCSS
-- **Persistence**: SQLite
-- **Packaging**: Hatchling
-- **Runtime**: local PTY plus SSH-backed shell launch
+- Python 3.11+
+- Textual
+- SQLite
+- YAML + TCSS
+- SQLAlchemy
+- optional Ibis and backend-specific drivers
 
 ## Repository Layout
 
 ```text
 config/
   commands.yaml
+  connections.example.yaml
+  datasources.example.yaml
   keybindings.yaml
   layouts/
+  plugins.example.yaml
   themes/
 docs/
   superpowers/
+packaging/
+  arch/
 src/cockpit/
-  application/
-  domain/
-  infrastructure/
-  runtime/
-  shared/
-  ui/
 tests/
 ```
 
-## Prerequisites
-
-- Python 3.11 or newer
-- `ssh` for remote workspaces
-- `docker` for Docker panel operations
-- `crontab` for Cron panel operations
-- `git` for Git panel inspection
-
-Optional but recommended:
-
-- a virtual environment
-- a working SSH agent or SSH config for remote targets
-
 ## Installation
 
-Clone the repository and install it in editable mode:
+### Core install
 
 ```bash
 git clone git@github.com:DamienDrash/cockpit_cli.git
@@ -73,94 +81,51 @@ source .venv/bin/activate
 pip install -e .
 ```
 
-## Getting Started
+### Full datasource install
 
-Launch the app in the current directory:
+```bash
+pip install -e '.[all-datasources]'
+```
+
+Or install only the extras you need, for example:
+
+```bash
+pip install -e '.[postgres,mysql,duckdb,mongo,redis]'
+```
+
+## Quick Start
+
+Open the current directory:
 
 ```bash
 cockpit open .
 ```
 
-Resume the most recent workspace:
+Resume the last session:
 
 ```bash
 cockpit resume
 ```
 
-Open a configured remote workspace profile:
-
-```bash
-cockpit open --connection prod /srv/app
-```
-
-List configured connection aliases:
+List connection aliases:
 
 ```bash
 cockpit connections
 ```
 
-Print a shell completion script:
+List configured datasource profiles:
 
 ```bash
-cockpit completion bash
-cockpit completion zsh
+cockpit datasources
 ```
 
-## Connection Profiles
-
-Connection profiles are optional and live in `config/connections.yaml`.
-
-Example:
-
-```yaml
-connections:
-  prod:
-    target: deploy@example.com
-    default_path: /srv/app
-    description: Production deployment target
-  stage:
-    target: stage@example.com
-    default_path: /srv/app
-```
-
-You can then open them through either form:
+Run the local web admin:
 
 ```bash
-cockpit open --connection prod /srv/app
-cockpit open @prod
-cockpit open @prod:/srv/app/releases/current
+cockpit admin --open-browser
 ```
 
-The second and third forms use the same path syntax the slash command layer
-understands, so CLI and in-app commands stay aligned.
-
-## Plugin System
-
-External plugin modules can register additional panels and commands through
-`config/plugins.yaml`.
-
-Example:
-
-```yaml
-plugins:
-  - module: cockpit.plugins.notes_plugin
-    enabled: true
-```
-
-The module must expose `register_plugin(context)`. Inside that hook a plugin may
-register:
-
-- additional `PanelSpec` entries
-- additional command handlers
-
-The example file [plugins.example.yaml](/home/damien/Dokumente/cockpit/config/plugins.example.yaml)
-shows the expected shape, and [notes_plugin.py](/home/damien/Dokumente/cockpit/src/cockpit/plugins/notes_plugin.py)
-demonstrates the registration contract.
-
-## Core Commands
-
-Slash commands, palette commands, and keybindings all route through the same
-dispatcher.
+## TUI Commands
 
 Common commands:
 
@@ -169,102 +134,116 @@ Common commands:
 /workspace open @prod:/srv/app
 /workspace reopen_last
 /session restore
-/tab focus git
+/tab focus db
 /layout apply_default
+/layout toggle_orientation
+/layout grow
+/layout shrink
+/terminal focus
 /terminal restart
+/terminal search "error"
+/terminal search_next
+/terminal search_prev
+/terminal export .cockpit/terminal-buffer.txt
 /docker restart
 /docker stop
 /docker remove
 /cron enable
 /cron disable
-/db run_query "SELECT name FROM sqlite_master"
+/db run_query "SELECT 1"
 /curl send GET https://example.com
 ```
 
-## Keybindings
+## Web Admin
 
-Default bindings from `config/keybindings.yaml`:
+The local web admin exposes:
 
-- `Ctrl+K` opens the command palette
-- `Ctrl+1` to `Ctrl+7` switch tabs
-- `Ctrl+T` focuses the work terminal
-- `Ctrl+R` restarts the work terminal
-- `F8` restarts the selected Docker container
-- `F9` stops the selected Docker container
-- `F10` removes the selected Docker container
+- datasource profile creation and deletion
+- plugin install/update/pin/enable/remove
+- layout cloning and split edits
+- diagnostics for commands, panels, datasources, plugins, and tool availability
 
-## Panels
+It runs locally only and reuses the same application services as the TUI.
 
-### Work
+## Connection Profiles
 
-- opens local or SSH-backed workspaces
-- mounts the embedded PTY terminal
-- persists cwd, browser path, and selected file
+Connection aliases live in `config/connections.yaml`. Start from
+[connections.example.yaml](/home/damien/Dokumente/cockpit/config/connections.example.yaml).
 
-### Git
+Example:
 
-- inspects the current repository
-- shows branch summary and changed files
+```yaml
+connections:
+  prod:
+    target: deploy@example.com
+    default_path: /srv/app
+    description: Production target
+```
 
-### Docker
+Then open through either form:
 
-- lists local or remote containers
-- supports guarded restart, stop, and remove actions
+```bash
+cockpit open --connection prod /srv/app
+cockpit open @prod:/srv/app/current
+```
 
-### Cron
+## Datasource Profiles
 
-- lists local or remote crontab entries
-- supports guarded enable and disable operations for the selected job
+Datasource profiles can be managed in the web admin or through
+`config/datasources.yaml`. Start from
+[datasources.example.yaml](/home/damien/Dokumente/cockpit/config/datasources.example.yaml).
 
-### DB
+Each profile captures:
 
-- discovers SQLite databases in the workspace
-- runs local queries
-- supports remote SQLite queries over SSH through remote Python execution
+- backend
+- connection URL
+- optional driver
+- risk level
+- local or SSH target
+- database name
+- capabilities
 
-### Curl
+## Plugin System
 
-- sends quick HTTP requests
-- keeps draft state and recent response history in the session snapshot
+Two plugin paths exist:
 
-### Logs
+1. Static config loading from `config/plugins.yaml`
+2. Managed installs through the web admin using pip-compatible requirements
 
-- shows recent command and runtime activity recorded in SQLite
+Managed plugin installs support:
 
-## Persistence Model
+- package names
+- pinned versions
+- local paths
+- git requirements
 
-Application state is stored in `.cockpit/cockpit.db`.
+Plugins can contribute:
 
-Persisted data includes:
+- panels
+- commands
+- datasource families
+- admin pages
 
-- workspaces
-- layouts
-- sessions
-- snapshots
-- command history
-- audit log entries
+See [plugins.example.yaml](/home/damien/Dokumente/cockpit/config/plugins.example.yaml)
+and [notes_plugin.py](/home/damien/Dokumente/cockpit/src/cockpit/plugins/notes_plugin.py).
 
-The `.cockpit/` directory is intentionally ignored by Git.
+## Packaging
 
-## Remote Execution Model
+Release artifacts included in the repo:
 
-Remote workspaces use SSH in two modes:
+- `sdist`
+- `wheel`
+- Arch/CachyOS `PKGBUILD` in [packaging/arch/PKGBUILD](/home/damien/Dokumente/cockpit/packaging/arch/PKGBUILD)
 
-- non-interactive inspection via `ssh ... sh -lc ...`
-- interactive shell panels via `ssh -tt`
+## Development
 
-This allows the same workspace/session model to operate across local and remote
-targets without changing the app shell.
-
-## Testing
-
-Run the standard suite:
+Run tests:
 
 ```bash
 PYTHONPATH=src python -m unittest discover -s tests -p 'test_*.py' -v
 ```
 
-Run UI and E2E tests with the Textual dependency environment:
+Run UI/E2E tests with the dependency environment:
 
 ```bash
 PYTHONPATH=src:/tmp/cockpit-deps python -m unittest \
@@ -272,31 +251,18 @@ PYTHONPATH=src:/tmp/cockpit-deps python -m unittest \
   tests.e2e.test_app_resume_flow -v
 ```
 
-Bytecode caches and runtime state are ignored, so test runs should not dirty the
-repository anymore.
+CI lives in [.github/workflows/ci.yml](/home/damien/Dokumente/cockpit/.github/workflows/ci.yml).
 
-## Development Notes
+Contribution and release notes:
 
-- The project is intentionally layered into `application`, `domain`,
-  `infrastructure`, `runtime`, and `ui`.
-- New commands should be added once in the dispatcher path and then exposed via
-  slash, palette, or keybindings as needed.
-- Mutating actions should use confirmation flows rather than bypassing the guard
-  model.
-- Panels should snapshot only stable UI state, not fragile process internals.
+- [CONTRIBUTING.md](/home/damien/Dokumente/cockpit/CONTRIBUTING.md)
+- [CHANGELOG.md](/home/damien/Dokumente/cockpit/CHANGELOG.md)
 
-## Known Boundaries
+## Linux Scope
 
-The project is well beyond a skeleton, but it is still opinionated and not
-fully generalized in every area.
-
-Current limits include:
-
-- no third-party plugin marketplace
-- no full terminal emulation stack
-- no universal database backend abstraction beyond the SQLite-focused path
-- no arbitrary layout editor UI yet
+This project is currently Linux-first. The repository includes first-class
+packaging for Arch-like systems, including CachyOS.
 
 ## License
 
-No license file is currently included in the repository.
+MIT. See [LICENSE](/home/damien/Dokumente/cockpit/LICENSE).

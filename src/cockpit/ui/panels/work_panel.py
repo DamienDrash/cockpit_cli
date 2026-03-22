@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from pathlib import PurePosixPath
+from pathlib import Path, PurePosixPath
 from threading import get_ident
 
 from textual import events
@@ -216,6 +216,44 @@ class WorkPanel(BasePanel):
 
     def dispose(self) -> None:
         self._pty_manager.stop_session(self.PANEL_ID)
+
+    def apply_command_result(self, payload: dict[str, object]) -> None:
+        terminal_action = payload.get("terminal_action")
+        if not isinstance(terminal_action, str):
+            return
+        terminal = self.query_one(EmbeddedTerminal)
+        note = self.query_one("#work-panel-note", Static)
+        if terminal_action == "search":
+            query = payload.get("query")
+            if not isinstance(query, str) or not query:
+                note.update("Terminal search requires a non-empty query.")
+                return
+            if terminal.search(query):
+                note.update(f"Terminal search active for '{query}'.")
+            else:
+                note.update(f"No terminal matches for '{query}'.")
+            return
+        if terminal_action == "search_next":
+            if terminal.search_next():
+                note.update("Moved to next terminal match.")
+            else:
+                note.update("No active terminal search results.")
+            return
+        if terminal_action == "search_previous":
+            if terminal.search_previous():
+                note.update("Moved to previous terminal match.")
+            else:
+                note.update("No active terminal search results.")
+            return
+        if terminal_action == "export":
+            destination = payload.get("path")
+            if not isinstance(destination, str) or not destination:
+                note.update("Terminal export requires a destination path.")
+                return
+            exported_path = self._resolve_export_path(destination)
+            terminal.export_text(exported_path)
+            note.update(f"Terminal buffer exported to {exported_path}.")
+            return
 
     def _render_context(self) -> None:
         self.query_one(FileContext).update_context(
@@ -563,6 +601,13 @@ class WorkPanel(BasePanel):
         if self._target_ref:
             return f"{self._target_kind.value}:{self._target_ref}"
         return self._target_kind.value
+
+    def _resolve_export_path(self, raw_path: str) -> Path:
+        path = Path(raw_path).expanduser()
+        if path.is_absolute():
+            return path
+        base = Path(self._workspace_root or self._cwd or ".")
+        return (base / path).resolve()
 
     def _risk_label(self) -> str:
         level = classify_target_risk(

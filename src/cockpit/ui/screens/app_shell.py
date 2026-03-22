@@ -354,6 +354,10 @@ class CockpitApp(App[None]):
             "panel.focus_next",
             "terminal.focus",
             "terminal.restart",
+            "terminal.search",
+            "terminal.search_next",
+            "terminal.search_prev",
+            "terminal.export",
             "docker.restart",
             "docker.stop",
             "docker.remove",
@@ -617,6 +621,22 @@ class CockpitApp(App[None]):
             "terminal.restart": (
                 "Restart Terminal",
                 "terminal restart",
+            ),
+            "terminal.search": (
+                "Search Terminal for Error",
+                'terminal search "error"',
+            ),
+            "terminal.search_next": (
+                "Next Terminal Search Match",
+                "terminal search_next",
+            ),
+            "terminal.search_prev": (
+                "Previous Terminal Search Match",
+                "terminal search_prev",
+            ),
+            "terminal.export": (
+                "Export Terminal Buffer",
+                "terminal export .cockpit/terminal-buffer.txt",
             ),
         }
         items: list[PaletteItem] = []

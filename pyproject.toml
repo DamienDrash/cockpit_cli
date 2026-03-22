@@ -10,6 +10,62 @@ readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
   "PyYAML>=6.0",
+  "SQLAlchemy>=2.0",
+  "textual>=0.58.0",
+]
+
+[project.optional-dependencies]
+analytics = [
+  "ibis-framework>=10.0",
+]
+postgres = [
+  "psycopg[binary]>=3.2",
+]
+mysql = [
+  "PyMySQL>=1.1",
+]
+mariadb = [
+  "mariadb>=1.1",
+]
+mssql = [
+  "pyodbc>=5.1",
+]
+duckdb = [
+  "duckdb>=1.1",
+  "duckdb-engine>=0.13",
+]
+bigquery = [
+  "google-cloud-bigquery>=3.30",
+  "pybigquery>=0.10",
+]
+snowflake = [
+  "snowflake-sqlalchemy>=1.6",
+]
+mongo = [
+  "pymongo>=4.10",
+]
+redis = [
+  "redis>=5.0",
+]
+chroma = [
+  "chromadb>=0.5",
+]
+all-datasources = [
+  "ibis-framework>=10.0",
+  "psycopg[binary]>=3.2",
+  "PyMySQL>=1.1",
+  "mariadb>=1.1",
+  "pyodbc>=5.1",
+  "duckdb>=1.1",
+  "duckdb-engine>=0.13",
+  "google-cloud-bigquery>=3.30",
+  "pybigquery>=0.10",
+  "snowflake-sqlalchemy>=1.6",
+  "pymongo>=4.10",
+  "redis>=5.0",
+  "chromadb>=0.5",
+]
+dev = [
   "textual>=0.58.0",
 ]
 

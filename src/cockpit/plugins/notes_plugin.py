@@ -5,6 +5,7 @@ from __future__ import annotations
 from textual.widgets import Static
 
 from cockpit.domain.models.panel_state import PanelState
+from cockpit.domain.models.plugin import PluginManifest
 from cockpit.plugins.loader import PluginBootstrapContext
 from cockpit.ui.panels.registry import PanelSpec
 
@@ -75,6 +76,18 @@ class AppendNoteHandler:
             message=f"Added plugin note: {note}",
             data={"result_panel_id": "notes-panel", "result_payload": {"note": note}},
         )
+
+
+PLUGIN_MANIFEST = PluginManifest(
+    name="Notes Plugin",
+    module="cockpit.plugins.notes_plugin",
+    version="1.0.0",
+    compat_range=">=0.1.0",
+    summary="Example plugin that adds a notes panel and append command.",
+    panels=["notes"],
+    commands=["notes.append"],
+    admin_pages=["plugins"],
+)
 
 
 def register_plugin(context: PluginBootstrapContext) -> None:

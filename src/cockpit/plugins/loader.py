@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any, Protocol
 
 from cockpit.application.dispatch.command_dispatcher import CommandDispatcher
+from cockpit.domain.models.plugin import PluginManifest
 from cockpit.ui.panels.registry import PanelRegistry, PanelSpec
 
 
@@ -74,3 +75,28 @@ class PluginLoader:
                 f"Plugin module '{module_name}' does not expose a callable register_plugin(context)."
             )
         return register
+
+    def manifest_for_module(self, module_name: str) -> PluginManifest | None:
+        module = importlib.import_module(module_name)
+        raw_manifest = getattr(module, "PLUGIN_MANIFEST", None)
+        if callable(raw_manifest):
+            raw_manifest = raw_manifest()
+        if isinstance(raw_manifest, PluginManifest):
+            return raw_manifest
+        if isinstance(raw_manifest, dict):
+            return PluginManifest(
+                name=str(raw_manifest.get("name", module_name)),
+                module=str(raw_manifest.get("module", module_name)),
+                version=str(raw_manifest.get("version", "0.0.0")),
+                compat_range=str(raw_manifest.get("compat_range", "*")),
+                summary=(
+                    str(raw_manifest["summary"])
+                    if raw_manifest.get("summary") is not None
+                    else None
+                ),
+                panels=[str(item) for item in raw_manifest.get("panels", []) if isinstance(item, str)],
+                commands=[str(item) for item in raw_manifest.get("commands", []) if isinstance(item, str)],
+                datasources=[str(item) for item in raw_manifest.get("datasources", []) if isinstance(item, str)],
+                admin_pages=[str(item) for item in raw_manifest.get("admin_pages", []) if isinstance(item, str)],
+            )
+        return None
