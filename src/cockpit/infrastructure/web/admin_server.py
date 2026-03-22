@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from html import escape
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -209,23 +210,42 @@ def _home_body(service: WebAdminService) -> str:
         "<div class='grid'>"
         f"<div class='card'><h3>Datasources</h3><p>{escape(str(datasource_diag['total_profiles']))} total / {escape(str(datasource_diag['enabled_profiles']))} enabled</p></div>"
         f"<div class='card'><h3>Plugins</h3><p>{escape(str(plugin_diag['count']))} installed / {escape(str(plugin_diag['enabled']))} enabled</p></div>"
+        f"<div class='card'><h3>Trusted Plugin Sources</h3><p>{escape(str(len(plugin_diag.get('trusted_sources', []))))} configured</p></div>"
         f"<div class='card'><h3>Panels</h3><p>{escape(', '.join(diagnostics['panel_types']))}</p></div>"
         "</div>"
-        "<p class='muted'>Use the admin pages to manage datasource profiles, plugin installs, layout variants, and runtime diagnostics.</p>"
+        "<p class='muted'>Use the admin pages to manage datasource profiles, secret-backed connection URLs, plugin installs, layout variants, and runtime diagnostics.</p>"
     )
 
 
 def _datasource_body(service: WebAdminService) -> str:
     profiles = service.list_datasources()
     rows = []
+    secret_refs_example = escape(
+        json.dumps(
+            {
+                "DB_USER": "env:APP_DB_USER",
+                "DB_PASS": "keyring:cockpit:analytics-password",
+            },
+            indent=2,
+        )
+    )
+    options_example = escape(
+        json.dumps(
+            {
+                "connect_args": {"sslmode": "require"},
+                "pool_pre_ping": True,
+            },
+            indent=2,
+        )
+    )
     for profile in profiles:
         inspect_result = service.inspect_datasource(profile.id)
         rows.append(
             "<tr>"
             f"<td><strong>{escape(profile.name)}</strong><br><span class='muted'>{escape(profile.id)}</span></td>"
             f"<td>{escape(profile.backend)}<br><span class='muted'>{escape(profile.connection_url or profile.target_ref or '(unset)')}</span></td>"
-            f"<td>{escape(inspect_result.message or '')}</td>"
-            f"<td>{escape(', '.join(profile.capabilities))}</td>"
+            f"<td>{escape(inspect_result.message or '')}<br><span class='muted'>risk={escape(profile.risk_level)} target={escape(profile.target_kind.value)}</span></td>"
+            f"<td>{escape(', '.join(profile.capabilities))}<br><span class='muted'>{escape(str(len(profile.secret_refs)))} secret ref(s), {escape(str(len(profile.options)))} option(s)</span></td>"
             "<td>"
             f"<form class='inline' method='post' action='/datasources/delete'><input type='hidden' name='profile_id' value='{escape(profile.id)}'><button type='submit'>Delete</button></form>"
             "</td>"
@@ -233,7 +253,7 @@ def _datasource_body(service: WebAdminService) -> str:
         )
     return (
         "<div class='card'><h3>Create datasource</h3>"
-        "<form method='post' action='/datasources/create'>"
+        "<form id='create-datasource-form' method='post' action='/datasources/create'>"
         "<div class='grid'>"
         "<div><label>Name</label><input name='name' required></div>"
         "<div><label>Backend</label><select name='backend'>"
@@ -247,7 +267,14 @@ def _datasource_body(service: WebAdminService) -> str:
         "<div><label>Target kind</label><select name='target_kind'><option value='local'>local</option><option value='ssh'>ssh</option></select></div>"
         "<div><label>Target ref</label><input name='target_ref'></div>"
         "<div><label>Risk</label><select name='risk_level'><option>dev</option><option>stage</option><option>prod</option></select></div>"
+        "<div><label>Tags</label><input name='tags' placeholder='analytics, read-only'></div>"
         "</div><p><button type='submit'>Save datasource</button></p></form></div>"
+        "<div class='card'><h3>Advanced datasource fields</h3>"
+        "<p class='muted'>Use <code>${NAME}</code> placeholders in connection URLs and resolve them from env, files, keyring, or literals.</p>"
+        "<div class='grid'>"
+        f"<div><label>Secret refs JSON</label><textarea name='secret_refs_json' form='create-datasource-form' rows='8' placeholder='{secret_refs_example}'></textarea></div>"
+        f"<div><label>Options JSON</label><textarea name='options_json' form='create-datasource-form' rows='8' placeholder='{options_example}'></textarea></div>"
+        "</div></div>"
         "<div class='card'><h3>Saved profiles</h3><table><thead><tr><th>Name</th><th>Backend</th><th>Status</th><th>Capabilities</th><th>Actions</th></tr></thead>"
         f"<tbody>{''.join(rows) if rows else '<tr><td colspan=\"5\">No datasource profiles saved.</td></tr>'}</tbody></table></div>"
     )
@@ -263,7 +290,7 @@ def _plugin_body(service: WebAdminService) -> str:
             f"<td><strong>{escape(plugin.name)}</strong><br><span class='muted'>{escape(plugin.module)}</span></td>"
             f"<td>{escape(plugin.requirement)}<br><span class='muted'>pin={escape(plugin.version_pin or '(none)')}</span></td>"
             f"<td>{escape(str(plugin.enabled))} / {escape(plugin.status)}</td>"
-            f"<td>{escape(str(summary))}</td>"
+            f"<td>{escape(str(summary))}<br><span class='muted'>compat={escape(str(plugin.manifest.get('compat_range', '*')))}</span></td>"
             "<td>"
             f"<form class='inline' method='post' action='/plugins/update'><input type='hidden' name='plugin_id' value='{escape(plugin.id)}'><button type='submit'>Update</button></form> "
             f"<form class='inline' method='post' action='/plugins/toggle'><input type='hidden' name='plugin_id' value='{escape(plugin.id)}'><input type='hidden' name='enabled' value='{'0' if plugin.enabled else '1'}'><button type='submit'>{'Disable' if plugin.enabled else 'Enable'}</button></form> "
@@ -271,6 +298,9 @@ def _plugin_body(service: WebAdminService) -> str:
             "</td>"
             "</tr>"
         )
+    diagnostics = service.diagnostics()
+    plugin_diag = diagnostics["plugins"]
+    trusted_sources = plugin_diag.get("trusted_sources", [])
     return (
         "<div class='card'><h3>Install plugin</h3>"
         "<form method='post' action='/plugins/install'>"
@@ -279,8 +309,12 @@ def _plugin_body(service: WebAdminService) -> str:
         "<div><label>Module</label><input name='module' required></div>"
         "<div><label>Requirement / repo</label><input name='requirement' required placeholder='package-name or /path/to/plugin or git+https://...'></div>"
         "<div><label>Version pin</label><input name='version_pin' placeholder='1.2.3'></div>"
-        "<div><label>Source label</label><input name='source'></div>"
+        "<div><label>Source label</label><input name='source' placeholder='github.com/org/repo'></div>"
         "</div><p><button type='submit'>Install plugin</button></p></form></div>"
+        "<div class='card'><h3>Plugin trust policy</h3>"
+        f"<p class='muted'>Cockpit version: <code>{escape(str(plugin_diag.get('app_version', 'unknown')))}</code></p>"
+        f"<pre>{escape(json.dumps(trusted_sources, indent=2))}</pre>"
+        "</div>"
         "<div class='card'><h3>Installed plugins</h3><table><thead><tr><th>Plugin</th><th>Requirement</th><th>Status</th><th>Summary</th><th>Actions</th></tr></thead>"
         f"<tbody>{''.join(rows) if rows else '<tr><td colspan=\"5\">No plugins installed.</td></tr>'}</tbody></table></div>"
     )

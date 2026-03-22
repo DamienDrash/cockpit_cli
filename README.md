@@ -19,7 +19,7 @@ Docker, Cron, DB, HTTP, and layout management.
 - local web admin for datasource profiles, plugin installs, layouts, and diagnostics
 - plugin install/update/pin/remove with repo or package requirements
 - broad datasource support through SQLAlchemy dialects plus non-SQL adapters
-- terminal scrollback, search, and export
+- terminal scrollback, search, export, and clipboard copy
 
 ## Supported Datasource Families
 
@@ -93,6 +93,12 @@ Or install only the extras you need, for example:
 pip install -e '.[postgres,mysql,duckdb,mongo,redis]'
 ```
 
+Enable keyring-backed secret resolution:
+
+```bash
+pip install -e '.[secrets]'
+```
+
 ## Quick Start
 
 Open the current directory:
@@ -145,6 +151,7 @@ Common commands:
 /terminal search_next
 /terminal search_prev
 /terminal export .cockpit/terminal-buffer.txt
+/terminal copy
 /docker restart
 /docker stop
 /docker remove
@@ -197,11 +204,31 @@ Each profile captures:
 
 - backend
 - connection URL
+- optional secret reference mappings for `${PLACEHOLDER}` interpolation
 - optional driver
 - risk level
 - local or SSH target
+- SSH tunneling for tunnel-safe remote SQL and NoSQL backends
 - database name
 - capabilities
+
+Example secret-backed datasource snippet:
+
+```yaml
+profiles:
+  - id: analytics-postgres
+    name: Analytics Postgres
+    backend: postgres
+    connection_url: postgresql+psycopg://${DB_USER}:${DB_PASS}@db.internal:5432/analytics
+    target_kind: ssh
+    target_ref: deploy@example.com
+    secret_refs:
+      DB_USER: env:ANALYTICS_DB_USER
+      DB_PASS:
+        provider: keyring
+        service: cockpit
+        username: analytics-password
+```
 
 ## Plugin System
 
@@ -216,6 +243,8 @@ Managed plugin installs support:
 - pinned versions
 - local paths
 - git requirements
+- trusted source prefix enforcement
+- compatibility checks against the running cockpit version
 
 Plugins can contribute:
 
@@ -252,6 +281,7 @@ PYTHONPATH=src:/tmp/cockpit-deps python -m unittest \
 ```
 
 CI lives in [.github/workflows/ci.yml](/home/damien/Dokumente/cockpit/.github/workflows/ci.yml).
+It compiles the code, runs the unittest suite, and builds `sdist` plus `wheel`.
 
 Contribution and release notes:
 

@@ -17,6 +17,8 @@ bindings:
     action: tab.focus.curl
   - key: ctrl+r
     action: terminal.restart
+  - key: ctrl+alt+c
+    action: terminal.copy
   - key: ctrl+]
     action: panel.focus_next
   - key: ctrl+t

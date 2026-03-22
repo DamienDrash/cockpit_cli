@@ -24,6 +24,7 @@ from cockpit.infrastructure.filesystem.remote_filesystem_adapter import (
     RemoteFilesystemAdapter,
     RemotePathEntry,
 )
+from cockpit.infrastructure.system.clipboard import ClipboardError, ClipboardService
 from cockpit.runtime.pty_manager import PTYManager
 from cockpit.runtime.stream_router import StreamRouter
 from cockpit.shared.enums import SessionTargetKind
@@ -47,12 +48,14 @@ class WorkPanel(BasePanel):
         pty_manager: PTYManager,
         stream_router: StreamRouter,
         remote_filesystem_adapter: RemoteFilesystemAdapter,
+        clipboard_service: ClipboardService,
     ) -> None:
         super().__init__(id=self.PANEL_ID)
         self._event_bus = event_bus
         self._pty_manager = pty_manager
         self._stream_router = stream_router
         self._remote_filesystem_adapter = remote_filesystem_adapter
+        self._clipboard_service = clipboard_service
         self._main_thread_id = get_ident()
         self._subscriptions_registered = False
         self._workspace_name = "No workspace"
@@ -253,6 +256,14 @@ class WorkPanel(BasePanel):
             exported_path = self._resolve_export_path(destination)
             terminal.export_text(exported_path)
             note.update(f"Terminal buffer exported to {exported_path}.")
+            return
+        if terminal_action == "copy_buffer":
+            try:
+                backend = self._clipboard_service.copy_text(terminal.current_output())
+            except ClipboardError as exc:
+                note.update(str(exc))
+                return
+            note.update(f"Terminal buffer copied via {backend}.")
             return
 
     def _render_context(self) -> None:

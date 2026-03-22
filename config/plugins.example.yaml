@@ -1,3 +1,7 @@
+trusted_sources:
+  - git+https://github.com/
+  - https://github.com/
+
 plugins:
   - module: cockpit.plugins.notes_plugin
     enabled: true

@@ -32,7 +32,7 @@ class _NamedObject:
 class FakeWebAdminService:
     def __init__(self) -> None:
         self.saved_pages: list[str] = []
-        self.created_datasources: list[dict[str, str]] = []
+        self.created_datasources: list[dict[str, object]] = []
 
     def diagnostics(self) -> dict[str, object]:
         return {
@@ -42,7 +42,13 @@ class FakeWebAdminService:
             "command_count": 4,
             "panel_types": ["work", "db"],
             "datasources": {"total_profiles": 0, "enabled_profiles": 0, "backends": []},
-            "plugins": {"count": 0, "enabled": 0, "modules": []},
+            "plugins": {
+                "count": 0,
+                "enabled": 0,
+                "modules": [],
+                "trusted_sources": ["git+https://github.com/"],
+                "app_version": "0.1.0",
+            },
             "tools": {"git": True, "docker": True, "ssh": True},
         }
 
@@ -52,7 +58,7 @@ class FakeWebAdminService:
     def list_datasources(self):
         return []
 
-    def create_datasource(self, payload: dict[str, str]):
+    def create_datasource(self, payload: dict[str, object]):
         self.created_datasources.append(dict(payload))
         return _NamedObject(name=payload.get("name", "New datasource"))
 
@@ -142,6 +148,11 @@ class LocalWebAdminServerTests(unittest.TestCase):
             with urlopen(f"{base_url}/diagnostics") as response:
                 body = response.read().decode("utf-8")
             self.assertIn("Diagnostics", body)
+            self.assertIn("trusted_sources", body)
+
+            with urlopen(f"{base_url}/plugins") as response:
+                plugin_body = response.read().decode("utf-8")
+            self.assertIn("git+https://github.com/", plugin_body)
 
             request = Request(
                 f"{base_url}/datasources/create",
@@ -150,6 +161,9 @@ class LocalWebAdminServerTests(unittest.TestCase):
                         "name": "PG",
                         "backend": "postgres",
                         "connection_url": "postgresql://localhost/app",
+                        "secret_refs_json": '{"DB_PASS":"env:APP_DB_PASS"}',
+                        "options_json": '{"connect_args":{"sslmode":"require"}}',
+                        "tags": "analytics, stage",
                     }
                 ).encode("utf-8"),
                 method="POST",
@@ -159,7 +173,12 @@ class LocalWebAdminServerTests(unittest.TestCase):
 
             self.assertIn("Created datasource PG.", redirected_body)
             self.assertEqual(service.created_datasources[0]["backend"], "postgres")
+            self.assertEqual(
+                service.created_datasources[0]["secret_refs_json"],
+                '{"DB_PASS":"env:APP_DB_PASS"}',
+            )
             self.assertIn("/diagnostics", service.saved_pages)
+            self.assertIn("/plugins", service.saved_pages)
             self.assertIn("/datasources", service.saved_pages)
         finally:
             server.shutdown()

@@ -5,15 +5,32 @@ from __future__ import annotations
 import importlib
 from importlib import metadata as importlib_metadata
 import importlib.util
+import os
 import shutil
 import subprocess
 import sys
+import tomllib
 from pathlib import Path
 
 from cockpit.domain.models.plugin import InstalledPlugin, PluginManifest
 from cockpit.infrastructure.persistence.repositories import InstalledPluginRepository
-from cockpit.shared.config import state_dir
+from cockpit.shared.config import discover_project_root, state_dir
 from cockpit.shared.utils import make_id
+
+try:  # pragma: no cover - optional dependency guard
+    from packaging.specifiers import SpecifierSet
+    from packaging.version import Version
+except Exception:  # pragma: no cover - optional dependency guard
+    SpecifierSet = None
+    Version = None
+
+
+DEFAULT_TRUSTED_SOURCE_PREFIXES = (
+    "git+https://github.com/",
+    "https://github.com/",
+    "git@github.com:",
+    "git+ssh://git@github.com/",
+)
 
 
 class PluginService:
@@ -25,10 +42,18 @@ class PluginService:
         *,
         start: Path | None = None,
         pip_runner: object | None = None,
+        trusted_sources: tuple[str, ...] = (),
+        app_version: str | None = None,
     ) -> None:
         self._repository = repository
         self._start = start
         self._pip_runner = pip_runner or subprocess.run
+        self._trusted_sources = tuple(
+            item.strip()
+            for item in trusted_sources
+            if isinstance(item, str) and item.strip()
+        )
+        self._app_version = app_version or self._resolve_app_version()
 
     def list_plugins(self) -> list[InstalledPlugin]:
         return self._repository.list_all()
@@ -66,6 +91,7 @@ class PluginService:
             raise ValueError("Plugin requirement must not be empty.")
         if not module_name.strip():
             raise ValueError("Plugin module name must not be empty.")
+        self._validate_requirement(requirement, source)
         plugin_id = make_id("plg")
         install_path = self._plugin_install_root(plugin_id)
         install_path.mkdir(parents=True, exist_ok=True)
@@ -75,6 +101,7 @@ class PluginService:
             sys.path.insert(0, str(install_path))
         importlib.invalidate_caches()
         manifest = self._load_manifest(module_name)
+        self._validate_manifest(manifest)
         plugin = InstalledPlugin(
             id=plugin_id,
             name=display_name or manifest.name,
@@ -92,6 +119,7 @@ class PluginService:
 
     def update_plugin(self, plugin_id: str) -> InstalledPlugin:
         plugin = self._require_plugin(plugin_id)
+        self._validate_requirement(plugin.requirement, plugin.source)
         install_path = Path(plugin.install_path or self._plugin_install_root(plugin_id))
         install_path.mkdir(parents=True, exist_ok=True)
         self._run_pip_install(
@@ -102,6 +130,7 @@ class PluginService:
             sys.path.insert(0, str(install_path))
         importlib.invalidate_caches()
         manifest = self._load_manifest(plugin.module)
+        self._validate_manifest(manifest)
         updated = InstalledPlugin(
             id=plugin.id,
             name=plugin.name,
@@ -163,6 +192,8 @@ class PluginService:
             "count": len(plugins),
             "enabled": sum(1 for plugin in plugins if plugin.enabled),
             "modules": [plugin.module for plugin in plugins],
+            "trusted_sources": list(self._effective_trusted_sources()),
+            "app_version": self._app_version,
         }
 
     def _plugin_install_root(self, plugin_id: str) -> Path:
@@ -217,12 +248,23 @@ class PluginService:
 
     @staticmethod
     def _install_spec(requirement: str, version_pin: str | None) -> str:
+        normalized = requirement.strip()
+        if not normalized:
+            return normalized
+        if Path(os.path.expanduser(normalized)).exists():
+            return normalized
+        if normalized.startswith("git+") and version_pin:
+            base, fragment = normalized, ""
+            if "#" in normalized:
+                base, suffix = normalized.split("#", 1)
+                fragment = f"#{suffix}"
+            if "@" not in base[4:]:
+                return f"{base}@{version_pin}{fragment}"
         if version_pin:
-            normalized = requirement.strip()
             if any(token in normalized for token in ("://", "/", "@")):
                 return normalized
             return f"{normalized}=={version_pin}"
-        return requirement.strip()
+        return normalized
 
     def _require_plugin(self, plugin_id: str) -> InstalledPlugin:
         plugin = self.get_plugin(plugin_id)
@@ -239,3 +281,63 @@ class PluginService:
             except importlib_metadata.PackageNotFoundError:
                 continue
         return "0.0.0"
+
+    def _resolve_app_version(self) -> str:
+        try:
+            return importlib_metadata.version("cockpit")
+        except importlib_metadata.PackageNotFoundError:
+            pass
+        project_root = discover_project_root(self._start)
+        pyproject_path = project_root / "pyproject.toml"
+        if pyproject_path.exists():
+            payload = tomllib.loads(pyproject_path.read_text(encoding="utf-8"))
+            project_payload = payload.get("project", {})
+            if isinstance(project_payload, dict):
+                version = project_payload.get("version")
+                if isinstance(version, str) and version.strip():
+                    return version.strip()
+        return "0.0.0"
+
+    def _validate_requirement(self, requirement: str, source: str | None) -> None:
+        normalized = requirement.strip()
+        if not normalized:
+            raise ValueError("Plugin requirement must not be empty.")
+        if self._is_local_requirement(normalized):
+            return
+        if any(token in normalized for token in ("://", "git+")):
+            candidates = [normalized]
+            if isinstance(source, str) and source.strip():
+                candidates.append(source.strip())
+            trusted_sources = self._effective_trusted_sources()
+            if not any(
+                candidate.startswith(prefix)
+                for candidate in candidates
+                for prefix in trusted_sources
+            ):
+                raise ValueError(
+                    "Plugin source is not trusted. Configure a trusted source prefix before installing it."
+                )
+
+    def _validate_manifest(self, manifest: PluginManifest) -> None:
+        if (
+            SpecifierSet is None
+            or Version is None
+            or not manifest.compat_range
+            or manifest.compat_range == "*"
+        ):
+            return
+        specifier = SpecifierSet(manifest.compat_range)
+        if not specifier.contains(Version(self._app_version), prereleases=True):
+            raise RuntimeError(
+                f"Plugin '{manifest.name}' is incompatible with cockpit {self._app_version}."
+            )
+
+    def _effective_trusted_sources(self) -> tuple[str, ...]:
+        if self._trusted_sources:
+            return self._trusted_sources
+        return DEFAULT_TRUSTED_SOURCE_PREFIXES
+
+    @staticmethod
+    def _is_local_requirement(requirement: str) -> bool:
+        expanded = Path(os.path.expanduser(requirement))
+        return expanded.exists()

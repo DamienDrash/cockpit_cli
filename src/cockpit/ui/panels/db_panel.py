@@ -56,6 +56,7 @@ class DBPanel(Static):
         self._selected_profile_id: str | None = None
         self._selected_database_path: str | None = None
         self._message = "No database state loaded."
+        self._last_inspection: dict[str, object] | None = None
         self._last_result: dict[str, object] | None = None
 
     def on_mount(self) -> None:
@@ -89,6 +90,9 @@ class DBPanel(Static):
         selected_profile_id = snapshot.get("selected_profile_id")
         if isinstance(selected_profile_id, str) and selected_profile_id:
             self._selected_profile_id = selected_profile_id
+        last_inspection = snapshot.get("last_inspection")
+        if isinstance(last_inspection, dict):
+            self._last_inspection = dict(last_inspection)
         last_result = snapshot.get("last_result")
         if isinstance(last_result, dict):
             self._last_result = dict(last_result)
@@ -102,6 +106,9 @@ class DBPanel(Static):
             snapshot={
                 "selected_profile_id": self._selected_profile_id,
                 "selected_database_path": self._selected_database_path,
+                "last_inspection": (
+                    dict(self._last_inspection) if self._last_inspection else None
+                ),
                 "last_result": dict(self._last_result) if self._last_result else None,
             },
         )
@@ -200,6 +207,7 @@ class DBPanel(Static):
         self._catalog_entries = entries
         self._message = snapshot.message or ""
         self._sync_selected_entry()
+        self._refresh_inspection()
         self._render_state()
 
     def _sync_selected_entry(self) -> None:
@@ -234,6 +242,7 @@ class DBPanel(Static):
         next_entry = self._catalog_entries[next_index]
         self._selected_catalog_id = f"{next_entry.kind}:{next_entry.entry_id}"
         self._apply_selection_payload(self._selected_catalog_id)
+        self._refresh_inspection()
         self._render_state()
         self._publish_panel_state()
 
@@ -277,9 +286,18 @@ class DBPanel(Static):
         )
         return "\n".join(lines)
 
+    def _refresh_inspection(self) -> None:
+        if not isinstance(self._selected_profile_id, str) or not self._selected_profile_id:
+            self._last_inspection = None
+            return
+        result = self._datasource_service.inspect_profile(self._selected_profile_id)
+        self._last_inspection = result.to_dict()
+
     def _render_result_lines(self) -> list[str]:
         result = self._last_result
         if not isinstance(result, dict):
+            if isinstance(self._last_inspection, dict):
+                return self._render_inspection_lines()
             return [self._message or "No query executed yet."]
         query = result.get("query")
         backend = result.get("backend")
@@ -314,6 +332,26 @@ class DBPanel(Static):
                 elif isinstance(value, str) and value:
                     lines.append(f"{key}={value}")
         return lines or ["No query executed yet."]
+
+    def _render_inspection_lines(self) -> list[str]:
+        result = self._last_inspection
+        if not isinstance(result, dict):
+            return [self._message or "No inspection available."]
+        backend = result.get("backend")
+        message = result.get("message")
+        metadata = result.get("metadata")
+        lines: list[str] = []
+        if isinstance(backend, str) and backend:
+            lines.append(f"backend={backend}")
+        if isinstance(message, str) and message:
+            lines.append(message)
+        if isinstance(metadata, dict):
+            for key, value in metadata.items():
+                if isinstance(value, list) and value:
+                    lines.append(f"{key}=" + ", ".join(str(item) for item in value[:8]))
+                elif isinstance(value, str) and value:
+                    lines.append(f"{key}={value}")
+        return lines or ["No inspection available."]
 
     def _publish_panel_state(self) -> None:
         self._event_bus.publish(

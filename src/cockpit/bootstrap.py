@@ -26,6 +26,7 @@ from cockpit.application.handlers.layout_handlers import (
 from cockpit.application.handlers.session_handlers import RestoreSessionHandler
 from cockpit.application.handlers.tab_handlers import FocusTabHandler
 from cockpit.application.handlers.terminal_handlers import (
+    CopyTerminalBufferHandler,
     ExportTerminalBufferHandler,
     FocusTerminalHandler,
     NavigateTerminalSearchHandler,
@@ -71,11 +72,14 @@ from cockpit.infrastructure.persistence.repositories import (
     WorkspaceRepository,
 )
 from cockpit.infrastructure.persistence.sqlite_store import SQLiteStore
+from cockpit.infrastructure.secrets.secret_resolver import SecretResolver
 from cockpit.infrastructure.shell.base import ShellAdapter
 from cockpit.infrastructure.shell.local_shell_adapter import LocalShellAdapter
 from cockpit.infrastructure.shell.shell_adapter_router import ShellAdapterRouter
 from cockpit.infrastructure.ssh.command_runner import SSHCommandRunner
 from cockpit.infrastructure.ssh.ssh_shell_adapter import SSHShellAdapter
+from cockpit.infrastructure.ssh.tunnel_manager import SSHTunnelManager
+from cockpit.infrastructure.system.clipboard import ClipboardService
 from cockpit.plugins.loader import PluginBootstrapContext, PluginLoader
 from cockpit.runtime.pty_manager import PTYManager
 from cockpit.runtime.stream_router import StreamRouter
@@ -115,11 +119,14 @@ class ApplicationContainer:
     http_adapter: HttpAdapter
     git_adapter: GitAdapter
     remote_filesystem_adapter: RemoteFilesystemAdapter
+    clipboard_service: ClipboardService
+    tunnel_manager: SSHTunnelManager
     panel_registry: PanelRegistry
     store: SQLiteStore
 
     def shutdown(self) -> None:
         self.pty_manager.shutdown()
+        self.tunnel_manager.shutdown()
         self.store.close()
 
 
@@ -140,6 +147,7 @@ def build_container(
     command_dispatcher = CommandDispatcher(event_bus=event_bus)
     store = SQLiteStore(default_db_path(project_root))
     config_loader = ConfigLoader(start=start)
+    plugin_config = config_loader.load_plugins()
     connection_service = ConnectionService(config_loader)
     command_catalog_payload = config_loader.load_command_catalog()
     raw_commands = command_catalog_payload.get("commands", [])
@@ -170,6 +178,9 @@ def build_container(
     http_adapter = http_adapter or HttpAdapter()
     git_adapter = GitAdapter(ssh_command_runner=ssh_command_runner)
     remote_filesystem_adapter = RemoteFilesystemAdapter(ssh_command_runner)
+    secret_resolver = SecretResolver(base_path=project_root)
+    tunnel_manager = SSHTunnelManager()
+    clipboard_service = ClipboardService()
     pty_manager = PTYManager(
         event_bus=event_bus,
         shell_adapter=shell_adapter,
@@ -185,10 +196,19 @@ def build_container(
     data_source_service = DataSourceService(
         datasource_repository,
         config_loader=config_loader,
+        secret_resolver=secret_resolver,
+        tunnel_manager=tunnel_manager,
     )
     plugin_service = PluginService(
         installed_plugin_repository,
         start=start,
+        trusted_sources=tuple(
+            item
+            for item in plugin_config.get("trusted_sources", [])
+            if isinstance(item, str) and item
+        )
+        if isinstance(plugin_config.get("trusted_sources", []), list)
+        else (),
     )
     plugin_service.enable_runtime_paths()
     activity_log_service = ActivityLogService(
@@ -206,6 +226,7 @@ def build_container(
                 pty_manager=container.pty_manager,
                 stream_router=container.stream_router,
                 remote_filesystem_adapter=container.remote_filesystem_adapter,
+                clipboard_service=container.clipboard_service,
             ),
         )
     )
@@ -351,6 +372,9 @@ def build_container(
         "terminal.export", ExportTerminalBufferHandler()
     )
     command_dispatcher.register(
+        "terminal.copy", CopyTerminalBufferHandler()
+    )
+    command_dispatcher.register(
         "docker.restart", RestartDockerContainerHandler(docker_adapter)
     )
     command_dispatcher.register("docker.stop", StopDockerContainerHandler(docker_adapter))
@@ -371,7 +395,7 @@ def build_container(
     )
 
     plugin_loader = PluginLoader()
-    plugin_payload = dict(config_loader.load_plugins())
+    plugin_payload = dict(plugin_config)
     combined_plugins = plugin_payload.get("plugins", [])
     if not isinstance(combined_plugins, list):
         combined_plugins = []
@@ -419,6 +443,8 @@ def build_container(
         http_adapter=http_adapter,
         git_adapter=git_adapter,
         remote_filesystem_adapter=remote_filesystem_adapter,
+        clipboard_service=clipboard_service,
+        tunnel_manager=tunnel_manager,
         panel_registry=panel_registry,
         store=store,
     )

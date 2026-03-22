@@ -164,3 +164,22 @@ class ExportTerminalBufferHandler:
                 if isinstance(token, str) and token.strip():
                     return token.strip()
         return ".cockpit/terminal-buffer.txt"
+
+
+class CopyTerminalBufferHandler:
+    """Copy the current terminal buffer into the system clipboard."""
+
+    def __call__(self, command: Command) -> DispatchResult:
+        panel_id = command.context.get("panel_id", "work-panel")
+        if not isinstance(panel_id, str):
+            raise CommandContextError("panel_id context must be a string.")
+        return DispatchResult(
+            success=True,
+            message="Copying terminal buffer to the clipboard.",
+            data={
+                "result_panel_id": panel_id,
+                "result_payload": {
+                    "terminal_action": "copy_buffer",
+                },
+            },
+        )

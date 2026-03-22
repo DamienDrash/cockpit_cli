@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict
+import json
 from pathlib import Path
 import platform
 import shutil
@@ -61,8 +62,11 @@ class WebAdminService:
     def list_datasources(self) -> list[DataSourceProfile]:
         return self._datasource_service.list_profiles()
 
-    def create_datasource(self, payload: dict[str, str]) -> DataSourceProfile:
+    def create_datasource(self, payload: dict[str, object]) -> DataSourceProfile:
         target_kind = SessionTargetKind(payload.get("target_kind", "local"))
+        options = self._json_mapping(payload.get("options_json"))
+        secret_refs = self._json_mapping(payload.get("secret_refs_json"))
+        tags = self._csv_list(payload.get("tags"))
         return self._datasource_service.create_profile(
             name=payload.get("name", "").strip() or payload.get("backend", "Datasource"),
             backend=payload.get("backend", "sqlite"),
@@ -72,6 +76,9 @@ class WebAdminService:
             target_kind=target_kind,
             target_ref=payload.get("target_ref") or None,
             risk_level=payload.get("risk_level", "dev"),
+            options=options,
+            secret_refs=secret_refs,
+            tags=tags,
         )
 
     def delete_datasource(self, profile_id: str) -> None:
@@ -179,3 +186,25 @@ class WebAdminService:
         if isinstance(payload, dict) and isinstance(payload.get("page"), str):
             return str(payload["page"])
         return None
+
+    @staticmethod
+    def _json_mapping(raw_value: object) -> dict[str, object]:
+        if raw_value is None:
+            return {}
+        text = str(raw_value).strip()
+        if not text:
+            return {}
+        payload = json.loads(text)
+        if not isinstance(payload, dict):
+            raise ValueError("Expected a JSON object payload.")
+        return {str(key): value for key, value in payload.items()}
+
+    @staticmethod
+    def _csv_list(raw_value: object) -> list[str]:
+        if raw_value is None:
+            return []
+        return [
+            item.strip()
+            for item in str(raw_value).split(",")
+            if item.strip()
+        ]

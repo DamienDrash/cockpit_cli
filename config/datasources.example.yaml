@@ -7,8 +7,16 @@ profiles:
   - id: analytics-postgres
     name: Analytics Postgres
     backend: postgres
-    connection_url: postgresql+psycopg://user:password@localhost:5432/analytics
+    connection_url: postgresql+psycopg://${DB_USER}:${DB_PASS}@db.internal:5432/analytics
+    target_kind: ssh
+    target_ref: deploy@example.com
     risk_level: stage
+    secret_refs:
+      DB_USER: env:ANALYTICS_DB_USER
+      DB_PASS: keyring:cockpit:analytics-db-password
+    options:
+      connect_args:
+        sslmode: require
   - id: app-mysql
     name: App MySQL
     backend: mysql
