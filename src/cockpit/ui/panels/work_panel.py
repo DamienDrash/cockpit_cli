@@ -27,6 +27,7 @@ from cockpit.infrastructure.filesystem.remote_filesystem_adapter import (
 from cockpit.runtime.pty_manager import PTYManager
 from cockpit.runtime.stream_router import StreamRouter
 from cockpit.shared.enums import SessionTargetKind
+from cockpit.shared.risk import classify_target_risk, risk_presentation
 from cockpit.ui.panels.base_panel import BasePanel
 from cockpit.ui.widgets.embedded_terminal import EmbeddedTerminal
 from cockpit.ui.widgets.file_context import FileContext
@@ -212,6 +213,7 @@ class WorkPanel(BasePanel):
             selected_path=self._selected_path or self._workspace_root or "(none)",
             restored=self._restored,
             target_label=self._target_label(),
+            risk_label=self._risk_label(),
             recovery_message=self._recovery_message,
         )
 
@@ -525,3 +527,12 @@ class WorkPanel(BasePanel):
         if self._target_ref:
             return f"{self._target_kind.value}:{self._target_ref}"
         return self._target_kind.value
+
+    def _risk_label(self) -> str:
+        level = classify_target_risk(
+            target_kind=self._target_kind,
+            target_ref=self._target_ref,
+            workspace_name=self._workspace_name,
+            workspace_root=self._workspace_root,
+        )
+        return risk_presentation(level).label

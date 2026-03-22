@@ -20,6 +20,7 @@ class FileContext(Static):
         selected_path: str,
         restored: bool,
         target_label: str | None = None,
+        risk_label: str | None = None,
         recovery_message: str | None = None,
     ) -> None:
         mode = "restored" if restored else "fresh"
@@ -32,6 +33,8 @@ class FileContext(Static):
         ]
         if target_label:
             lines.append(f"Target: {target_label}")
+        if risk_label:
+            lines.append(f"Risk: {risk_label}")
         if recovery_message:
             lines.append(f"Recovery: {recovery_message}")
         self.update("\n".join(lines))

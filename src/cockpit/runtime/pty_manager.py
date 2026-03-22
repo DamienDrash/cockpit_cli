@@ -158,11 +158,7 @@ class PTYManager:
                 session.process.kill()
                 session.process.wait(timeout=1.0)
 
-        self._task_supervisor.stop(session.task.name, timeout=1.0)
-        try:
-            os.close(session.master_fd)
-        except OSError:
-            pass
+        self._task_supervisor.stop(session.task.name, timeout=2.5)
 
     def restart_session(
         self,

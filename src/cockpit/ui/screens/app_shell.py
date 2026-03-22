@@ -26,7 +26,8 @@ from cockpit.domain.events.runtime_events import (
     TerminalExited,
 )
 from cockpit.shared.config import themes_dir
-from cockpit.shared.enums import CommandSource, StatusLevel
+from cockpit.shared.enums import CommandSource, SessionTargetKind, StatusLevel
+from cockpit.shared.risk import classify_target_risk
 from cockpit.shared.utils import make_id
 from cockpit.ui.panels.panel_host import PanelHost
 from cockpit.ui.widgets.command_palette import CommandPalette, PaletteItem
@@ -319,6 +320,12 @@ class CockpitApp(App[None]):
             str(data.get("workspace_name", "Workspace")),
             active_tab_id=str(data.get("active_tab_id", "work")),
             restored=bool(data.get("restored", False)),
+            target_label=self._target_label_from_data(data),
+            risk_level=self._risk_level_from_data(data),
+        )
+        self.query_one(StatusBar).set_context(
+            target_label=self._target_label_from_data(data),
+            risk_level=self._risk_level_from_data(data),
         )
 
     def _command_context(self) -> dict[str, object]:
@@ -460,3 +467,31 @@ class CockpitApp(App[None]):
                 )
             )
         return items
+
+    def _target_label_from_data(self, data: dict[str, object]) -> str:
+        target_kind = self._target_kind_from_data(data.get("target_kind"))
+        target_ref = data.get("target_ref")
+        if target_kind is SessionTargetKind.LOCAL:
+            return "local"
+        if isinstance(target_ref, str) and target_ref:
+            return f"{target_kind.value}:{target_ref}"
+        return target_kind.value
+
+    def _risk_level_from_data(self, data: dict[str, object]):
+        return classify_target_risk(
+            target_kind=self._target_kind_from_data(data.get("target_kind")),
+            target_ref=data.get("target_ref") if isinstance(data.get("target_ref"), str) else None,
+            workspace_name=str(data.get("workspace_name", "Workspace")),
+            workspace_root=str(data.get("workspace_root", "")),
+        )
+
+    @staticmethod
+    def _target_kind_from_data(value: object) -> SessionTargetKind:
+        if isinstance(value, SessionTargetKind):
+            return value
+        if isinstance(value, str):
+            try:
+                return SessionTargetKind(value)
+            except ValueError:
+                return SessionTargetKind.LOCAL
+        return SessionTargetKind.LOCAL

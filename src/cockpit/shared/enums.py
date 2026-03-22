@@ -44,3 +44,8 @@ class StatusLevel(StrEnum):
     WARNING = "warning"
     ERROR = "error"
 
+
+class TargetRiskLevel(StrEnum):
+    DEV = "dev"
+    STAGE = "stage"
+    PROD = "prod"
