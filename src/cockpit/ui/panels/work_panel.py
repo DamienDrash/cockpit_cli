@@ -206,6 +206,28 @@ class WorkPanel(BasePanel):
             self.query_one("#work-panel-note", Static).update("Terminal selection cleared.")
             event.stop()
             return
+        if event.key == "ctrl+shift+v":
+            try:
+                clipboard_text, backend = self._clipboard_service.read_text()
+            except ClipboardError as exc:
+                self.query_one("#work-panel-note", Static).update(str(exc))
+                event.stop()
+                return
+            if not clipboard_text:
+                self.query_one("#work-panel-note", Static).update("Clipboard is empty.")
+                event.stop()
+                return
+            try:
+                self._pty_manager.send_input(self.PANEL_ID, clipboard_text)
+            except LookupError:
+                self.query_one("#work-panel-note", Static).update(
+                    "No active terminal session is available for paste."
+                )
+                event.stop()
+                return
+            self.query_one("#work-panel-note", Static).update(f"Pasted clipboard via {backend}.")
+            event.stop()
+            return
         payload = self._terminal_payload_for_key(event)
         if payload is None:
             return

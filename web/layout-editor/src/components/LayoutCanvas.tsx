@@ -9,6 +9,7 @@ type LayoutCanvasProps = {
   selectedTabId: string;
   selectedPath: NodePath;
   draggedPath: NodePath | null;
+  onAdjustRatio: (path: NodePath, ratio: number) => void;
   onSelect: (path: NodePath) => void;
   onDropPanel: (sourcePath: NodePath, targetPath: NodePath) => void;
   onStartDrag: (path: NodePath) => void;
@@ -84,6 +85,17 @@ function renderNode(
         <span>{node.orientation ?? "vertical"}</span>
         <span>{Math.round((node.ratio ?? 0.5) * 100)} / {Math.round((1 - (node.ratio ?? 0.5)) * 100)}</span>
       </div>
+      <label className="split-card__slider">
+        <span>ratio</span>
+        <input
+          max="0.8"
+          min="0.2"
+          onChange={(event) => props.onAdjustRatio(path, Number(event.currentTarget.value))}
+          step="0.05"
+          type="range"
+          value={node.ratio ?? 0.5}
+        />
+      </label>
       <div className={`split-card__children ${directionClass}`}>
         {node.children.map((child, index) => (
           <div className="split-card__child" key={`${describePath(path)}-${index}`}>
@@ -94,4 +106,3 @@ function renderNode(
     </div>
   );
 }
-

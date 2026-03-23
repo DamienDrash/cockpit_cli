@@ -236,6 +236,12 @@ export function App() {
           <LayoutCanvas
             draggedPath={draggedPath}
             layout={draftLayout}
+            onAdjustRatio={(path, ratio) =>
+              commit(
+                setRatio(draftLayout, selectedTabId, path, ratio),
+                `Adjusted canvas split ratio to ${Math.round(ratio * 100)}%.`,
+              )
+            }
             onClearDrag={() => setDraggedPath(null)}
             onDropPanel={(sourcePath, targetPath) => {
               if (JSON.stringify(sourcePath) === JSON.stringify(targetPath)) {

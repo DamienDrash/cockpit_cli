@@ -31,3 +31,21 @@ class ClipboardServiceTests(unittest.TestCase):
 
         with self.assertRaises(ClipboardError):
             service.copy_text("hello")
+
+    def test_reads_clipboard_from_first_available_backend(self) -> None:
+        calls: list[list[str]] = []
+
+        def runner(argv: list[str], **kwargs: object) -> SimpleNamespace:
+            del kwargs
+            calls.append(list(argv))
+            if argv[0] == "wl-paste":
+                raise FileNotFoundError(argv[0])
+            return SimpleNamespace(returncode=0, stdout="pasted text", stderr="")
+
+        service = ClipboardService(runner=runner)
+
+        text, backend = service.read_text()
+
+        self.assertEqual(text, "pasted text")
+        self.assertEqual(backend, "xclip -selection clipboard -o")
+        self.assertEqual(calls[1], ["xclip", "-selection", "clipboard", "-o"])

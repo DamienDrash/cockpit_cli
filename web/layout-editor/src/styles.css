@@ -273,6 +273,13 @@ textarea {
   font-size: 0.82rem;
 }
 
+.split-card__slider {
+  display: grid;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+
 .split-card__children {
   display: flex;
   gap: 12px;
