@@ -24,6 +24,9 @@ same artifacts rather than rebuilding them.
 - PyPI Trusted Publishing must trust this repository and the `Release` workflow.
 - The PyPI environment in GitHub should be configured for the publish job if
   environment protection is desired.
+- For a brand-new PyPI project, configure a pending publisher first. If the
+  project already exists on PyPI, configure an active trusted publisher on that
+  project instead of relying on a pending publisher.
 
 ## Local Dry Run
 
@@ -116,6 +119,23 @@ git push origin v<version>
    - Sigstore bundle files
    - provenance bundle file
 6. Confirm the package appears on PyPI.
+
+## PyPI Troubleshooting
+
+If `publish-pypi` fails but the GitHub release is otherwise complete, check the
+PyPI project state before cutting another tag.
+
+- If `https://pypi.org/simple/<project>/` exists but contains no files, the
+  project already exists on PyPI even if there are no releases yet.
+- Pending publishers are only for projects that do not exist yet. For an
+  already-created project, add the same repository/workflow/environment tuple
+  as an active trusted publisher in the project's publishing settings.
+- If the first trusted-publish attempt created the project but did not upload a
+  release, re-running tags from GitHub without fixing the publisher state on
+  PyPI will continue to fail.
+- If the project name on PyPI and the package metadata diverge, correct the
+  `project.name` value in `pyproject.toml` or create a new pending publisher
+  with the exact intended project name before the next tag.
 
 ## Verifying A Release
 
