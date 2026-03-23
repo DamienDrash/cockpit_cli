@@ -101,6 +101,12 @@ Enable Vault, encrypted local cache support, and keyring compatibility:
 pip install -e '.[vault,secrets]'
 ```
 
+Install release and verification tooling:
+
+```bash
+pip install -e '.[release]'
+```
+
 ## Quick Start
 
 Open the current directory:
@@ -284,6 +290,10 @@ Release artifacts included in the repo:
 - Arch/CachyOS `PKGBUILD` in [packaging/arch/PKGBUILD](/home/damien/Dokumente/cockpit/packaging/arch/PKGBUILD)
 - tag-driven GitHub release workflow in [.github/workflows/release.yml](/home/damien/Dokumente/cockpit/.github/workflows/release.yml)
 - release checksum manifest generation (`SHA256SUMS.txt`)
+- CycloneDX SBOM generation for Python and frontend dependencies
+- Sigstore keyless bundles for published release assets
+- GitHub provenance attestation generation
+- PyPI Trusted Publishing from the same canonical package artifacts
 
 ## Development
 
@@ -303,7 +313,47 @@ PYTHONPATH=src:/tmp/cockpit-deps python -m unittest \
 
 CI lives in [.github/workflows/ci.yml](/home/damien/Dokumente/cockpit/.github/workflows/ci.yml).
 It compiles the code, runs the unittest suite, builds `sdist` plus `wheel`, and runs a live service matrix against PostgreSQL, MySQL, Redis, and MongoDB.
+It also exercises a release dry-run path that builds the frontend bundle, assembles Python artifacts, and emits SBOM plus checksum metadata without publishing.
 Tagged pushes additionally publish release artifacts through [.github/workflows/release.yml](/home/damien/Dokumente/cockpit/.github/workflows/release.yml).
+
+## Release Verification
+
+Published GitHub releases include:
+
+- `sdist`
+- `wheel`
+- `SHA256SUMS.txt`
+- `release-manifest.json`
+- Python and frontend CycloneDX SBOM files
+- Sigstore bundle files for release assets
+- GitHub build provenance bundle output
+
+Verify checksums:
+
+```bash
+sha256sum -c SHA256SUMS.txt
+```
+
+Verify a signed artifact:
+
+```bash
+python -m pip install sigstore
+python -m sigstore verify github cockpit-0.1.0-py3-none-any.whl \
+  --bundle cockpit-0.1.0-py3-none-any.whl.sigstore.json \
+  --repository DamienDrash/cockpit_cli \
+  --ref refs/tags/v0.1.0 \
+  --trigger push
+```
+
+Verify provenance:
+
+```bash
+gh attestation verify cockpit-0.1.0-py3-none-any.whl \
+  --repo DamienDrash/cockpit_cli
+```
+
+Maintainer release steps are documented in
+[docs/releasing.md](/home/damien/Dokumente/cockpit/docs/releasing.md).
 
 ## Operator Notes
 
@@ -340,6 +390,8 @@ Contribution and release notes:
 
 - [CONTRIBUTING.md](/home/damien/Dokumente/cockpit/CONTRIBUTING.md)
 - [CHANGELOG.md](/home/damien/Dokumente/cockpit/CHANGELOG.md)
+- [SECURITY.md](/home/damien/Dokumente/cockpit/SECURITY.md)
+- [docs/releasing.md](/home/damien/Dokumente/cockpit/docs/releasing.md)
 
 ## Linux Scope
 

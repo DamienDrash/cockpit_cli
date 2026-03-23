@@ -7,6 +7,7 @@
 - added plugin install/update/pin/remove management
 - added terminal search and export commands
 - added Linux packaging metadata, CI workflow, and repository governance files
+- hardened release supply-chain with SBOMs, Sigstore bundles, GitHub provenance, and PyPI Trusted Publishing
 
 ## 0.1.0
 

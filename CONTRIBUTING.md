@@ -39,3 +39,5 @@ PYTHONPATH=src:/tmp/cockpit-deps python -m unittest \
 
 - keep `pyproject.toml`, `.github/workflows/ci.yml`, and `packaging/arch/PKGBUILD` aligned
 - update `CHANGELOG.md` for user-visible changes
+- keep [docs/releasing.md](/home/damien/Dokumente/cockpit/docs/releasing.md) aligned with the actual workflow
+- do not bypass the staged release pipeline by rebuilding artifacts inside publish jobs

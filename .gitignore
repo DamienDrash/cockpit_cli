@@ -8,8 +8,10 @@ __pycache__/
 .mypy_cache/
 .ruff_cache/
 .venv/
+.sbom-venv/
 build/
 dist/
+release-assets/
 vendor/
 /cockpit/
 /home/

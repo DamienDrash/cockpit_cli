@@ -5,9 +5,18 @@ on:
     tags:
       - "v*"
 
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
-  build-and-release:
+  verify:
     runs-on: ubuntu-latest
+    env:
+      PYTHONPATH: src
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -17,27 +26,316 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Install build tooling
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: web/layout-editor/package-lock.json
+
+      - name: Install Python tooling
         run: |
           python -m pip install --upgrade pip
-          pip install build
+          pip install -e .[release]
 
-      - name: Build artifacts
+      - name: Install frontend dependencies
+        working-directory: web/layout-editor
+        run: npm ci
+
+      - name: Run frontend tests
+        working-directory: web/layout-editor
+        run: npm test
+
+      - name: Build frontend bundle
+        working-directory: web/layout-editor
+        run: npm run build
+
+      - name: Sync packaged frontend assets
+        run: python scripts/release_tooling.py sync-layout-editor
+
+      - name: Compile
+        run: python -m compileall src tests
+
+      - name: Run tests
+        run: PYTHONPATH=src python -m unittest discover -s tests -p 'test_*.py' -v
+
+      - name: Build packages
         run: python -m build
 
-      - name: Generate checksums
-        run: sha256sum dist/* > dist/SHA256SUMS.txt
+  service-matrix:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: cockpit
+          POSTGRES_DB: cockpit
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d cockpit"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+      mysql:
+        image: mysql:8
+        env:
+          MYSQL_ALLOW_EMPTY_PASSWORD: "yes"
+          MYSQL_DATABASE: cockpit
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd "mysqladmin ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+      redis:
+        image: redis:7
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+      mongodb:
+        image: mongo:7
+        ports:
+          - 27017:27017
+        options: >-
+          --health-cmd "mongosh --eval 'db.adminCommand({ ping: 1 })'"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      COCKPIT_LIVE_SERVICES: "1"
+      COCKPIT_TEST_POSTGRES_URL: postgresql+psycopg://postgres:cockpit@127.0.0.1:5432/cockpit
+      COCKPIT_TEST_MYSQL_URL: mysql+pymysql://root@127.0.0.1:3306/cockpit
+      COCKPIT_TEST_REDIS_URL: redis://127.0.0.1:6379/0
+      COCKPIT_TEST_MONGODB_URL: mongodb://127.0.0.1:27017/admin
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
 
-      - name: Upload workflow artifacts
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install package with live backend extras
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .[dev,postgres,mysql,redis,mongo]
+
+      - name: Run live datasource integration tests
+        run: PYTHONPATH=src python -m unittest tests.integration.test_datasource_live_backends -v
+
+  package:
+    runs-on: ubuntu-latest
+    needs:
+      - verify
+      - service-matrix
+    env:
+      PYTHONPATH: src
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: web/layout-editor/package-lock.json
+
+      - name: Install Python tooling
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .[release]
+
+      - name: Install frontend dependencies
+        working-directory: web/layout-editor
+        run: npm ci
+
+      - name: Build frontend bundle
+        working-directory: web/layout-editor
+        run: npm run build
+
+      - name: Sync packaged frontend assets
+        run: python scripts/release_tooling.py sync-layout-editor
+
+      - name: Build canonical Python artifacts
+        run: python -m build
+
+      - name: Assemble package payload
+        run: |
+          mkdir -p release-assets/dist
+          cp dist/*.tar.gz dist/*.whl release-assets/dist/
+
+      - name: Upload package payload
         uses: actions/upload-artifact@v4
         with:
-          name: cockpit-dist
-          path: dist/*
+          name: cockpit-release-dist
+          path: release-assets
+
+  sbom:
+    runs-on: ubuntu-latest
+    needs:
+      - package
+    env:
+      PYTHONPATH: src
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: web/layout-editor/package-lock.json
+
+      - name: Install Python SBOM tooling
+        run: |
+          python -m pip install --upgrade pip
+          pip install cyclonedx-bom
+
+      - name: Install frontend dependencies
+        working-directory: web/layout-editor
+        run: npm ci
+
+      - name: Download canonical package payload
+        uses: actions/download-artifact@v4
+        with:
+          name: cockpit-release-dist
+          path: .
+
+      - name: Prepare Python SBOM environment
+        run: |
+          mkdir -p release-assets/sbom
+          python -m venv .sbom-venv
+          .sbom-venv/bin/python -m pip install --upgrade pip
+          .sbom-venv/bin/pip install release-assets/dist/*.whl
+
+      - name: Generate Python SBOM
+        run: .sbom-venv/bin/python -m pip freeze --all | cyclonedx-py requirements - --pyproject pyproject.toml --output-reproducible --of JSON -o release-assets/sbom/cockpit-python-runtime.cdx.json
+
+      - name: Generate frontend SBOM
+        working-directory: web/layout-editor
+        run: npm exec -- cyclonedx-npm --output-format JSON --output-file ../../release-assets/sbom/cockpit-frontend.cdx.json
+
+      - name: Upload release bundle with SBOMs
+        uses: actions/upload-artifact@v4
+        with:
+          name: cockpit-release-bundle
+          path: release-assets
+
+  attest-sign:
+    runs-on: ubuntu-latest
+    needs:
+      - sbom
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    env:
+      PYTHONPATH: src
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install signing tooling
+        run: |
+          python -m pip install --upgrade pip
+          pip install sigstore
+
+      - name: Download release bundle
+        uses: actions/download-artifact@v4
+        with:
+          name: cockpit-release-bundle
+          path: .
+
+      - name: Prepare attestation directory
+        run: mkdir -p release-assets/attestations
+
+      - name: Generate GitHub build provenance
+        uses: actions/attest-build-provenance@v3
+        with:
+          subject-path: |
+            release-assets/dist/*
+            release-assets/sbom/*
+          bundle-path: release-assets/attestations/cockpit-build-provenance.jsonl
+
+      - name: Write release manifest
+        run: python scripts/release_tooling.py manifest --root release-assets --output release-assets/release-manifest.json --version "${GITHUB_REF_NAME#v}" --git-ref "${GITHUB_REF}" --workflow-ref "${GITHUB_WORKFLOW_REF}"
+
+      - name: Write release checksums
+        run: python scripts/release_tooling.py checksums --root release-assets --output release-assets/SHA256SUMS.txt
+
+      - name: Sign release assets
+        run: |
+          while IFS= read -r file; do
+            python -m sigstore sign --bundle "${file}.sigstore.json" "${file}"
+          done < <(find release-assets -type f ! -name '*.sigstore.json' | LC_ALL=C sort)
+
+      - name: Upload signed release bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: cockpit-release-final
+          path: release-assets
+
+  publish-github:
+    runs-on: ubuntu-latest
+    needs:
+      - attest-sign
+    permissions:
+      contents: write
+    steps:
+      - name: Download final release bundle
+        uses: actions/download-artifact@v4
+        with:
+          name: cockpit-release-final
+          path: .
 
       - name: Create GitHub release
         uses: softprops/action-gh-release@v2
         with:
+          generate_release_notes: true
           files: |
-            dist/*.tar.gz
-            dist/*.whl
-            dist/SHA256SUMS.txt
+            release-assets/**
+
+  publish-pypi:
+    runs-on: ubuntu-latest
+    needs:
+      - attest-sign
+    permissions:
+      id-token: write
+    environment:
+      name: pypi
+      url: https://pypi.org/p/cockpit
+    steps:
+      - name: Download final release bundle
+        uses: actions/download-artifact@v4
+        with:
+          name: cockpit-release-final
+          path: .
+
+      - name: Publish package distributions to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: release-assets/dist

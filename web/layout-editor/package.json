@@ -7,6 +7,7 @@
     "build": "vite build",
     "dev": "vite",
     "preview": "vite preview",
+    "sbom": "cyclonedx-npm --output-format JSON",
     "test": "vitest run"
   },
   "dependencies": {
@@ -14,6 +15,7 @@
     "react-dom": "^19.2.0"
   },
   "devDependencies": {
+    "@cyclonedx/cyclonedx-npm": "^4.1.1",
     "@types/react": "^19.2.2",
     "@types/react-dom": "^19.2.2",
     "@vitejs/plugin-react": "^5.1.0",
