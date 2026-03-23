@@ -6,9 +6,12 @@ import json
 from html import escape
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+import mimetypes
+from pathlib import Path
 from urllib.parse import parse_qs, urlencode, urlparse
 
 from cockpit.application.services.web_admin_service import WebAdminService
+from cockpit.infrastructure.web.layout_editor.assets import index_path, resolve_asset
 
 
 def _page(title: str, body: str, *, flash: str | None = None) -> str:
@@ -68,6 +71,22 @@ class LocalWebAdminServer:
                 query = parse_qs(parsed.query)
                 flash = query.get("message", [None])[0]
                 service.save_last_page(parsed.path)
+                if parsed.path.startswith("/api/"):
+                    payload = _handle_api_get(service, parsed.path)
+                    if payload is None:
+                        self.send_error(HTTPStatus.NOT_FOUND)
+                        return
+                    self._json(payload)
+                    return
+                if parsed.path == "/layouts/editor" or parsed.path.startswith("/layouts/editor/"):
+                    asset_path = resolve_asset(parsed.path)
+                    if asset_path is None and parsed.path in {"/layouts/editor", "/layouts/editor/"}:
+                        asset_path = index_path()
+                    if asset_path is None or not asset_path.exists():
+                        self.send_error(HTTPStatus.NOT_FOUND)
+                        return
+                    self._asset(asset_path)
+                    return
                 if parsed.path == "/":
                     self._html(_page("Cockpit Web Admin", _home_body(service), flash=flash))
                     return
@@ -92,6 +111,17 @@ class LocalWebAdminServer:
                 parsed = urlparse(self.path)
                 length = int(self.headers.get("Content-Length", "0") or 0)
                 body = self.rfile.read(length).decode("utf-8")
+                if parsed.path.startswith("/api/"):
+                    try:
+                        payload = json.loads(body) if body else {}
+                        if not isinstance(payload, dict):
+                            raise ValueError("JSON API payloads must be objects.")
+                        response = _handle_api_post(service, parsed.path, payload)
+                    except Exception as exc:
+                        self._json({"ok": False, "error": str(exc)}, status=HTTPStatus.BAD_REQUEST)
+                        return
+                    self._json(response)
+                    return
                 form = {key: values[-1] for key, values in parse_qs(body).items() if values}
                 try:
                     redirect_path, message = _handle_post(service, parsed.path, form)
@@ -111,6 +141,26 @@ class LocalWebAdminServer:
                 self.send_header("Content-Length", str(len(encoded)))
                 self.end_headers()
                 self.wfile.write(encoded)
+
+            def _json(self, payload: dict[str, object], *, status: HTTPStatus = HTTPStatus.OK) -> None:
+                encoded = json.dumps(payload, sort_keys=True).encode("utf-8")
+                self.send_response(status)
+                self.send_header("Content-Type", "application/json; charset=utf-8")
+                self.send_header("Content-Length", str(len(encoded)))
+                self.end_headers()
+                self.wfile.write(encoded)
+
+            def _asset(self, asset_path: Path) -> None:
+                payload = asset_path.read_bytes()
+                content_type, _encoding = mimetypes.guess_type(str(asset_path))
+                self.send_response(HTTPStatus.OK)
+                self.send_header(
+                    "Content-Type",
+                    content_type or "application/octet-stream",
+                )
+                self.send_header("Content-Length", str(len(payload)))
+                self.end_headers()
+                self.wfile.write(payload)
 
         with ThreadingHTTPServer((self._host, self._port), Handler) as server:
             self._server = server
@@ -248,6 +298,70 @@ def _handle_post(service: WebAdminService, path: str, form: dict[str, str]) -> t
         service.reconnect_tunnel(profile_id)
         return "/diagnostics", f"Reconnected tunnel for {profile_id}."
     raise ValueError(f"Unknown admin action '{path}'.")
+
+
+def _handle_api_get(service: WebAdminService, path: str) -> dict[str, object] | None:
+    if path == "/api/layouts":
+        return {
+            "layouts": service.layout_summaries(),
+            "panels": _panel_metadata(service),
+        }
+    if path == "/api/panels":
+        return {
+            "panels": _panel_metadata(service),
+        }
+    if path.startswith("/api/layouts/"):
+        layout_id = path.removeprefix("/api/layouts/")
+        if not layout_id:
+            return None
+        return {
+            "layout": service.load_layout_document(layout_id),
+            "panels": _panel_metadata(service),
+        }
+    return None
+
+
+def _handle_api_post(service: WebAdminService, path: str, payload: dict[str, object]) -> dict[str, object]:
+    if path == "/api/layouts/validate":
+        layout_payload = payload.get("layout", payload)
+        if not isinstance(layout_payload, dict):
+            raise ValueError("Layout validation requires a layout object.")
+        result = service.validate_layout_document(layout_payload)
+        return {
+            "ok": bool(result.get("ok", False)),
+            "errors": result.get("errors", []),
+            "layout": result.get("layout", {}),
+        }
+    if path == "/api/layouts/save":
+        layout_payload = payload.get("layout", payload)
+        if not isinstance(layout_payload, dict):
+            raise ValueError("Layout save requires a layout object.")
+        layout = service.save_layout_document(layout_payload)
+        return {
+            "ok": True,
+            "layout": layout.to_dict(),
+        }
+    if path == "/api/layouts/clone":
+        source_layout_id = str(payload.get("source_layout_id", "")).strip()
+        target_layout_id = str(payload.get("target_layout_id", "")).strip()
+        name = str(payload.get("name", "")).strip() or None
+        layout = service.clone_layout(source_layout_id, target_layout_id, name)
+        return {
+            "ok": True,
+            "layout": layout.to_dict(),
+        }
+    raise ValueError(f"Unknown API action '{path}'.")
+
+
+def _panel_metadata(service: WebAdminService) -> list[dict[str, str]]:
+    return [
+        {
+            "panel_type": panel_type,
+            "panel_id": panel_id,
+            "display_name": display_name,
+        }
+        for panel_type, panel_id, display_name in service.available_panels()
+    ]
 
 
 def _home_body(service: WebAdminService) -> str:
@@ -459,6 +573,13 @@ def _plugin_body(service: WebAdminService) -> str:
 def _layout_body(service: WebAdminService) -> str:
     layouts = service.list_layouts()
     panels = service.available_panels()
+    header = (
+        "<div class='card'>"
+        "<h3>Canvas Editor</h3>"
+        "<p class='muted'>Open the dedicated visual layout editor for split-tree editing, drag-and-drop moves, and whole-document saves.</p>"
+        "<p><a href='/layouts/editor'>Open layout canvas</a></p>"
+        "</div>"
+    )
     blocks = []
     for layout in layouts:
         tabs = []
@@ -525,7 +646,8 @@ def _layout_body(service: WebAdminService) -> str:
             + "".join(tabs)
             + "</div>"
         )
-    return "".join(blocks) or "<div class='card'>No layouts saved.</div>"
+    body = "".join(blocks) or "<div class='card'>No layouts saved.</div>"
+    return header + body
 
 
 def _diagnostics_body(service: WebAdminService) -> str:

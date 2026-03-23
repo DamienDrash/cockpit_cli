@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 from datetime import UTC, datetime
+import json
 from threading import Thread
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
@@ -131,7 +132,66 @@ class FakeWebAdminService:
         del plugin_id
 
     def list_layouts(self):
-        return []
+        return [
+            _LayoutObject(
+                id="default",
+                name="Default",
+                tabs=[
+                    {
+                        "id": "work",
+                        "name": "Work",
+                    }
+                ],
+            )
+        ]
+
+    def layout_summaries(self):
+        return [
+            {
+                "id": "default",
+                "name": "Default",
+                "tab_count": 1,
+                "tabs": [{"id": "work", "name": "Work"}],
+            }
+        ]
+
+    def load_layout_document(self, layout_id: str):
+        del layout_id
+        return {
+            "id": "default",
+            "name": "Default",
+            "focus_path": [],
+            "tabs": [
+                {
+                    "id": "work",
+                    "name": "Work",
+                    "root_split": {
+                        "orientation": "vertical",
+                        "ratio": 1.0,
+                        "children": [{"panel_id": "work-panel", "panel_type": "work"}],
+                    },
+                }
+            ],
+        }
+
+    def validate_layout_document(self, payload: dict[str, object]):
+        return {
+            "ok": True,
+            "errors": [],
+            "layout": payload,
+        }
+
+    def save_layout_document(self, payload: dict[str, object]):
+        return _LayoutObject(
+            id=str(payload.get("id", "default")),
+            name=str(payload.get("name", "Default")),
+            tabs=[
+                {
+                    "id": "work",
+                    "name": "Work",
+                }
+            ],
+        )
 
     def clone_layout(self, source_layout_id: str, target_layout_id: str, name: str | None = None):
         del source_layout_id, target_layout_id, name
@@ -175,7 +235,10 @@ class FakeWebAdminService:
         return _NamedObject(name="Layout")
 
     def available_panels(self):
-        return []
+        return [
+            ("work", "work-panel", "Work"),
+            ("logs", "logs-panel", "Logs"),
+        ]
 
     def close_tunnel(self, profile_id: str) -> None:
         self.closed_tunnels.append(profile_id)
@@ -203,6 +266,31 @@ class SimpleResult:
     message: str
 
 
+@dataclass
+class _LayoutObject:
+    id: str
+    name: str
+    tabs: list[dict[str, str]]
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "id": self.id,
+            "name": self.name,
+            "focus_path": [],
+            "tabs": [
+                {
+                    "id": "work",
+                    "name": "Work",
+                    "root_split": {
+                        "orientation": "vertical",
+                        "ratio": 1.0,
+                        "children": [{"panel_id": "work-panel", "panel_type": "work"}],
+                    },
+                }
+            ],
+        }
+
+
 class LocalWebAdminServerTests(unittest.TestCase):
     def test_serves_pages_and_handles_post_actions(self) -> None:
         service = FakeWebAdminService()
@@ -223,6 +311,19 @@ class LocalWebAdminServerTests(unittest.TestCase):
                 body = response.read().decode("utf-8")
             self.assertIn("Diagnostics", body)
             self.assertIn("trusted_sources", body)
+
+            with urlopen(f"{base_url}/api/layouts") as response:
+                layout_catalog = response.read().decode("utf-8")
+            self.assertIn('"layouts"', layout_catalog)
+            self.assertIn('"panel_id": "work-panel"', layout_catalog)
+
+            with urlopen(f"{base_url}/api/layouts/default") as response:
+                layout_document = response.read().decode("utf-8")
+            self.assertIn('"root_split"', layout_document)
+
+            with urlopen(f"{base_url}/layouts/editor") as response:
+                editor_html = response.read().decode("utf-8")
+            self.assertIn("Cockpit Layout Editor", editor_html)
 
             with urlopen(f"{base_url}/plugins") as response:
                 plugin_body = response.read().decode("utf-8")
@@ -255,6 +356,35 @@ class LocalWebAdminServerTests(unittest.TestCase):
                 service.created_datasources[0]["secret_refs_json"],
                 '{"DB_PASS":"env:APP_DB_PASS"}',
             )
+
+            validate_request = Request(
+                f"{base_url}/api/layouts/validate",
+                data=json.dumps(
+                    {
+                        "layout": {
+                            "id": "default",
+                            "name": "Default",
+                            "focus_path": [],
+                            "tabs": [
+                                {
+                                    "id": "work",
+                                    "name": "Work",
+                                    "root_split": {
+                                        "orientation": "vertical",
+                                        "ratio": 1.0,
+                                        "children": [{"panel_id": "work-panel", "panel_type": "work"}],
+                                    },
+                                }
+                            ],
+                        }
+                    }
+                ).encode("utf-8"),
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            with urlopen(validate_request) as response:
+                validate_body = response.read().decode("utf-8")
+            self.assertIn('"ok": true', validate_body)
 
             execute_request = Request(
                 f"{base_url}/datasources/execute",

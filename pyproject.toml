@@ -9,6 +9,7 @@ description = "Keyboard-first TUI platform for developer workspaces."
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
+  "cffi>=1.17",
   "packaging>=24.0",
   "PyYAML>=6.0",
   "SQLAlchemy>=2.0",
@@ -79,6 +80,19 @@ cockpit = "cockpit.app:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/cockpit"]
+
+[tool.hatch.build.targets.wheel.force-include]
+"third_party/libvterm" = "third_party/libvterm"
+
+[tool.hatch.build.targets.sdist]
+include = [
+  "/src",
+  "/tests",
+  "/README.md",
+  "/LICENSE",
+  "/third_party/libvterm",
+  "/web/layout-editor",
+]
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from typing import Any
 
 from cockpit.domain.models.layout import Layout, PanelRef, SplitNode, TabLayout
 from cockpit.domain.models.workspace import Workspace
@@ -39,6 +40,48 @@ class LayoutService:
         return self._layout_repository.get(layout_id)
 
     def save_layout(self, layout: Layout) -> Layout:
+        self._layout_repository.save(layout)
+        return layout
+
+    def load_layout_document(self, layout_id: str) -> dict[str, object]:
+        layout = self._require_layout(layout_id)
+        return layout.to_dict()
+
+    def validate_layout_document(
+        self,
+        payload: dict[str, Any],
+        *,
+        allowed_panel_types: set[str] | None = None,
+        allowed_panel_ids: set[str] | None = None,
+    ) -> dict[str, object]:
+        layout = self._layout_from_payload(payload)
+        errors = self._validate_layout(
+            layout,
+            allowed_panel_types=allowed_panel_types,
+            allowed_panel_ids=allowed_panel_ids,
+        )
+        return {
+            "ok": not errors,
+            "errors": errors,
+            "layout": layout.to_dict(),
+        }
+
+    def save_layout_document(
+        self,
+        payload: dict[str, Any],
+        *,
+        allowed_panel_types: set[str] | None = None,
+        allowed_panel_ids: set[str] | None = None,
+    ) -> Layout:
+        validation = self.validate_layout_document(
+            payload,
+            allowed_panel_types=allowed_panel_types,
+            allowed_panel_ids=allowed_panel_ids,
+        )
+        errors = validation["errors"]
+        if isinstance(errors, list) and errors:
+            raise ValueError("; ".join(str(item) for item in errors))
+        layout = self._layout_from_payload(payload)
         self._layout_repository.save(layout)
         return layout
 
@@ -259,6 +302,84 @@ class LayoutService:
             tabs=tabs,
             focus_path=[str(item) for item in payload.get("focus_path", [])],
         )
+
+    def _validate_layout(
+        self,
+        layout: Layout,
+        *,
+        allowed_panel_types: set[str] | None,
+        allowed_panel_ids: set[str] | None,
+    ) -> list[str]:
+        errors: list[str] = []
+        if not layout.id.strip():
+            errors.append("Layout id must not be empty.")
+        if not layout.name.strip():
+            errors.append("Layout name must not be empty.")
+        if not layout.tabs:
+            errors.append("Layout must contain at least one tab.")
+        seen_tab_ids: set[str] = set()
+        for tab in layout.tabs:
+            if not tab.id.strip():
+                errors.append("Tab id must not be empty.")
+            if tab.id in seen_tab_ids:
+                errors.append(f"Tab id '{tab.id}' is duplicated.")
+            seen_tab_ids.add(tab.id)
+            if not tab.name.strip():
+                errors.append(f"Tab '{tab.id}' must have a name.")
+            errors.extend(
+                self._validate_split_node(
+                    tab.root_split,
+                    path=f"tabs[{tab.id}]",
+                    allowed_panel_types=allowed_panel_types,
+                    allowed_panel_ids=allowed_panel_ids,
+                )
+            )
+        return errors
+
+    def _validate_split_node(
+        self,
+        node: SplitNode,
+        *,
+        path: str,
+        allowed_panel_types: set[str] | None,
+        allowed_panel_ids: set[str] | None,
+    ) -> list[str]:
+        errors: list[str] = []
+        if node.orientation not in {None, "horizontal", "vertical"}:
+            errors.append(f"{path} has invalid orientation '{node.orientation}'.")
+        if not node.children:
+            errors.append(f"{path} must have at least one child.")
+            return errors
+        if node.ratio is not None:
+            ratio_value = float(node.ratio)
+            if len(node.children) == 1:
+                if not 0.05 <= ratio_value <= 1.0:
+                    errors.append(f"{path} ratio must be between 0.05 and 1.0.")
+            elif not 0.05 <= ratio_value <= 0.95:
+                errors.append(f"{path} ratio must be between 0.05 and 0.95.")
+        if len(node.children) == 1 and isinstance(node.children[0], SplitNode):
+            errors.append(f"{path} must not wrap a single nested split.")
+        for index, child in enumerate(node.children):
+            child_path = f"{path}.children[{index}]"
+            if isinstance(child, PanelRef):
+                if not child.panel_id.strip():
+                    errors.append(f"{child_path} panel_id must not be empty.")
+                if not child.panel_type.strip():
+                    errors.append(f"{child_path} panel_type must not be empty.")
+                if allowed_panel_types is not None and child.panel_type not in allowed_panel_types:
+                    errors.append(f"{child_path} panel_type '{child.panel_type}' is not registered.")
+                if allowed_panel_ids is not None and child.panel_id not in allowed_panel_ids:
+                    errors.append(f"{child_path} panel_id '{child.panel_id}' is not registered.")
+                continue
+            errors.extend(
+                self._validate_split_node(
+                    child,
+                    path=child_path,
+                    allowed_panel_types=allowed_panel_types,
+                    allowed_panel_ids=allowed_panel_ids,
+                )
+            )
+        return errors
 
     def _require_layout(self, layout_id: str) -> Layout:
         layout = self._layout_repository.get(layout_id)

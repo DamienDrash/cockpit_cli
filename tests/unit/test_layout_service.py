@@ -51,3 +51,79 @@ class LayoutServiceTests(unittest.TestCase):
                 ["work-panel", "logs-panel", "db-panel"],
             )
             store.close()
+
+    def test_validates_document_against_registered_panels(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            (root / "config").mkdir()
+            store = SQLiteStore(root / "cockpit.db")
+            repository = LayoutRepository(store)
+            service = LayoutService(repository, ConfigLoader(start=root))
+
+            result = service.validate_layout_document(
+                {
+                    "id": "default",
+                    "name": "Default",
+                    "focus_path": [],
+                    "tabs": [
+                        {
+                            "id": "work",
+                            "name": "Work",
+                            "root_split": {
+                                "orientation": "vertical",
+                                "ratio": 1.0,
+                                "children": [
+                                    {
+                                        "panel_id": "work-panel",
+                                        "panel_type": "work",
+                                    }
+                                ],
+                            },
+                        }
+                    ],
+                },
+                allowed_panel_types={"work"},
+                allowed_panel_ids={"work-panel"},
+            )
+
+            self.assertTrue(result["ok"])
+            self.assertEqual(result["errors"], [])
+            store.close()
+
+    def test_rejects_unknown_panel_ids_in_document_validation(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            (root / "config").mkdir()
+            store = SQLiteStore(root / "cockpit.db")
+            repository = LayoutRepository(store)
+            service = LayoutService(repository, ConfigLoader(start=root))
+
+            result = service.validate_layout_document(
+                {
+                    "id": "default",
+                    "name": "Default",
+                    "focus_path": [],
+                    "tabs": [
+                        {
+                            "id": "work",
+                            "name": "Work",
+                            "root_split": {
+                                "orientation": "vertical",
+                                "ratio": 1.0,
+                                "children": [
+                                    {
+                                        "panel_id": "ghost-panel",
+                                        "panel_type": "ghost",
+                                    }
+                                ],
+                            },
+                        }
+                    ],
+                },
+                allowed_panel_types={"work"},
+                allowed_panel_ids={"work-panel"},
+            )
+
+            self.assertFalse(result["ok"])
+            self.assertIn("ghost-panel", " ".join(str(item) for item in result["errors"]))
+            store.close()

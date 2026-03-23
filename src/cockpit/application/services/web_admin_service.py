@@ -173,6 +173,44 @@ class WebAdminService:
     def list_layouts(self) -> list[Layout]:
         return self._layout_service.list_layouts()
 
+    def layout_summaries(self) -> list[dict[str, object]]:
+        return [
+            {
+                "id": layout.id,
+                "name": layout.name,
+                "tab_count": len(layout.tabs),
+                "tabs": [
+                    {
+                        "id": tab.id,
+                        "name": tab.name,
+                    }
+                    for tab in layout.tabs
+                ],
+            }
+            for layout in self.list_layouts()
+        ]
+
+    def load_layout_document(self, layout_id: str) -> dict[str, object]:
+        return self._layout_service.load_layout_document(layout_id)
+
+    def validate_layout_document(self, payload: dict[str, object]) -> dict[str, object]:
+        panel_types = {panel_type for panel_type, _panel_id, _display_name in self.available_panels()}
+        panel_ids = {panel_id for _panel_type, panel_id, _display_name in self.available_panels()}
+        return self._layout_service.validate_layout_document(
+            payload,
+            allowed_panel_types=panel_types,
+            allowed_panel_ids=panel_ids,
+        )
+
+    def save_layout_document(self, payload: dict[str, object]) -> Layout:
+        panel_types = {panel_type for panel_type, _panel_id, _display_name in self.available_panels()}
+        panel_ids = {panel_id for _panel_type, panel_id, _display_name in self.available_panels()}
+        return self._layout_service.save_layout_document(
+            payload,
+            allowed_panel_types=panel_types,
+            allowed_panel_ids=panel_ids,
+        )
+
     def clone_layout(self, source_layout_id: str, target_layout_id: str, name: str | None = None) -> Layout:
         return self._layout_service.save_variant(
             source_layout_id=source_layout_id,

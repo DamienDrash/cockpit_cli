@@ -10,3 +10,10 @@ __pycache__/
 .venv/
 build/
 dist/
+vendor/
+/cockpit/
+/home/
+/src/cockpit/terminal/bindings/_libvterm.so
+/src/cockpit/terminal/bindings/cockpit/
+/src/cockpit/terminal/bindings/home/
+/web/layout-editor/node_modules/

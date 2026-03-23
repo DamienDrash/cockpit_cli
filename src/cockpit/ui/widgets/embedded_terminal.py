@@ -56,6 +56,10 @@ class EmbeddedTerminal(Static):
     def current_output(self) -> str:
         return self._trimmed_buffer()
 
+    def on_resize(self, event: events.Resize) -> None:
+        self._buffer.resize(event.size.height, event.size.width)
+        self._refresh_view()
+
     def page_up(self) -> None:
         lines = self._buffer_lines()
         if not lines:
@@ -224,7 +228,7 @@ class EmbeddedTerminal(Static):
         return lines
 
     def _trimmed_buffer(self) -> str:
-        return self._buffer.render_text()[-self._max_chars :]
+        return self._buffer.snapshot().render_text()[-self._max_chars :]
 
     def _viewport_step(self) -> int:
         size = getattr(self, "size", None)
