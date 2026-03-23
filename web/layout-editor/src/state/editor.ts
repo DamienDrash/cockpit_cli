@@ -235,3 +235,66 @@ export function movePanel(
   );
 }
 
+export function addTab(layout: LayoutDocument, title: string, panel: PanelRef): LayoutDocument {
+  const trimmed = title.trim();
+  const tabIdBase = trimmed.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "tab";
+  let tabId = tabIdBase;
+  let suffix = 2;
+  while (layout.tabs.some((tab) => tab.id === tabId)) {
+    tabId = `${tabIdBase}-${suffix}`;
+    suffix += 1;
+  }
+  return {
+    ...layout,
+    tabs: [
+      ...layout.tabs,
+      {
+        id: tabId,
+        name: trimmed || "New Tab",
+        root_split: {
+          orientation: "vertical",
+          ratio: 1,
+          children: [panel],
+        },
+      },
+    ],
+  };
+}
+
+export function renameTab(layout: LayoutDocument, tabId: string, name: string): LayoutDocument {
+  return {
+    ...layout,
+    tabs: layout.tabs.map((tab) => (tab.id === tabId ? { ...tab, name: name.trim() || tab.name } : tab)),
+  };
+}
+
+export function duplicateTab(layout: LayoutDocument, tabId: string): LayoutDocument {
+  const tab = getTab(layout, tabId);
+  let nextId = `${tab.id}-copy`;
+  let suffix = 2;
+  while (layout.tabs.some((candidate) => candidate.id === nextId)) {
+    nextId = `${tab.id}-copy-${suffix}`;
+    suffix += 1;
+  }
+  return {
+    ...layout,
+    tabs: [
+      ...layout.tabs,
+      {
+        ...structuredClone(tab),
+        id: nextId,
+        name: `${tab.name} Copy`,
+      },
+    ],
+  };
+}
+
+export function removeTab(layout: LayoutDocument, tabId: string): LayoutDocument {
+  if (layout.tabs.length <= 1) {
+    return layout;
+  }
+  return {
+    ...layout,
+    tabs: layout.tabs.filter((tab) => tab.id !== tabId),
+  };
+}

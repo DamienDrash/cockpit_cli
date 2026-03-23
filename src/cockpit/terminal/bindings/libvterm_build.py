@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import tempfile
 
 from cffi import FFI
 
@@ -59,8 +60,9 @@ def create_builder() -> FFI:
 
 if __name__ == "__main__":
     target_name = binding_dir() / "_libvterm.*"
+    build_root = Path(tempfile.mkdtemp(prefix="cockpit-libvterm-"))
     create_builder().compile(
-        tmpdir=str(binding_dir()),
+        tmpdir=str(build_root),
         target=str(target_name),
         verbose=True,
     )

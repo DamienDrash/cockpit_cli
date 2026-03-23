@@ -5,11 +5,15 @@ import { Inspector } from "./components/Inspector";
 import { LayoutCanvas } from "./components/LayoutCanvas";
 import { PanelLibrary } from "./components/PanelLibrary";
 import {
+  addTab,
   cloneLayout,
   defaultPanel,
+  duplicateTab,
   movePanel,
   removeSelected,
+  renameTab,
   replacePanel,
+  removeTab,
   setRatio,
   splitSelected,
   toggleOrientation,
@@ -174,6 +178,58 @@ export function App() {
                 <strong>{tab.id}</strong>
               </button>
             ))}
+            <div className="tab-tools">
+              <input
+                className="ghost-input compact"
+                onChange={(event) =>
+                  commit(
+                    renameTab(draftLayout, selectedTabId, event.currentTarget.value),
+                    `Renamed tab ${selectedTabId}.`,
+                  )
+                }
+                value={draftLayout.tabs.find((tab) => tab.id === selectedTabId)?.name ?? ""}
+              />
+              <button
+                onClick={() => {
+                  const nextLayout = addTab(
+                    draftLayout,
+                    `Tab ${draftLayout.tabs.length + 1}`,
+                    defaultPanel(panels),
+                  );
+                  const nextTabId = nextLayout.tabs[nextLayout.tabs.length - 1]?.id ?? selectedTabId;
+                  commit(nextLayout, `Added tab ${nextTabId}.`);
+                  setSelectedTabId(nextTabId);
+                  setSelectedPath(INITIAL_PATH);
+                }}
+                type="button"
+              >
+                Add tab
+              </button>
+              <button
+                onClick={() => {
+                  const nextLayout = duplicateTab(draftLayout, selectedTabId);
+                  const nextTabId = nextLayout.tabs[nextLayout.tabs.length - 1]?.id ?? selectedTabId;
+                  commit(nextLayout, `Duplicated tab ${selectedTabId} to ${nextTabId}.`);
+                  setSelectedTabId(nextTabId);
+                  setSelectedPath(INITIAL_PATH);
+                }}
+                type="button"
+              >
+                Duplicate
+              </button>
+              <button
+                onClick={() => {
+                  const nextLayout = removeTab(draftLayout, selectedTabId);
+                  const nextTabId = nextLayout.tabs[0]?.id ?? selectedTabId;
+                  commit(nextLayout, `Removed tab ${selectedTabId}.`);
+                  setSelectedTabId(nextTabId);
+                  setSelectedPath(INITIAL_PATH);
+                }}
+                type="button"
+              >
+                Remove
+              </button>
+            </div>
             <div className="status-copy">{status}</div>
           </div>
 
@@ -254,4 +310,3 @@ export function App() {
 }
 
 export default App;
-

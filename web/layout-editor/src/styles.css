@@ -123,6 +123,11 @@ textarea {
   cursor: pointer;
 }
 
+.ghost-input.compact {
+  width: 180px;
+  padding: 10px 12px;
+}
+
 .editor-grid {
   display: grid;
   grid-template-columns: 320px minmax(0, 1fr) 360px;
@@ -182,6 +187,13 @@ textarea {
   gap: 10px;
   align-items: center;
   flex-wrap: wrap;
+}
+
+.tab-tools {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  margin-left: 8px;
 }
 
 .tab-chip {
