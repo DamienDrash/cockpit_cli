@@ -48,7 +48,18 @@ class FakeWebAdminService:
             "command_count": 4,
             "panel_types": ["work", "db"],
             "datasources": {"total_profiles": 0, "enabled_profiles": 0, "backends": []},
-            "secrets": {"total_entries": 1, "providers": ["env"], "keyring_available": True},
+            "secrets": {
+                "total_entries": 1,
+                "providers": ["env", "vault"],
+                "keyring_available": True,
+                "rotated_entries": 0,
+                "vault_profiles": 1,
+                "active_vault_sessions": 1,
+                "cached_vault_sessions": 0,
+                "renewable_leases": 1,
+                "local_cache_available": True,
+                "primary_provider": "vault",
+            },
             "plugins": {
                 "count": 0,
                 "enabled": 0,
@@ -108,6 +119,48 @@ class FakeWebAdminService:
         del secret_value
         self.rotated_secrets.append(name)
         return _SecretObject(name=name, provider="keyring", reference={"provider": "keyring", "service": "cockpit", "username": name})
+
+    def list_vault_profiles(self):
+        return [
+            _VaultProfileObject(),
+        ]
+
+    def save_vault_profile(self, payload: dict[str, object]):
+        del payload
+        return _VaultProfileObject()
+
+    def delete_vault_profile(self, profile_id: str, *, revoke: bool = False) -> None:
+        del profile_id, revoke
+
+    def login_vault_profile(self, profile_id: str, payload: dict[str, object]):
+        del payload
+        return _VaultSessionObject(profile_id=profile_id or "ops-vault")
+
+    def logout_vault_profile(self, profile_id: str, *, revoke: bool = False) -> None:
+        del profile_id, revoke
+
+    def vault_profile_health(self, profile_id: str) -> dict[str, object]:
+        return {
+            "profile_id": profile_id,
+            "health": {"initialized": True, "sealed": False},
+        }
+
+    def list_vault_sessions(self):
+        return [_VaultSessionObject()]
+
+    def list_vault_leases(self):
+        return [_VaultLeaseObject()]
+
+    def renew_vault_lease(self, lease_id: str, *, increment_seconds: int | None = None):
+        del increment_seconds
+        return _VaultLeaseObject(lease_id=lease_id)
+
+    def revoke_vault_lease(self, lease_id: str) -> None:
+        del lease_id
+
+    def transit_operation(self, payload: dict[str, object]) -> dict[str, object]:
+        del payload
+        return {"operation": "encrypt", "ciphertext": "vault:v1:deadbeef"}
 
     def list_plugins(self):
         return []
@@ -259,6 +312,38 @@ class _SecretObject:
     def __post_init__(self) -> None:
         if self.reference is None:
             self.reference = {"provider": "env", "name": "ANALYTICS_DB_PASS"}
+
+
+@dataclass
+class _VaultProfileObject:
+    id: str = "ops-vault"
+    name: str = "Ops Vault"
+    address: str = "https://vault.internal:8200"
+    auth_type: str = "token"
+    auth_mount: str | None = None
+    role_name: str | None = None
+    allow_local_cache: bool = True
+    verify_tls: bool = True
+
+
+@dataclass
+class _VaultSessionObject:
+    profile_id: str = "ops-vault"
+    auth_type: str = "token"
+    cached: bool = False
+    renewable: bool = True
+    expires_at: datetime | None = datetime(2026, 3, 23, tzinfo=UTC)
+
+
+@dataclass
+class _VaultLeaseObject:
+    lease_id: str = "lease-1"
+    profile_id: str = "ops-vault"
+    source_kind: str = "dynamic"
+    mount: str = "database"
+    path: str = "creds/app"
+    renewable: bool = True
+    expires_at: datetime | None = datetime(2026, 3, 23, tzinfo=UTC)
 
 
 @dataclass

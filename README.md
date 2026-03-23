@@ -17,7 +17,7 @@ Docker, Cron, DB, HTTP, and layout management.
 - command palette, slash commands, and keybindings through one dispatcher
 - guarded mutating flows for Docker, Cron, DB, and HTTP actions
 - local web admin for datasource profiles, plugin installs, layouts, and diagnostics
-- managed secret references with optional keyring-backed values and keyring rotation
+- Vault-first secret registry with compatibility providers for env, file, and keyring
 - plugin install/update/pin/remove with repo or package requirements
 - plugin compatibility, permission allowlists, and on-disk integrity verification before runtime activation
 - broad datasource support through SQLAlchemy dialects plus non-SQL adapters
@@ -95,10 +95,10 @@ Or install only the extras you need, for example:
 pip install -e '.[postgres,mysql,duckdb,mongo,redis]'
 ```
 
-Enable keyring-backed secret resolution:
+Enable Vault, encrypted local cache support, and keyring compatibility:
 
 ```bash
-pip install -e '.[secrets]'
+pip install -e '.[vault,secrets]'
 ```
 
 ## Quick Start
@@ -169,7 +169,7 @@ The local web admin exposes:
 
 - datasource profile creation and deletion
 - datasource execution for quick operator queries and mutations
-- managed secret references for env/file/keyring providers
+- Vault profile management, login, lease diagnostics, transit actions, and managed secret references
 - plugin install/update/pin/enable/remove
 - layout cloning and split edits
 - diagnostics for commands, panels, datasources, secrets, plugins, tunnels, and tool availability
@@ -232,6 +232,19 @@ profiles:
         provider: keyring
         service: cockpit
         username: analytics-password
+
+Vault-backed references are also supported directly, for example:
+
+```yaml
+profiles:
+  - id: app-postgres
+    name: App Postgres
+    backend: postgres
+    connection_url: postgresql://${DB_USER}:${DB_PASS}@db.internal:5432/app
+    secret_refs:
+      DB_USER: vault+dynamic://ops-vault/database/app#username
+      DB_PASS: vault+dynamic://ops-vault/database/app#password
+```
 ```
 
 ## Plugin System
@@ -307,8 +320,11 @@ Managed secrets:
 
 - create them in the web admin under `Secrets`
 - reference them inside datasource `secret_refs` as `stored:secret-name`
-- keyring-backed entries can store the actual value directly if the optional `keyring` extra is installed
-- keyring-backed entries can be rotated in place from the web admin without changing datasource references
+- Vault profiles support `token`, `AppRole`, and `OIDC/JWT` login modes
+- Vault-managed entries support `kv` and dynamic secret references
+- Vault transit operations are available from the web admin for encrypt/decrypt/sign/verify
+- Vault sessions can use encrypted local cache where enabled
+- compatibility `env`, `file`, and `keyring` providers remain supported for migration and bootstrap flows
 
 Plugin trust policy:
 

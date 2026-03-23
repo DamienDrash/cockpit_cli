@@ -222,6 +222,46 @@ def _handle_post(service: WebAdminService, path: str, form: dict[str, str]) -> t
         name = form.get("name", "")
         rotated = service.rotate_secret(name, secret_value=form.get("secret_value", ""))
         return "/secrets", f"Rotated secret reference {rotated.name}."
+    if path == "/secrets/vault/profile/save":
+        profile = service.save_vault_profile(form)
+        return "/secrets", f"Saved Vault profile {profile.name}."
+    if path == "/secrets/vault/profile/delete":
+        profile_id = form.get("profile_id", "")
+        revoke = form.get("revoke", "0") == "1"
+        service.delete_vault_profile(profile_id, revoke=revoke)
+        return "/secrets", f"Deleted Vault profile {profile_id}."
+    if path == "/secrets/vault/login":
+        session = service.login_vault_profile(form.get("profile_id", ""), form)
+        return "/secrets", f"Logged into Vault profile {session.profile_id}."
+    if path == "/secrets/vault/logout":
+        profile_id = form.get("profile_id", "")
+        revoke = form.get("revoke", "0") == "1"
+        service.logout_vault_profile(profile_id, revoke=revoke)
+        return "/secrets", f"Logged out Vault profile {profile_id}."
+    if path == "/secrets/vault/health":
+        profile_id = form.get("profile_id", "")
+        payload = service.vault_profile_health(profile_id)
+        health = payload.get("health", {})
+        if isinstance(health, dict):
+            status = health.get("initialized", health.get("sealed", "unknown"))
+        else:
+            status = "unknown"
+        return "/secrets", f"Vault profile {profile_id} health checked ({status})."
+    if path == "/secrets/vault/lease/renew":
+        lease_id = form.get("lease_id", "")
+        increment_raw = form.get("increment_seconds", "").strip()
+        increment = int(increment_raw) if increment_raw.isdigit() else None
+        lease = service.renew_vault_lease(lease_id, increment_seconds=increment)
+        return "/secrets", f"Renewed lease {lease.lease_id}."
+    if path == "/secrets/vault/lease/revoke":
+        lease_id = form.get("lease_id", "")
+        service.revoke_vault_lease(lease_id)
+        return "/secrets", f"Revoked lease {lease_id}."
+    if path == "/secrets/vault/transit":
+        result = service.transit_operation(form)
+        operation = str(result.get("operation", "transit"))
+        detail = next((str(value) for key, value in result.items() if key != "operation"), "ok")
+        return "/secrets", f"Transit {operation}: {detail}"
     if path == "/plugins/install":
         plugin = service.install_plugin(form)
         return "/plugins", f"Installed plugin {plugin.name}."
@@ -372,7 +412,7 @@ def _home_body(service: WebAdminService) -> str:
     return (
         "<div class='grid'>"
         f"<div class='card'><h3>Datasources</h3><p>{escape(str(datasource_diag['total_profiles']))} total / {escape(str(datasource_diag['enabled_profiles']))} enabled</p></div>"
-        f"<div class='card'><h3>Secrets</h3><p>{escape(str(secret_diag['total_entries']))} managed / {escape(str(secret_diag.get('rotated_entries', 0)))} rotated / keyring={escape(str(secret_diag['keyring_available']))}</p></div>"
+        f"<div class='card'><h3>Secrets</h3><p>{escape(str(secret_diag['total_entries']))} managed / {escape(str(secret_diag.get('rotated_entries', 0)))} rotated / vault profiles={escape(str(secret_diag.get('vault_profiles', 0)))} / active sessions={escape(str(secret_diag.get('active_vault_sessions', 0)))} / keyring={escape(str(secret_diag['keyring_available']))}</p></div>"
         f"<div class='card'><h3>Plugins</h3><p>{escape(str(plugin_diag['count']))} installed / {escape(str(plugin_diag['enabled']))} enabled</p></div>"
         f"<div class='card'><h3>Trusted Plugin Sources</h3><p>{escape(str(len(plugin_diag.get('trusted_sources', []))))} configured</p></div>"
         f"<div class='card'><h3>Panels</h3><p>{escape(', '.join(diagnostics['panel_types']))}</p></div>"
@@ -480,10 +520,13 @@ def _datasource_execute_card(
 
 def _secret_body(service: WebAdminService) -> str:
     entries = service.list_secrets()
+    profiles = service.list_vault_profiles()
+    sessions = {session.profile_id: session for session in service.list_vault_sessions()}
+    leases = service.list_vault_leases()
     rows = []
     for entry in entries:
         rotate_form = ""
-        if entry.provider == "keyring":
+        if entry.provider in {"keyring", "vault"}:
             rotate_form = (
                 f"<form class='inline' method='post' action='/secrets/rotate'>"
                 f"<input type='hidden' name='name' value='{escape(entry.name)}'>"
@@ -502,22 +545,106 @@ def _secret_body(service: WebAdminService) -> str:
             "</td>"
             "</tr>"
         )
+    profile_rows = []
+    for profile in profiles:
+        session = sessions.get(profile.id)
+        session_text = "not authenticated"
+        if session is not None:
+            expiry = escape(str(session.expires_at or "(no ttl)"))
+            session_text = (
+                f"{escape(session.auth_type)} / {'cached' if session.cached else 'live'}"
+                f"<br><span class='muted'>renewable={escape(str(session.renewable))} expires={expiry}</span>"
+            )
+        profile_rows.append(
+            "<tr>"
+            f"<td><strong>{escape(profile.name)}</strong><br><span class='muted'>{escape(profile.id)}</span></td>"
+            f"<td>{escape(profile.address)}<br><span class='muted'>auth={escape(profile.auth_type)} mount={escape(profile.auth_mount or '(default)')} role={escape(profile.role_name or '(none)')}</span></td>"
+            f"<td>{session_text}<br><span class='muted'>cache={escape(str(profile.allow_local_cache))} verify_tls={escape(str(profile.verify_tls))}</span></td>"
+            "<td>"
+            f"<form class='inline' method='post' action='/secrets/vault/health'><input type='hidden' name='profile_id' value='{escape(profile.id)}'><button type='submit'>Health</button></form> "
+            f"<form class='inline' method='post' action='/secrets/vault/logout'><input type='hidden' name='profile_id' value='{escape(profile.id)}'><button type='submit'>Logout</button></form> "
+            f"<form class='inline' method='post' action='/secrets/vault/profile/delete'><input type='hidden' name='profile_id' value='{escape(profile.id)}'><button type='submit'>Delete</button></form>"
+            "</td>"
+            "</tr>"
+        )
+    lease_rows = []
+    for lease in leases:
+        lease_rows.append(
+            "<tr>"
+            f"<td><strong>{escape(lease.lease_id)}</strong><br><span class='muted'>{escape(lease.profile_id)}</span></td>"
+            f"<td>{escape(lease.mount)}/{escape(lease.path)}<br><span class='muted'>kind={escape(lease.source_kind)}</span></td>"
+            f"<td>renewable={escape(str(lease.renewable))}<br><span class='muted'>expires={escape(str(lease.expires_at or '(none)'))}</span></td>"
+            "<td>"
+            f"<form class='inline' method='post' action='/secrets/vault/lease/renew'><input type='hidden' name='lease_id' value='{escape(lease.lease_id)}'><input name='increment_seconds' placeholder='seconds' style='width:8rem'><button type='submit'>Renew</button></form> "
+            f"<form class='inline' method='post' action='/secrets/vault/lease/revoke'><input type='hidden' name='lease_id' value='{escape(lease.lease_id)}'><button type='submit'>Revoke</button></form>"
+            "</td>"
+            "</tr>"
+        )
     return (
+        "<div class='card'><h3>Vault profiles</h3>"
+        "<form method='post' action='/secrets/vault/profile/save'>"
+        "<div class='grid'>"
+        "<div><label>Profile id</label><input name='profile_id' placeholder='ops-vault'></div>"
+        "<div><label>Name</label><input name='name' required placeholder='Ops Vault'></div>"
+        "<div><label>Address</label><input name='address' required placeholder='https://vault.internal:8200'></div>"
+        "<div><label>Auth type</label><select name='auth_type'><option value='token'>token</option><option value='approle'>approle</option><option value='jwt'>jwt</option><option value='oidc'>oidc</option></select></div>"
+        "<div><label>Auth mount</label><input name='auth_mount' placeholder='approle or jwt'></div>"
+        "<div><label>Role name</label><input name='role_name' placeholder='used for jwt/oidc'></div>"
+        "<div><label>Namespace</label><input name='namespace'></div>"
+        "<div><label>CA cert path</label><input name='ca_cert_path' placeholder='/etc/ssl/certs/vault-ca.pem'></div>"
+        "<div><label>Risk</label><select name='risk_level'><option>dev</option><option>stage</option><option>prod</option></select></div>"
+        "<div><label>Tags</label><input name='tags' placeholder='ops, vault'></div>"
+        "<div><label>Cache TTL seconds</label><input name='cache_ttl_seconds' value='3600'></div>"
+        "<div><label>Description</label><input name='description' placeholder='Primary Vault cluster'></div>"
+        "</div>"
+        "<p><label><input type='checkbox' name='allow_local_cache' value='1'> Allow encrypted local session cache</label></p>"
+        "<p><label><input type='checkbox' name='verify_tls' value='0'> Disable TLS verification</label></p>"
+        "<p><button type='submit'>Save Vault profile</button></p></form></div>"
+        "<div class='card'><h3>Vault login</h3>"
+        "<form method='post' action='/secrets/vault/login'>"
+        "<div class='grid'>"
+        "<div><label>Profile id</label><input name='profile_id' required placeholder='ops-vault'></div>"
+        "<div><label>Token</label><input name='token' type='password'></div>"
+        "<div><label>AppRole role_id</label><input name='role_id'></div>"
+        "<div><label>AppRole secret_id</label><input name='secret_id' type='password'></div>"
+        "<div><label>JWT / OIDC token</label><input name='jwt' type='password'></div>"
+        "</div><p><button type='submit'>Login</button></p></form></div>"
+        "<div class='card'><h3>Vault transit</h3>"
+        "<form method='post' action='/secrets/vault/transit'>"
+        "<div class='grid'>"
+        "<div><label>Profile id</label><input name='profile_id' required placeholder='ops-vault'></div>"
+        "<div><label>Mount</label><input name='mount' value='transit'></div>"
+        "<div><label>Key name</label><input name='key_name' required placeholder='app-key'></div>"
+        "<div><label>Operation</label><select name='operation'><option value='encrypt'>encrypt</option><option value='decrypt'>decrypt</option><option value='sign'>sign</option><option value='verify'>verify</option></select></div>"
+        "<div><label>Value</label><input name='value' required placeholder='plaintext or ciphertext'></div>"
+        "<div><label>Signature</label><input name='signature' placeholder='only for verify'></div>"
+        "</div><p><button type='submit'>Run transit operation</button></p></form></div>"
         "<div class='card'><h3>Create managed secret reference</h3>"
         "<form method='post' action='/secrets/create'>"
         "<div class='grid'>"
         "<div><label>Name</label><input name='name' required placeholder='analytics-db-pass'></div>"
-        "<div><label>Provider</label><select name='provider'><option value='env'>env</option><option value='file'>file</option><option value='keyring'>keyring</option></select></div>"
+        "<div><label>Provider</label><select name='provider'><option value='vault'>vault</option><option value='env'>env</option><option value='file'>file</option><option value='keyring'>keyring</option></select></div>"
         "<div><label>Description</label><input name='description' placeholder='Analytics DB password'></div>"
         "<div><label>Tags</label><input name='tags' placeholder='analytics, prod'></div>"
+        "<div><label>Vault profile id</label><input name='vault_profile_id' placeholder='ops-vault'></div>"
+        "<div><label>Vault kind</label><select name='vault_kind'><option value='kv'>kv</option><option value='dynamic'>dynamic</option></select></div>"
+        "<div><label>Vault mount</label><input name='vault_mount' placeholder='kv or database'></div>"
+        "<div><label>Vault path</label><input name='vault_path' placeholder='apps/api or fallback role'></div>"
+        "<div><label>Vault role</label><input name='vault_role' placeholder='dynamic role'></div>"
+        "<div><label>Vault field</label><input name='vault_field' placeholder='password'></div>"
+        "<div><label>Vault version</label><input name='vault_version' placeholder='optional'></div>"
         "<div><label>Env var name</label><input name='env_name' placeholder='ANALYTICS_DB_PASS'></div>"
         "<div><label>File path</label><input name='file_path' placeholder='secrets/db-pass.txt'></div>"
         "<div><label>Keyring service</label><input name='keyring_service' placeholder='cockpit'></div>"
         "<div><label>Keyring username</label><input name='keyring_username' placeholder='analytics-db-pass'></div>"
         "</div>"
         "<p><label>Keyring value</label><input name='secret_value' type='password' placeholder='Only used for keyring entries'></p>"
-        "<p class='muted'>Use these in datasource secret refs as <code>stored:secret-name</code>.</p>"
+        "<p class='muted'>Use these in datasource secret refs as <code>stored:secret-name</code>. Vault refs are the preferred primary path.</p>"
         "<p><button type='submit'>Save secret reference</button></p></form></div>"
+        "<div class='card'><h3>Vault sessions</h3><table><thead><tr><th>Profile</th><th>Target</th><th>Status</th><th>Actions</th></tr></thead>"
+        f"<tbody>{''.join(profile_rows) if profile_rows else '<tr><td colspan=\"4\">No Vault profiles saved.</td></tr>'}</tbody></table></div>"
+        "<div class='card'><h3>Vault leases</h3><table><thead><tr><th>Lease</th><th>Source</th><th>Status</th><th>Actions</th></tr></thead>"
+        f"<tbody>{''.join(lease_rows) if lease_rows else '<tr><td colspan=\"4\">No active Vault leases recorded.</td></tr>'}</tbody></table></div>"
         "<div class='card'><h3>Managed secrets</h3><table><thead><tr><th>Name</th><th>Reference</th><th>Description</th><th>Actions</th></tr></thead>"
         f"<tbody>{''.join(rows) if rows else '<tr><td colspan=\"4\">No managed secrets saved.</td></tr>'}</tbody></table></div>"
     )

@@ -53,6 +53,11 @@ chroma = [
   "chromadb>=0.5",
 ]
 secrets = [
+  "cryptography>=44.0",
+  "keyring>=25.6",
+]
+vault = [
+  "cryptography>=44.0",
   "keyring>=25.6",
 ]
 all-datasources = [

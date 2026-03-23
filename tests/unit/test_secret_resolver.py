@@ -53,3 +53,48 @@ class SecretResolverTests(unittest.TestCase):
         value = resolver.resolve_text("postgres://${TOKEN}", {"TOKEN": "stored:analytics-pass"})
 
         self.assertEqual(value, "postgres://value-for-analytics-pass")
+
+    def test_dispatches_vault_refs_and_reuses_dynamic_results_per_resolution(self) -> None:
+        calls: list[tuple[str, str, str]] = []
+
+        def lookup(reference: dict[str, object], *, resolution_cache: dict[str, object] | None = None) -> str:
+            del resolution_cache
+            calls.append(
+                (
+                    str(reference.get("kind")),
+                    str(reference.get("mount")),
+                    str(reference.get("field")),
+                )
+            )
+            if reference.get("kind") == "dynamic":
+                return "dyn-user" if reference.get("field") == "username" else "dyn-pass"
+            return "vault-secret"
+
+        resolver = SecretResolver(vault_reference_lookup=lookup)
+
+        value = resolver.resolve_text(
+            "postgres://${DB_USER}:${DB_PASS}@localhost/app",
+            {
+                "DB_USER": "vault+dynamic://ops-vault/database/app#username",
+                "DB_PASS": "vault+dynamic://ops-vault/database/app#password",
+            },
+        )
+
+        self.assertEqual(value, "postgres://dyn-user:dyn-pass@localhost/app")
+        self.assertEqual(
+            calls,
+            [
+                ("dynamic", "database", "username"),
+                ("dynamic", "database", "password"),
+            ],
+        )
+
+    def test_rejects_vault_transit_interpolation(self) -> None:
+        resolver = SecretResolver(vault_reference_lookup=lambda reference, *, resolution_cache=None: "ignored")
+
+        with self.assertRaisesRegex(ValueError, "transit"):
+            resolver.resolve_ref("vault+transit://ops-vault/app-key")
+
+
+if __name__ == "__main__":
+    unittest.main()

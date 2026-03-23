@@ -182,10 +182,11 @@ def build_container(
     http_adapter = http_adapter or HttpAdapter()
     git_adapter = GitAdapter(ssh_command_runner=ssh_command_runner)
     remote_filesystem_adapter = RemoteFilesystemAdapter(ssh_command_runner)
-    secret_service = SecretService(web_admin_state_repository)
+    secret_service = SecretService(web_admin_state_repository, start=start)
     secret_resolver = SecretResolver(
         base_path=project_root,
         named_reference_lookup=secret_service.lookup_reference,
+        vault_reference_lookup=secret_service.resolve_vault_reference,
     )
     tunnel_manager = SSHTunnelManager()
     clipboard_service = ClipboardService()

@@ -15,7 +15,7 @@ from cockpit.application.services.plugin_service import PluginService
 from cockpit.application.services.secret_service import SecretService
 from cockpit.domain.models.datasource import DataSourceOperationResult, DataSourceProfile
 from cockpit.domain.models.layout import Layout
-from cockpit.domain.models.secret import ManagedSecretEntry
+from cockpit.domain.models.secret import ManagedSecretEntry, VaultProfile, VaultSession, VaultLease
 from cockpit.infrastructure.persistence.repositories import WebAdminStateRepository
 from cockpit.infrastructure.ssh.tunnel_manager import SSHTunnelManager
 from cockpit.shared.enums import SessionTargetKind
@@ -137,6 +137,17 @@ class WebAdminService:
             keyring_service=self._optional_str(payload.get("keyring_service")),
             keyring_username=self._optional_str(payload.get("keyring_username")),
             secret_value=self._optional_str(payload.get("secret_value")),
+            vault_profile_id=self._optional_str(payload.get("vault_profile_id")),
+            vault_kind=self._optional_str(payload.get("vault_kind")),
+            vault_mount=self._optional_str(payload.get("vault_mount")),
+            vault_path=self._optional_str(payload.get("vault_path")),
+            vault_field=self._optional_str(payload.get("vault_field")),
+            vault_version=(
+                int(payload["vault_version"])
+                if str(payload.get("vault_version", "")).strip().isdigit()
+                else None
+            ),
+            vault_role=self._optional_str(payload.get("vault_role")),
         )
 
     def delete_secret(self, name: str, *, purge_value: bool = False) -> None:
@@ -144,6 +155,70 @@ class WebAdminService:
 
     def rotate_secret(self, name: str, *, secret_value: str) -> ManagedSecretEntry:
         return self._secret_service.rotate_entry(name, secret_value=secret_value)
+
+    def list_vault_profiles(self) -> list[VaultProfile]:
+        return self._secret_service.list_vault_profiles()
+
+    def save_vault_profile(self, payload: dict[str, object]) -> VaultProfile:
+        return self._secret_service.save_vault_profile(
+            profile_id=self._optional_str(payload.get("profile_id")),
+            name=str(payload.get("name", "")),
+            address=str(payload.get("address", "")),
+            auth_type=str(payload.get("auth_type", "token")),
+            auth_mount=self._optional_str(payload.get("auth_mount")),
+            role_name=self._optional_str(payload.get("role_name")),
+            namespace=self._optional_str(payload.get("namespace")),
+            description=self._optional_str(payload.get("description")),
+            verify_tls=str(payload.get("verify_tls", "1")) != "0",
+            ca_cert_path=self._optional_str(payload.get("ca_cert_path")),
+            allow_local_cache=str(payload.get("allow_local_cache", "0")) == "1",
+            cache_ttl_seconds=int(payload.get("cache_ttl_seconds", 3600) or 3600),
+            risk_level=str(payload.get("risk_level", "dev")),
+            tags=self._csv_list(payload.get("tags")),
+        )
+
+    def delete_vault_profile(self, profile_id: str, *, revoke: bool = False) -> None:
+        self._secret_service.delete_vault_profile(profile_id, revoke=revoke)
+
+    def login_vault_profile(self, profile_id: str, payload: dict[str, object]) -> VaultSession:
+        return self._secret_service.login_vault_profile(
+            profile_id,
+            token=self._optional_str(payload.get("token")),
+            role_id=self._optional_str(payload.get("role_id")),
+            secret_id=self._optional_str(payload.get("secret_id")),
+            jwt=self._optional_str(payload.get("jwt")),
+        )
+
+    def logout_vault_profile(self, profile_id: str, *, revoke: bool = False) -> None:
+        self._secret_service.logout_vault_profile(profile_id, revoke=revoke)
+
+    def vault_profile_health(self, profile_id: str) -> dict[str, object]:
+        return self._secret_service.vault_profile_health(profile_id)
+
+    def list_vault_sessions(self) -> list[VaultSession]:
+        return self._secret_service.list_vault_sessions()
+
+    def list_vault_leases(self) -> list[VaultLease]:
+        return self._secret_service.list_vault_leases()
+
+    def renew_vault_lease(self, lease_id: str, *, increment_seconds: int | None = None) -> VaultLease:
+        return self._secret_service.renew_vault_lease(
+            lease_id,
+            increment_seconds=increment_seconds,
+        )
+
+    def revoke_vault_lease(self, lease_id: str) -> None:
+        self._secret_service.revoke_vault_lease(lease_id)
+
+    def transit_operation(self, payload: dict[str, object]) -> dict[str, object]:
+        return self._secret_service.transit_operation(
+            profile_id=str(payload.get("profile_id", "")),
+            mount=str(payload.get("mount", "transit")),
+            key_name=str(payload.get("key_name", "")),
+            operation=str(payload.get("operation", "encrypt")),
+            value=str(payload.get("value", "")),
+            signature=self._optional_str(payload.get("signature")),
+        )
 
     def list_plugins(self):
         return self._plugin_service.list_plugins()
