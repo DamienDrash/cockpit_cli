@@ -87,8 +87,8 @@ Write manifest and checksums:
 PYTHONPATH=src python scripts/release_tooling.py manifest \
   --root release-assets \
   --output release-assets/release-manifest.json \
-  --version 0.1.0 \
-  --git-ref refs/tags/v0.1.0
+  --version <version> \
+  --git-ref refs/tags/v<version>
 
 PYTHONPATH=src python scripts/release_tooling.py checksums \
   --root release-assets \
@@ -102,8 +102,8 @@ PYTHONPATH=src python scripts/release_tooling.py checksums \
 3. Create and push a tag such as:
 
 ```bash
-git tag v0.1.0
-git push origin v0.1.0
+git tag v<version>
+git push origin v<version>
 ```
 
 4. Wait for `.github/workflows/release.yml` to complete.
@@ -129,17 +129,17 @@ Verify a wheel against its Sigstore bundle:
 
 ```bash
 python -m pip install sigstore
-python -m sigstore verify github cockpit_cli-0.1.0-py3-none-any.whl \
-  --bundle cockpit_cli-0.1.0-py3-none-any.whl.sigstore.json \
+python -m sigstore verify github cockpit_cli-<version>-py3-none-any.whl \
+  --bundle cockpit_cli-<version>-py3-none-any.whl.sigstore.json \
   --repository DamienDrash/cockpit_cli \
-  --ref refs/tags/v0.1.0 \
+  --ref refs/tags/v<version> \
   --trigger push
 ```
 
 Verify GitHub provenance:
 
 ```bash
-gh attestation verify cockpit_cli-0.1.0-py3-none-any.whl \
+gh attestation verify cockpit_cli-<version>-py3-none-any.whl \
   --repo DamienDrash/cockpit_cli
 ```
 

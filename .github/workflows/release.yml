@@ -218,7 +218,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: cockpit-release-dist
-          path: .
+          path: release-assets
 
       - name: Prepare Python SBOM environment
         run: |
@@ -268,7 +268,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: cockpit-release-bundle
-          path: .
+          path: release-assets
 
       - name: Prepare attestation directory
         run: mkdir -p release-assets/attestations
@@ -310,7 +310,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: cockpit-release-final
-          path: .
+          path: release-assets
 
       - name: Create GitHub release
         uses: softprops/action-gh-release@v2
@@ -333,7 +333,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: cockpit-release-final
-          path: .
+          path: release-assets
 
       - name: Publish package distributions to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1

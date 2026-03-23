@@ -338,17 +338,17 @@ Verify a signed artifact:
 
 ```bash
 python -m pip install sigstore
-python -m sigstore verify github cockpit_cli-0.1.0-py3-none-any.whl \
-  --bundle cockpit_cli-0.1.0-py3-none-any.whl.sigstore.json \
+python -m sigstore verify github cockpit_cli-<version>-py3-none-any.whl \
+  --bundle cockpit_cli-<version>-py3-none-any.whl.sigstore.json \
   --repository DamienDrash/cockpit_cli \
-  --ref refs/tags/v0.1.0 \
+  --ref refs/tags/v<version> \
   --trigger push
 ```
 
 Verify provenance:
 
 ```bash
-gh attestation verify cockpit_cli-0.1.0-py3-none-any.whl \
+gh attestation verify cockpit_cli-<version>-py3-none-any.whl \
   --repo DamienDrash/cockpit_cli
 ```
 
