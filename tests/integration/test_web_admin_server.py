@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 import json
 from threading import Thread
@@ -39,6 +39,10 @@ class FakeWebAdminService:
         self.closed_tunnels: list[str] = []
         self.rotated_secrets: list[str] = []
         self.reconnected_tunnels: list[str] = []
+        self.acknowledged_incidents: list[str] = []
+        self.closed_incidents: list[str] = []
+        self.retried_components: list[str] = []
+        self.reset_components: list[str] = []
 
     def diagnostics(self) -> dict[str, object]:
         return {
@@ -78,6 +82,41 @@ class FakeWebAdminService:
                     "alive": True,
                 }
             ],
+            "health": {
+                "healthy": 3,
+                "degraded": 0,
+                "recovering": 1,
+                "failed": 0,
+                "quarantined": 1,
+            },
+            "quarantined_components": [
+                {
+                    "component_id": "ssh-tunnel:pg-main",
+                    "component_kind": "ssh_tunnel",
+                    "status": "quarantined",
+                }
+            ],
+            "active_incidents": [
+                {
+                    "id": "inc-1",
+                    "component_id": "ssh-tunnel:pg-main",
+                    "component_kind": "ssh_tunnel",
+                    "severity": "high",
+                    "status": "open",
+                    "summary": "tunnel exited",
+                    "updated_at": "2026-03-23T00:00:00+00:00",
+                }
+            ],
+            "recent_recovery_attempts": [
+                {"id": "rcv-1", "status": "failed"},
+            ],
+            "operations": {
+                "docker": [{"name": "web"}],
+                "db": [{"profile_id": "pg-main"}],
+                "curl": [{"url": "https://example.com"}],
+                "recent_guard_decisions": [{"outcome": "allow"}],
+                "recent_operations": [{"summary": "ok"}],
+            },
             "tools": {"git": True, "docker": True, "ssh": True},
         }
 
@@ -98,8 +137,16 @@ class FakeWebAdminService:
         del profile_id
         return _NamedObject(name="Inspection")
 
-    def execute_datasource(self, profile_id: str, statement: str, *, operation: str):
-        del profile_id, statement, operation
+    def execute_datasource(
+        self,
+        profile_id: str,
+        statement: str,
+        *,
+        operation: str,
+        confirmed: bool = False,
+        elevated_mode: bool = False,
+    ):
+        del profile_id, statement, operation, confirmed, elevated_mode
         return SimpleResult("Datasource command executed.")
 
     def last_datasource_result(self):
@@ -299,6 +346,31 @@ class FakeWebAdminService:
     def reconnect_tunnel(self, profile_id: str) -> None:
         self.reconnected_tunnels.append(profile_id)
 
+    def list_incidents(self, *, status=None, severity=None, component_kind=None, search=None):
+        del status, severity, component_kind, search
+        return [
+            _IncidentObject(),
+        ]
+
+    def incident_detail(self, incident_id: str):
+        del incident_id
+        return _IncidentDetailObject()
+
+    def acknowledge_incident(self, incident_id: str):
+        self.acknowledged_incidents.append(incident_id)
+        return _IncidentObject(id=incident_id, status="acknowledged")
+
+    def close_incident(self, incident_id: str):
+        self.closed_incidents.append(incident_id)
+        return _IncidentObject(id=incident_id, status="closed")
+
+    def reset_component_quarantine(self, component_id: str) -> None:
+        self.reset_components.append(component_id)
+
+    def retry_component_recovery(self, component_id: str) -> bool:
+        self.retried_components.append(component_id)
+        return True
+
 
 @dataclass
 class _SecretObject:
@@ -352,6 +424,77 @@ class SimpleResult:
 
 
 @dataclass
+class _IncidentObject:
+    id: str = "inc-1"
+    component_id: str = "ssh-tunnel:pg-main"
+    component_kind: str = "ssh_tunnel"
+    severity: str = "high"
+    status: str = "open"
+    title: str = "Tunnel unhealthy"
+    summary: str = "tunnel exited"
+    updated_at: str = "2026-03-23T00:00:00+00:00"
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "id": self.id,
+            "component_id": self.component_id,
+            "component_kind": self.component_kind,
+            "severity": self.severity,
+            "status": self.status,
+            "title": self.title,
+            "summary": self.summary,
+            "updated_at": self.updated_at,
+        }
+
+
+@dataclass
+class _IncidentStatusValue:
+    value: str
+
+
+@dataclass
+class _IncidentDetailIncident:
+    id: str = "inc-1"
+    component_id: str = "ssh-tunnel:pg-main"
+    title: str = "Tunnel unhealthy"
+    summary: str = "tunnel exited"
+    status: _IncidentStatusValue = field(default_factory=lambda: _IncidentStatusValue("open"))
+    severity: _IncidentStatusValue = field(default_factory=lambda: _IncidentStatusValue("high"))
+
+
+@dataclass
+class _IncidentTimelineItem:
+    event_type: str = "opened"
+
+    def to_dict(self) -> dict[str, object]:
+        return {"event_type": self.event_type}
+
+
+@dataclass
+class _RecoveryAttemptItem:
+    attempt_number: int = 1
+
+    def to_dict(self) -> dict[str, object]:
+        return {"attempt_number": self.attempt_number}
+
+
+@dataclass
+class _IncidentDetailObject:
+    incident: _IncidentDetailIncident = field(default_factory=_IncidentDetailIncident)
+    timeline: list[_IncidentTimelineItem] = None  # type: ignore[assignment]
+    recovery_attempts: list[_RecoveryAttemptItem] = None  # type: ignore[assignment]
+    current_health: dict[str, object] = None  # type: ignore[assignment]
+
+    def __post_init__(self) -> None:
+        if self.timeline is None:
+            self.timeline = [_IncidentTimelineItem()]
+        if self.recovery_attempts is None:
+            self.recovery_attempts = [_RecoveryAttemptItem()]
+        if self.current_health is None:
+            self.current_health = {"status": "recovering"}
+
+
+@dataclass
 class _LayoutObject:
     id: str
     name: str
@@ -396,6 +539,12 @@ class LocalWebAdminServerTests(unittest.TestCase):
                 body = response.read().decode("utf-8")
             self.assertIn("Diagnostics", body)
             self.assertIn("trusted_sources", body)
+            self.assertIn("Health Summary", body)
+
+            with urlopen(f"{base_url}/incidents") as response:
+                incidents_body = response.read().decode("utf-8")
+            self.assertIn("Incident Center", incidents_body)
+            self.assertIn("inc-1", incidents_body)
 
             with urlopen(f"{base_url}/api/layouts") as response:
                 layout_catalog = response.read().decode("utf-8")
@@ -478,6 +627,7 @@ class LocalWebAdminServerTests(unittest.TestCase):
                         "profile_id": "pg-main",
                         "statement": "SELECT 1",
                         "operation": "query",
+                        "confirmed": "1",
                     }
                 ).encode("utf-8"),
                 method="POST",
@@ -537,10 +687,21 @@ class LocalWebAdminServerTests(unittest.TestCase):
             self.assertIn("Reconnected tunnel for pg-main.", reconnect_body)
             self.assertEqual(service.reconnected_tunnels, ["pg-main"])
 
+            acknowledge_request = Request(
+                f"{base_url}/incidents/acknowledge",
+                data=urlencode({"incident_id": "inc-1"}).encode("utf-8"),
+                method="POST",
+            )
+            with urlopen(acknowledge_request) as response:
+                acknowledge_body = response.read().decode("utf-8")
+            self.assertIn("Acknowledged incident inc-1.", acknowledge_body)
+            self.assertEqual(service.acknowledged_incidents, ["inc-1"])
+
             self.assertIn("/diagnostics", service.saved_pages)
             self.assertIn("/plugins", service.saved_pages)
             self.assertIn("/secrets", service.saved_pages)
             self.assertIn("/datasources", service.saved_pages)
+            self.assertIn("/incidents", service.saved_pages)
         finally:
             server.shutdown()
             thread.join(timeout=2)

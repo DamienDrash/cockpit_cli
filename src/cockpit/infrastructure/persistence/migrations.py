@@ -11,6 +11,7 @@ from cockpit.infrastructure.persistence.schema import (
     DATABASE_VERSION,
     V1_STATEMENTS,
     V2_STATEMENTS,
+    V3_STATEMENTS,
 )
 
 
@@ -23,6 +24,7 @@ class Migration:
 MIGRATIONS: tuple[Migration, ...] = (
     Migration(version=1, statements=V1_STATEMENTS),
     Migration(version=2, statements=V2_STATEMENTS),
+    Migration(version=3, statements=V3_STATEMENTS),
 )
 
 

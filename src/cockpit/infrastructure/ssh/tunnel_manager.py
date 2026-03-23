@@ -125,8 +125,10 @@ class SSHTunnelManager:
             self.close_tunnel(profile_id)
 
     def list_tunnels(self) -> list[dict[str, object]]:
+        return self.snapshot_tunnels()
+
+    def snapshot_tunnels(self) -> list[dict[str, object]]:
         items: list[dict[str, object]] = []
-        stale: list[str] = []
         for profile_id, tunnel in self._tunnels.items():
             tunnel.last_checked_at = utc_now()
             returncode = tunnel.process.poll()
@@ -148,10 +150,6 @@ class SSHTunnelManager:
                     "last_failure": tunnel.last_failure,
                 }
             )
-            if not alive:
-                stale.append(profile_id)
-        for profile_id in stale:
-            self._tunnels.pop(profile_id, None)
         return items
 
     @staticmethod

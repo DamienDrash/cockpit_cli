@@ -4,8 +4,14 @@ from cockpit.application.handlers.base import ConfirmationRequiredError
 from cockpit.application.handlers.db_handlers import RunDatabaseQueryHandler
 from cockpit.domain.commands.command import Command
 from cockpit.domain.models.datasource import DataSourceOperationResult, DataSourceProfile
+from cockpit.domain.models.policy import GuardDecision
 from cockpit.infrastructure.db.database_adapter import DatabaseQueryResult
-from cockpit.shared.enums import CommandSource, SessionTargetKind
+from cockpit.shared.enums import (
+    CommandSource,
+    GuardDecisionOutcome,
+    SessionTargetKind,
+    TargetRiskLevel,
+)
 
 
 class FakeDatabaseAdapter:
@@ -72,10 +78,54 @@ class FakeDataSourceService:
         )
 
 
+class FakeGuardPolicyService:
+    def evaluate(self, context):
+        if context.action_kind.value == "db_query":
+            return GuardDecision(
+                command_id=context.command_id,
+                action_kind=context.action_kind,
+                component_kind=context.component_kind,
+                target_risk=context.target_risk,
+                outcome=GuardDecisionOutcome.ALLOW,
+                explanation="read-only",
+            )
+        if not context.confirmed:
+            return GuardDecision(
+                command_id=context.command_id,
+                action_kind=context.action_kind,
+                component_kind=context.component_kind,
+                target_risk=context.target_risk,
+                outcome=GuardDecisionOutcome.REQUIRE_CONFIRMATION,
+                explanation="confirmation required",
+                requires_confirmation=True,
+                confirmation_message="Confirm database operation.",
+            )
+        return GuardDecision(
+            command_id=context.command_id,
+            action_kind=context.action_kind,
+            component_kind=context.component_kind,
+            target_risk=context.target_risk,
+            outcome=GuardDecisionOutcome.ALLOW,
+            explanation="allowed",
+        )
+
+
+class FakeOperationsDiagnosticsService:
+    def __init__(self) -> None:
+        self.calls = []
+
+    def record_operation(self, **payload):
+        self.calls.append(payload)
+
+
 class RunDatabaseQueryHandlerTests(unittest.TestCase):
     def test_requires_confirmation_for_mutating_queries(self) -> None:
         adapter = FakeDatabaseAdapter()
-        handler = RunDatabaseQueryHandler(adapter)
+        handler = RunDatabaseQueryHandler(
+            adapter,
+            guard_policy_service=FakeGuardPolicyService(),
+            operations_diagnostics_service=FakeOperationsDiagnosticsService(),
+        )
         command = Command(
             id="cmd_1",
             source=CommandSource.SLASH,
@@ -96,7 +146,12 @@ class RunDatabaseQueryHandlerTests(unittest.TestCase):
 
     def test_runs_query_for_selected_database(self) -> None:
         adapter = FakeDatabaseAdapter()
-        handler = RunDatabaseQueryHandler(adapter)
+        diagnostics = FakeOperationsDiagnosticsService()
+        handler = RunDatabaseQueryHandler(
+            adapter,
+            guard_policy_service=FakeGuardPolicyService(),
+            operations_diagnostics_service=diagnostics,
+        )
         command = Command(
             id="cmd_2",
             source=CommandSource.SLASH,
@@ -117,11 +172,17 @@ class RunDatabaseQueryHandlerTests(unittest.TestCase):
             [("/tmp/app.db", "SELECT 1", SessionTargetKind.SSH, "dev@example.com")],
         )
         self.assertEqual(result.data["result_panel_id"], "db-panel")
+        self.assertEqual(len(diagnostics.calls), 1)
 
     def test_runs_query_for_selected_datasource_profile(self) -> None:
         adapter = FakeDatabaseAdapter()
         datasource_service = FakeDataSourceService()
-        handler = RunDatabaseQueryHandler(adapter, datasource_service)
+        handler = RunDatabaseQueryHandler(
+            adapter,
+            datasource_service,
+            guard_policy_service=FakeGuardPolicyService(),
+            operations_diagnostics_service=FakeOperationsDiagnosticsService(),
+        )
         command = Command(
             id="cmd_3",
             source=CommandSource.SLASH,
@@ -149,7 +210,12 @@ class RunDatabaseQueryHandlerTests(unittest.TestCase):
     def test_requires_confirmation_for_mutating_datasource_queries(self) -> None:
         adapter = FakeDatabaseAdapter()
         datasource_service = FakeDataSourceService()
-        handler = RunDatabaseQueryHandler(adapter, datasource_service)
+        handler = RunDatabaseQueryHandler(
+            adapter,
+            datasource_service,
+            guard_policy_service=FakeGuardPolicyService(),
+            operations_diagnostics_service=FakeOperationsDiagnosticsService(),
+        )
         command = Command(
             id="cmd_4",
             source=CommandSource.SLASH,

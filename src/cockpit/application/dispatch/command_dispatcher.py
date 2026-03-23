@@ -9,6 +9,7 @@ from cockpit.application.handlers.base import (
     CommandHandlingError,
     ConfirmationRequiredError,
     DispatchResult,
+    PolicyViolationError,
 )
 from cockpit.application.dispatch.event_bus import EventBus
 from cockpit.domain.commands.command import Command
@@ -59,6 +60,26 @@ class CommandDispatcher:
                     **exc.payload,
                 },
             )
+        except PolicyViolationError as exc:
+            self._event_bus.publish(
+                StatusMessagePublished(message=str(exc), level=StatusLevel.WARNING)
+            )
+            failure = DispatchResult(
+                success=False,
+                message=str(exc),
+                data={"policy_violation": True, **exc.payload},
+            )
+            self._notify_observers(command, failure)
+            self._event_bus.publish(
+                CommandExecuted(
+                    command_id=command.id,
+                    name=command.name,
+                    source=command.source,
+                    success=False,
+                    message=failure.message,
+                )
+            )
+            return failure
         except CommandContextError as exc:
             self._event_bus.publish(
                 StatusMessagePublished(message=str(exc), level=StatusLevel.ERROR)

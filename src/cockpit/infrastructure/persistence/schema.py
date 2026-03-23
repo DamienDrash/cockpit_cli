@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-DATABASE_VERSION = 2
+DATABASE_VERSION = 3
 
 CREATE_MIGRATIONS_TABLE = """
 CREATE TABLE IF NOT EXISTS schema_migrations (
@@ -147,5 +147,162 @@ V2_STATEMENTS: tuple[str, ...] = (
     """
     CREATE INDEX IF NOT EXISTS idx_installed_plugins_module
     ON installed_plugins(module);
+    """,
+)
+
+V3_STATEMENTS: tuple[str, ...] = (
+    """
+    CREATE TABLE IF NOT EXISTS component_health_state (
+        component_id TEXT PRIMARY KEY,
+        component_kind TEXT NOT NULL,
+        display_name TEXT NOT NULL,
+        status TEXT NOT NULL,
+        workspace_id TEXT,
+        session_id TEXT,
+        target_kind TEXT NOT NULL,
+        target_ref TEXT,
+        last_heartbeat_at TEXT,
+        last_failure_at TEXT,
+        last_recovery_at TEXT,
+        next_recovery_at TEXT,
+        cooldown_until TEXT,
+        consecutive_failures INTEGER NOT NULL,
+        exhaustion_count INTEGER NOT NULL,
+        quarantined INTEGER NOT NULL,
+        quarantine_reason TEXT,
+        last_incident_id TEXT,
+        payload_json TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+    );
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS component_health_history (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        component_id TEXT NOT NULL,
+        component_kind TEXT NOT NULL,
+        previous_status TEXT,
+        new_status TEXT NOT NULL,
+        reason TEXT NOT NULL,
+        recorded_at TEXT NOT NULL,
+        payload_json TEXT NOT NULL
+    );
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS incidents (
+        id TEXT PRIMARY KEY,
+        component_id TEXT NOT NULL,
+        component_kind TEXT NOT NULL,
+        severity TEXT NOT NULL,
+        status TEXT NOT NULL,
+        title TEXT NOT NULL,
+        summary TEXT NOT NULL,
+        workspace_id TEXT,
+        session_id TEXT,
+        opened_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        acknowledged_at TEXT,
+        resolved_at TEXT,
+        closed_at TEXT,
+        payload_json TEXT NOT NULL
+    );
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS incident_timeline (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        incident_id TEXT NOT NULL,
+        event_type TEXT NOT NULL,
+        message TEXT NOT NULL,
+        recorded_at TEXT NOT NULL,
+        payload_json TEXT NOT NULL,
+        FOREIGN KEY(incident_id) REFERENCES incidents(id)
+    );
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS recovery_attempts (
+        id TEXT PRIMARY KEY,
+        incident_id TEXT NOT NULL,
+        component_id TEXT NOT NULL,
+        attempt_number INTEGER NOT NULL,
+        status TEXT NOT NULL,
+        trigger TEXT NOT NULL,
+        action TEXT NOT NULL,
+        backoff_ms INTEGER NOT NULL,
+        scheduled_for TEXT,
+        started_at TEXT,
+        finished_at TEXT,
+        error_message TEXT,
+        payload_json TEXT NOT NULL,
+        FOREIGN KEY(incident_id) REFERENCES incidents(id)
+    );
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS guard_decisions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        command_id TEXT NOT NULL,
+        action_kind TEXT NOT NULL,
+        component_kind TEXT NOT NULL,
+        target_risk TEXT NOT NULL,
+        outcome TEXT NOT NULL,
+        requires_confirmation INTEGER NOT NULL,
+        requires_elevated_mode INTEGER NOT NULL,
+        requires_dry_run INTEGER NOT NULL,
+        audit_required INTEGER NOT NULL,
+        explanation TEXT NOT NULL,
+        recorded_at TEXT NOT NULL,
+        payload_json TEXT NOT NULL
+    );
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS operation_diagnostics (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        operation_family TEXT NOT NULL,
+        component_id TEXT NOT NULL,
+        subject_ref TEXT NOT NULL,
+        success INTEGER NOT NULL,
+        severity TEXT NOT NULL,
+        summary TEXT NOT NULL,
+        recorded_at TEXT NOT NULL,
+        payload_json TEXT NOT NULL
+    );
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS component_diagnostics_cache (
+        component_id TEXT PRIMARY KEY,
+        component_kind TEXT NOT NULL,
+        snapshot_json TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+    );
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_component_health_state_status
+    ON component_health_state(status);
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_component_health_state_kind
+    ON component_health_state(component_kind);
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_component_health_history_component
+    ON component_health_history(component_id, recorded_at DESC);
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_incidents_component_status
+    ON incidents(component_id, status, updated_at DESC);
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_incident_timeline_incident_id
+    ON incident_timeline(incident_id, recorded_at DESC);
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_recovery_attempts_component_id
+    ON recovery_attempts(component_id, scheduled_for DESC);
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_guard_decisions_command_id
+    ON guard_decisions(command_id, recorded_at DESC);
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_operation_diagnostics_family
+    ON operation_diagnostics(operation_family, recorded_at DESC);
     """,
 )

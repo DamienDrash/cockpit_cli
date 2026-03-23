@@ -30,6 +30,7 @@ class PTYStarted(RuntimeEvent):
     panel_id: str
     cwd: str
     pid: int | None = None
+    command: tuple[str, ...] = ()
     target_kind: SessionTargetKind = SessionTargetKind.LOCAL
     target_ref: str | None = None
 
@@ -39,6 +40,7 @@ class PTYStartupFailed(RuntimeEvent):
     panel_id: str
     cwd: str
     reason: str
+    command: tuple[str, ...] = ()
     target_kind: SessionTargetKind = SessionTargetKind.LOCAL
     target_ref: str | None = None
 
@@ -53,6 +55,11 @@ class ProcessOutputReceived(RuntimeEvent):
 class TerminalExited(RuntimeEvent):
     panel_id: str
     exit_code: int
+    cwd: str = ""
+    command: tuple[str, ...] = ()
+    expected: bool = False
+    target_kind: SessionTargetKind = SessionTargetKind.LOCAL
+    target_ref: str | None = None
 
 
 @dataclass(slots=True, kw_only=True)

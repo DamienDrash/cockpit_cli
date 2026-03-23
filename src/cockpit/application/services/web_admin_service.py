@@ -10,15 +10,32 @@ import shutil
 import sys
 
 from cockpit.application.services.datasource_service import DataSourceService
+from cockpit.application.services.guard_policy_service import GuardPolicyService
+from cockpit.application.services.incident_service import IncidentService
 from cockpit.application.services.layout_service import LayoutService
+from cockpit.application.services.operations_diagnostics_service import (
+    OperationsDiagnosticsService,
+)
 from cockpit.application.services.plugin_service import PluginService
 from cockpit.application.services.secret_service import SecretService
+from cockpit.application.services.self_healing_service import SelfHealingService
 from cockpit.domain.models.datasource import DataSourceOperationResult, DataSourceProfile
 from cockpit.domain.models.layout import Layout
+from cockpit.domain.models.policy import GuardContext
 from cockpit.domain.models.secret import ManagedSecretEntry, VaultProfile, VaultSession, VaultLease
+from cockpit.infrastructure.db.database_adapter import DatabaseAdapter
 from cockpit.infrastructure.persistence.repositories import WebAdminStateRepository
 from cockpit.infrastructure.ssh.tunnel_manager import SSHTunnelManager
-from cockpit.shared.enums import SessionTargetKind
+from cockpit.shared.enums import (
+    ComponentKind,
+    GuardActionKind,
+    GuardDecisionOutcome,
+    IncidentSeverity,
+    IncidentStatus,
+    OperationFamily,
+    SessionTargetKind,
+    TargetRiskLevel,
+)
 from cockpit.ui.panels.registry import PanelRegistry
 
 
@@ -32,6 +49,10 @@ class WebAdminService:
         secret_service: SecretService,
         plugin_service: PluginService,
         layout_service: LayoutService,
+        incident_service: IncidentService,
+        self_healing_service: SelfHealingService,
+        operations_diagnostics_service: OperationsDiagnosticsService,
+        guard_policy_service: GuardPolicyService,
         panel_registry: PanelRegistry,
         state_repository: WebAdminStateRepository,
         command_catalog: tuple[str, ...],
@@ -42,6 +63,10 @@ class WebAdminService:
         self._secret_service = secret_service
         self._plugin_service = plugin_service
         self._layout_service = layout_service
+        self._incident_service = incident_service
+        self._self_healing_service = self_healing_service
+        self._operations_diagnostics_service = operations_diagnostics_service
+        self._guard_policy_service = guard_policy_service
         self._panel_registry = panel_registry
         self._state_repository = state_repository
         self._command_catalog = command_catalog
@@ -52,6 +77,23 @@ class WebAdminService:
         datasource_diagnostics = self._datasource_service.diagnostics()
         secret_diagnostics = self._secret_service.diagnostics()
         plugin_diagnostics = self._plugin_service.diagnostics()
+        active_incidents = self._incident_service.list_incidents(
+            limit=10,
+            statuses=(
+                IncidentStatus.OPEN,
+                IncidentStatus.ACKNOWLEDGED,
+                IncidentStatus.RECOVERING,
+                IncidentStatus.QUARANTINED,
+            ),
+        )
+        incident_rows = [incident.to_dict() for incident in active_incidents]
+        recent_attempts = []
+        for incident in active_incidents[:5]:
+            detail = self._incident_service.get_incident_detail(incident.id)
+            if detail is None:
+                continue
+            recent_attempts.extend(attempt.to_dict() for attempt in detail.recovery_attempts)
+        operations = self._operations_diagnostics_service.overview()
         return {
             "project_root": str(self._project_root),
             "python": sys.version.split()[0],
@@ -62,6 +104,13 @@ class WebAdminService:
             "secrets": asdict(secret_diagnostics),
             "plugins": plugin_diagnostics,
             "tunnels": self._tunnel_manager.list_tunnels(),
+            "health": self._self_healing_service.health_summary().to_dict(),
+            "quarantined_components": [
+                state.to_dict() for state in self._self_healing_service.list_quarantined()
+            ],
+            "active_incidents": incident_rows,
+            "recent_recovery_attempts": recent_attempts[:10],
+            "operations": operations,
             "tools": {
                 "git": shutil.which("git") is not None,
                 "docker": shutil.which("docker") is not None,
@@ -103,11 +152,55 @@ class WebAdminService:
         statement: str,
         *,
         operation: str,
+        confirmed: bool = False,
+        elevated_mode: bool = False,
     ) -> DataSourceOperationResult:
+        profile = self._datasource_service.get_profile(profile_id)
+        if profile is None:
+            raise LookupError(f"Datasource profile '{profile_id}' was not found.")
+        risk_level = self._target_risk(profile.risk_level)
+        decision = self._guard_policy_service.evaluate(
+            GuardContext(
+                command_id=f"admin:{profile_id}",
+                action_kind=self._guard_action_for_statement(statement),
+                component_kind=ComponentKind.DATASOURCE,
+                target_risk=risk_level,
+                workspace_name="web-admin",
+                target_ref=profile.target_ref,
+                confirmed=confirmed,
+                elevated_mode=elevated_mode,
+                subject_ref=profile.id,
+                description=f"admin datasource execution on {profile.name}",
+                metadata={
+                    "profile_id": profile.id,
+                    "subject_ref": profile.id,
+                    "query": statement,
+                    "backend": profile.backend,
+                },
+            )
+        )
+        if decision.outcome is not GuardDecisionOutcome.ALLOW:
+            raise ValueError(decision.explanation)
         result = self._datasource_service.run_statement(
             profile_id,
             statement,
             operation=operation,
+        )
+        self._operations_diagnostics_service.record_operation(
+            family=OperationFamily.DB,
+            component_id=f"datasource:{profile.id}",
+            subject_ref=profile.id,
+            success=result.success,
+            severity="info" if result.success else "high",
+            summary=result.message or "admin datasource statement executed",
+            payload={
+                "query": statement,
+                "operation": operation,
+                "message": result.message,
+                "backend": profile.backend,
+                "risk_level": risk_level.value,
+                "guard_outcome": decision.outcome.value,
+            },
         )
         self._state_repository.save(
             "web_admin:last_datasource_result",
@@ -365,6 +458,66 @@ class WebAdminService:
 
     def reconnect_tunnel(self, profile_id: str) -> None:
         self._tunnel_manager.reconnect_tunnel(profile_id)
+
+    def list_incidents(
+        self,
+        *,
+        status: str | None = None,
+        severity: str | None = None,
+        component_kind: str | None = None,
+        search: str | None = None,
+    ):
+        statuses = (
+            (IncidentStatus(status),)
+            if isinstance(status, str) and status
+            else None
+        )
+        severities = (
+            (IncidentSeverity(severity),)
+            if isinstance(severity, str) and severity
+            else None
+        )
+        kind = (
+            ComponentKind(component_kind)
+            if isinstance(component_kind, str) and component_kind
+            else None
+        )
+        return self._incident_service.list_incidents(
+            statuses=statuses,
+            severities=severities,
+            component_kind=kind,
+            search=search,
+        )
+
+    def incident_detail(self, incident_id: str):
+        return self._incident_service.get_incident_detail(incident_id)
+
+    def acknowledge_incident(self, incident_id: str):
+        return self._incident_service.acknowledge_incident(incident_id)
+
+    def close_incident(self, incident_id: str):
+        return self._incident_service.close_incident(incident_id)
+
+    def reset_component_quarantine(self, component_id: str) -> None:
+        self._incident_service.reset_quarantine(component_id)
+
+    def retry_component_recovery(self, component_id: str) -> bool:
+        return self._incident_service.retry_component(component_id)
+
+    @staticmethod
+    def _guard_action_for_statement(statement: str) -> GuardActionKind:
+        if DatabaseAdapter.is_destructive_query(statement):
+            return GuardActionKind.DB_DESTRUCTIVE
+        if DatabaseAdapter.is_mutating_query(statement):
+            return GuardActionKind.DB_MUTATION
+        return GuardActionKind.DB_QUERY
+
+    @staticmethod
+    def _target_risk(raw_level: str) -> TargetRiskLevel:
+        try:
+            return TargetRiskLevel(raw_level.lower())
+        except ValueError:
+            return TargetRiskLevel.DEV
 
     @staticmethod
     def _json_mapping(raw_value: object) -> dict[str, object]:

@@ -25,6 +25,7 @@ def _page(title: str, body: str, *, flash: str | None = None) -> str:
         "<a href='/secrets'>Secrets</a>"
         "<a href='/plugins'>Plugins</a>"
         "<a href='/layouts'>Layouts</a>"
+        "<a href='/incidents'>Incidents</a>"
         "<a href='/diagnostics'>Diagnostics</a>"
         "</nav>"
     )
@@ -101,6 +102,16 @@ class LocalWebAdminServer:
                     return
                 if parsed.path == "/layouts":
                     self._html(_page("Layouts", _layout_body(service), flash=flash))
+                    return
+                if parsed.path == "/incidents":
+                    incident_id = query.get("incident_id", [None])[0]
+                    self._html(
+                        _page(
+                            "Incidents",
+                            _incident_body(service, incident_id=incident_id),
+                            flash=flash,
+                        )
+                    )
                     return
                 if parsed.path == "/diagnostics":
                     self._html(_page("Diagnostics", _diagnostics_body(service), flash=flash))
@@ -191,6 +202,8 @@ def _redirect_target(path: str) -> str:
         return "/plugins"
     if path.startswith("/layouts"):
         return "/layouts"
+    if path.startswith("/incidents"):
+        return "/incidents"
     if path.startswith("/diagnostics"):
         return "/diagnostics"
     return "/"
@@ -208,7 +221,13 @@ def _handle_post(service: WebAdminService, path: str, form: dict[str, str]) -> t
         profile_id = form.get("profile_id", "")
         statement = form.get("statement", "")
         operation = form.get("operation", "query")
-        result = service.execute_datasource(profile_id, statement, operation=operation)
+        result = service.execute_datasource(
+            profile_id,
+            statement,
+            operation=operation,
+            confirmed=form.get("confirmed", "0") == "1",
+            elevated_mode=form.get("elevated_mode", "0") == "1",
+        )
         return "/datasources", result.message or "Datasource command executed."
     if path == "/secrets/create":
         secret = service.create_secret(form)
@@ -329,6 +348,22 @@ def _handle_post(service: WebAdminService, path: str, form: dict[str, str]) -> t
             form.get("direction", "next"),
         )
         return "/layouts", f"Moved panel in {layout.id}."
+    if path == "/incidents/acknowledge":
+        incident = service.acknowledge_incident(form.get("incident_id", ""))
+        return "/incidents", f"Acknowledged incident {incident.id}."
+    if path == "/incidents/close":
+        incident = service.close_incident(form.get("incident_id", ""))
+        return "/incidents", f"Closed incident {incident.id}."
+    if path == "/incidents/reset-quarantine":
+        component_id = form.get("component_id", "")
+        service.reset_component_quarantine(component_id)
+        return "/incidents", f"Reset quarantine for {component_id}."
+    if path == "/incidents/retry":
+        component_id = form.get("component_id", "")
+        retried = service.retry_component_recovery(component_id)
+        return "/incidents", (
+            f"Queued retry for {component_id}." if retried else f"No component named {component_id}."
+        )
     if path == "/diagnostics/close-tunnel":
         profile_id = form.get("profile_id", "")
         service.close_tunnel(profile_id)
@@ -409,6 +444,8 @@ def _home_body(service: WebAdminService) -> str:
     datasource_diag = diagnostics["datasources"]
     secret_diag = diagnostics["secrets"]
     plugin_diag = diagnostics["plugins"]
+    health_diag = diagnostics["health"]
+    active_incidents = diagnostics["active_incidents"]
     return (
         "<div class='grid'>"
         f"<div class='card'><h3>Datasources</h3><p>{escape(str(datasource_diag['total_profiles']))} total / {escape(str(datasource_diag['enabled_profiles']))} enabled</p></div>"
@@ -416,8 +453,10 @@ def _home_body(service: WebAdminService) -> str:
         f"<div class='card'><h3>Plugins</h3><p>{escape(str(plugin_diag['count']))} installed / {escape(str(plugin_diag['enabled']))} enabled</p></div>"
         f"<div class='card'><h3>Trusted Plugin Sources</h3><p>{escape(str(len(plugin_diag.get('trusted_sources', []))))} configured</p></div>"
         f"<div class='card'><h3>Panels</h3><p>{escape(', '.join(diagnostics['panel_types']))}</p></div>"
+        f"<div class='card'><h3>Health</h3><p>healthy={escape(str(health_diag['healthy']))} recovering={escape(str(health_diag['recovering']))} failed={escape(str(health_diag['failed']))} quarantined={escape(str(health_diag['quarantined']))}</p></div>"
+        f"<div class='card'><h3>Incidents</h3><p>{escape(str(len(active_incidents)))} active incident(s)</p></div>"
         "</div>"
-        "<p class='muted'>Use the admin pages to manage datasource profiles, managed secret references, plugin installs, layout variants, and runtime diagnostics.</p>"
+        "<p class='muted'>Use the admin pages to manage datasource profiles, managed secret references, plugin installs, layout variants, incidents, and runtime diagnostics.</p>"
     )
 
 
@@ -512,6 +551,8 @@ def _datasource_execute_card(
         "<div><label>Operation</label><select name='operation'><option value='query'>query</option><option value='mutate'>mutate</option></select></div>"
         "</div>"
         "<p><label>Statement</label><textarea name='statement' rows='10' placeholder='SELECT 1'></textarea></p>"
+        "<p><label><input type='checkbox' name='confirmed' value='1'> Confirm mutating execution</label></p>"
+        "<p><label><input type='checkbox' name='elevated_mode' value='1'> Elevated mode</label></p>"
         "<p class='muted'>Backend examples: SQL uses SQL text, MongoDB uses JSON payloads, Redis uses redis-cli style commands, Chroma uses JSON payloads.</p>"
         "<p><button type='submit'>Execute</button></p></form></div>"
         + last_result_block
@@ -787,6 +828,11 @@ def _layout_body(service: WebAdminService) -> str:
 def _diagnostics_body(service: WebAdminService) -> str:
     diagnostics = service.diagnostics()
     tunnels = diagnostics.get("tunnels", [])
+    operations = diagnostics.get("operations", {})
+    health = diagnostics.get("health", {})
+    active_incidents = diagnostics.get("active_incidents", [])
+    quarantined = diagnostics.get("quarantined_components", [])
+    recent_attempts = diagnostics.get("recent_recovery_attempts", [])
     return (
         "<div class='card'><h3>Environment</h3>"
         f"<p>Project root: <code>{escape(str(diagnostics['project_root']))}</code></p>"
@@ -794,6 +840,18 @@ def _diagnostics_body(service: WebAdminService) -> str:
         f"<p>Platform: <code>{escape(str(diagnostics['platform']))}</code></p>"
         f"<p>Commands: <code>{escape(str(diagnostics['command_count']))}</code></p>"
         f"<p>Panels: <code>{escape(', '.join(diagnostics['panel_types']))}</code></p>"
+        "</div>"
+        "<div class='card'><h3>Health Summary</h3>"
+        f"<pre>{escape(json.dumps(health, indent=2, sort_keys=True))}</pre>"
+        "</div>"
+        "<div class='card'><h3>Active Incidents</h3>"
+        f"{_incident_table(active_incidents, include_actions=False)}"
+        "</div>"
+        "<div class='card'><h3>Quarantined Components</h3>"
+        f"<pre>{escape(json.dumps(quarantined, indent=2, sort_keys=True))}</pre>"
+        "</div>"
+        "<div class='card'><h3>Recent Recovery Attempts</h3>"
+        f"<pre>{escape(json.dumps(recent_attempts, indent=2, sort_keys=True))}</pre>"
         "</div>"
         "<div class='card'><h3>Tooling</h3>"
         f"<pre>{escape(str(diagnostics['tools']))}</pre>"
@@ -809,6 +867,90 @@ def _diagnostics_body(service: WebAdminService) -> str:
         "</div>"
         "<div class='card'><h3>Tunnels</h3>"
         f"{_tunnel_table(tunnels)}"
+        "</div>"
+        "<div class='card'><h3>Docker Diagnostics</h3>"
+        f"<pre>{escape(json.dumps(operations.get('docker', []), indent=2, sort_keys=True))}</pre>"
+        "</div>"
+        "<div class='card'><h3>DB Diagnostics</h3>"
+        f"<pre>{escape(json.dumps(operations.get('db', []), indent=2, sort_keys=True))}</pre>"
+        "</div>"
+        "<div class='card'><h3>Curl Diagnostics</h3>"
+        f"<pre>{escape(json.dumps(operations.get('curl', []), indent=2, sort_keys=True))}</pre>"
+        "</div>"
+        "<div class='card'><h3>Guard Decisions</h3>"
+        f"<pre>{escape(json.dumps(operations.get('recent_guard_decisions', []), indent=2, sort_keys=True))}</pre>"
+        "</div>"
+    )
+
+
+def _incident_body(service: WebAdminService, *, incident_id: str | None) -> str:
+    incidents = service.list_incidents()
+    detail = service.incident_detail(incident_id) if incident_id else None
+    return (
+        "<div class='card'><h3>Incident Center</h3>"
+        "<p class='muted'>Structured incident records, recovery history, and quarantine visibility for runtime components.</p>"
+        f"{_incident_table([incident.to_dict() for incident in incidents], include_actions=True)}"
+        "</div>"
+        + (
+            _incident_detail_block(detail)
+            if detail is not None
+            else "<div class='card'><h3>Incident Detail</h3><p class='muted'>Select an incident from the list to inspect timeline and recovery history.</p></div>"
+        )
+    )
+
+
+def _incident_table(incidents: object, *, include_actions: bool) -> str:
+    if not isinstance(incidents, list) or not incidents:
+        return "<p class='muted'>No incidents recorded.</p>"
+    rows = []
+    for incident in incidents:
+        if not isinstance(incident, dict):
+            continue
+        incident_id = str(incident.get("id", ""))
+        component_id = str(incident.get("component_id", ""))
+        actions = ""
+        if include_actions:
+            actions = (
+                f"<form class='inline' method='get' action='/incidents'><input type='hidden' name='incident_id' value='{escape(incident_id)}'><button type='submit'>View</button></form> "
+                f"<form class='inline' method='post' action='/incidents/acknowledge'><input type='hidden' name='incident_id' value='{escape(incident_id)}'><button type='submit'>Ack</button></form> "
+                f"<form class='inline' method='post' action='/incidents/close'><input type='hidden' name='incident_id' value='{escape(incident_id)}'><button type='submit'>Close</button></form> "
+                f"<form class='inline' method='post' action='/incidents/retry'><input type='hidden' name='component_id' value='{escape(component_id)}'><button type='submit'>Retry</button></form> "
+                f"<form class='inline' method='post' action='/incidents/reset-quarantine'><input type='hidden' name='component_id' value='{escape(component_id)}'><button type='submit'>Reset Quarantine</button></form>"
+            )
+        rows.append(
+            "<tr>"
+            f"<td><strong>{escape(incident_id)}</strong><br><span class='muted'>{escape(component_id)}</span></td>"
+            f"<td>{escape(str(incident.get('component_kind', '')))}</td>"
+            f"<td>{escape(str(incident.get('severity', '')))}</td>"
+            f"<td>{escape(str(incident.get('status', '')))}</td>"
+            f"<td>{escape(str(incident.get('summary', '')))}</td>"
+            f"<td>{actions or escape(str(incident.get('updated_at', '')))}</td>"
+            "</tr>"
+        )
+    return (
+        "<table><thead><tr><th>Incident</th><th>Component</th><th>Severity</th><th>Status</th><th>Summary</th><th>Actions</th></tr></thead>"
+        f"<tbody>{''.join(rows)}</tbody></table>"
+    )
+
+
+def _incident_detail_block(detail: object) -> str:
+    incident = getattr(detail, "incident", None)
+    if incident is None:
+        return "<div class='card'><h3>Incident Detail</h3><p class='muted'>Incident not found.</p></div>"
+    timeline = getattr(detail, "timeline", [])
+    recovery_attempts = getattr(detail, "recovery_attempts", [])
+    health = getattr(detail, "current_health", None)
+    return (
+        "<div class='card'><h3>Incident Detail</h3>"
+        f"<p><strong>{escape(incident.title)}</strong><br><span class='muted'>{escape(incident.id)} / {escape(incident.component_id)}</span></p>"
+        f"<p>Status: <code>{escape(incident.status.value)}</code> Severity: <code>{escape(incident.severity.value)}</code></p>"
+        f"<p>{escape(incident.summary)}</p>"
+        "<h3>Timeline</h3>"
+        f"<pre>{escape(json.dumps([entry.to_dict() for entry in timeline], indent=2, sort_keys=True))}</pre>"
+        "<h3>Recovery Attempts</h3>"
+        f"<pre>{escape(json.dumps([attempt.to_dict() for attempt in recovery_attempts], indent=2, sort_keys=True))}</pre>"
+        "<h3>Current Health</h3>"
+        f"<pre>{escape(json.dumps(health or {}, indent=2, sort_keys=True))}</pre>"
         "</div>"
     )
 

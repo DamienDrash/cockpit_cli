@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import json
 import shlex
 import subprocess
 
@@ -32,6 +33,23 @@ class DockerRuntimeSnapshot:
 class DockerActionResult:
     success: bool
     message: str
+
+
+@dataclass(slots=True, frozen=True)
+class DockerContainerDiagnosticsSnapshot:
+    container_id: str
+    name: str
+    image: str
+    state: str
+    status: str
+    ports: str
+    health: str | None = None
+    restart_policy: str | None = None
+    exit_code: int | None = None
+    restart_count: int | None = None
+    last_error: str | None = None
+    last_finished_at: str | None = None
+    recent_logs: list[str] = field(default_factory=list)
 
 
 class DockerAdapter:
@@ -271,6 +289,148 @@ class DockerAdapter:
             success=True,
             message=result.stdout.strip() or f"{verb} docker container {container_id}.",
         )
+
+    def collect_diagnostics(
+        self,
+        *,
+        target_kind: SessionTargetKind = SessionTargetKind.LOCAL,
+        target_ref: str | None = None,
+        log_tail: int = 20,
+    ) -> list[DockerContainerDiagnosticsSnapshot]:
+        snapshot = self.list_containers(target_kind=target_kind, target_ref=target_ref)
+        diagnostics: list[DockerContainerDiagnosticsSnapshot] = []
+        for container in snapshot.containers:
+            detail = self._inspect_container(
+                container.container_id,
+                target_kind=target_kind,
+                target_ref=target_ref,
+                log_tail=log_tail,
+            )
+            diagnostics.append(
+                DockerContainerDiagnosticsSnapshot(
+                    container_id=container.container_id,
+                    name=container.name,
+                    image=container.image,
+                    state=container.state,
+                    status=container.status,
+                    ports=container.ports,
+                    health=detail.get("health"),
+                    restart_policy=detail.get("restart_policy"),
+                    exit_code=detail.get("exit_code"),
+                    restart_count=detail.get("restart_count"),
+                    last_error=detail.get("last_error"),
+                    last_finished_at=detail.get("last_finished_at"),
+                    recent_logs=detail.get("recent_logs", []),
+                )
+            )
+        return diagnostics
+
+    def _inspect_container(
+        self,
+        container_id: str,
+        *,
+        target_kind: SessionTargetKind,
+        target_ref: str | None,
+        log_tail: int,
+    ) -> dict[str, object]:
+        if target_kind is SessionTargetKind.SSH:
+            return self._inspect_remote_container(container_id, target_ref, log_tail=log_tail)
+        return self._inspect_local_container(container_id, log_tail=log_tail)
+
+    def _inspect_local_container(
+        self,
+        container_id: str,
+        *,
+        log_tail: int,
+    ) -> dict[str, object]:
+        try:
+            inspect_result = self._run_docker("inspect", container_id)
+        except FileNotFoundError:
+            return {"recent_logs": [], "last_error": "docker executable unavailable"}
+        if inspect_result.returncode != 0:
+            return {
+                "recent_logs": [],
+                "last_error": inspect_result.stderr.strip()
+                or f"docker inspect failed for {container_id}",
+            }
+        logs_result = self._run_docker("logs", "--tail", str(max(1, log_tail)), container_id)
+        return self._detail_from_inspect_payload(
+            inspect_result.stdout,
+            logs_output=(logs_result.stdout or logs_result.stderr),
+        )
+
+    def _inspect_remote_container(
+        self,
+        container_id: str,
+        target_ref: str | None,
+        *,
+        log_tail: int,
+    ) -> dict[str, object]:
+        if not target_ref or self._ssh_command_runner is None:
+            return {"recent_logs": [], "last_error": "SSH docker inspection is not configured."}
+        inspect_result = self._ssh_command_runner.run(
+            target_ref,
+            f"docker inspect {shlex.quote(container_id)}",
+        )
+        if not inspect_result.is_available or inspect_result.returncode != 0:
+            return {
+                "recent_logs": [],
+                "last_error": inspect_result.message
+                or inspect_result.stderr.strip()
+                or f"docker inspect failed for {container_id}",
+            }
+        logs_result = self._ssh_command_runner.run(
+            target_ref,
+            f"docker logs --tail {max(1, int(log_tail))} {shlex.quote(container_id)}",
+        )
+        logs_output = logs_result.stdout or logs_result.stderr or logs_result.message or ""
+        return self._detail_from_inspect_payload(
+            inspect_result.stdout,
+            logs_output=logs_output,
+        )
+
+    @staticmethod
+    def _detail_from_inspect_payload(raw_inspect: str, *, logs_output: str) -> dict[str, object]:
+        try:
+            payload = json.loads(raw_inspect)
+        except json.JSONDecodeError:
+            payload = []
+        inspect_entry = payload[0] if isinstance(payload, list) and payload else {}
+        if not isinstance(inspect_entry, dict):
+            inspect_entry = {}
+        state = inspect_entry.get("State", {})
+        if not isinstance(state, dict):
+            state = {}
+        health = state.get("Health", {})
+        if not isinstance(health, dict):
+            health = {}
+        host_config = inspect_entry.get("HostConfig", {})
+        if not isinstance(host_config, dict):
+            host_config = {}
+        restart_policy = host_config.get("RestartPolicy", {})
+        if not isinstance(restart_policy, dict):
+            restart_policy = {}
+        return {
+            "health": health.get("Status") if health.get("Status") else None,
+            "restart_policy": restart_policy.get("Name") or None,
+            "exit_code": (
+                int(state["ExitCode"])
+                if isinstance(state.get("ExitCode"), int)
+                else None
+            ),
+            "restart_count": (
+                int(inspect_entry["RestartCount"])
+                if isinstance(inspect_entry.get("RestartCount"), int)
+                else None
+            ),
+            "last_error": state.get("Error") or None,
+            "last_finished_at": state.get("FinishedAt") or None,
+            "recent_logs": [
+                line
+                for line in logs_output.splitlines()[-max(1, min(50, len(logs_output.splitlines()) or 0)) :]
+                if line.strip()
+            ],
+        }
 
     def _run_remote_container_action(
         self,

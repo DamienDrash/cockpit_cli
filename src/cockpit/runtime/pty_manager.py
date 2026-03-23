@@ -24,7 +24,7 @@ from cockpit.domain.events.runtime_events import (
 )
 from cockpit.infrastructure.shell.base import ShellAdapter
 from cockpit.runtime.stream_router import StreamRouter
-from cockpit.runtime.task_supervisor import BackgroundTask, TaskSupervisor
+from cockpit.runtime.task_supervisor import BackgroundTask, SupervisedTaskContext, TaskSupervisor
 from cockpit.shared.enums import SessionTargetKind, StatusLevel
 
 
@@ -58,6 +58,7 @@ class PTYManager:
         self._stream_router = stream_router
         self._task_supervisor = task_supervisor
         self._sessions: dict[str, TerminalSession] = {}
+        self._expected_exits: set[str] = set()
         self._lock = Lock()
 
     def start_session(
@@ -108,6 +109,7 @@ class PTYManager:
                     panel_id=panel_id,
                     cwd=cwd,
                     reason=reason,
+                    command=tuple(command or ()),
                     target_kind=target_kind,
                     target_ref=target_ref,
                 )
@@ -122,14 +124,21 @@ class PTYManager:
 
         self._stream_router.clear(panel_id)
         task_name = f"pty-reader-{panel_id}"
-        task = self._task_supervisor.spawn(
+        task = self._task_supervisor.spawn_supervised(
             task_name,
-            lambda stop_event: self._reader_loop(
+            lambda context: self._reader_loop(
                 panel_id=panel_id,
                 process=process,
                 master_fd=master_fd,
-                stop_event=stop_event,
+                context=context,
             ),
+            heartbeat_timeout_seconds=5.0,
+            restartable=False,
+            metadata={
+                "component_kind": "pty_reader",
+                "panel_id": panel_id,
+                "cwd": launch.cwd,
+            },
         )
         session = TerminalSession(
             panel_id=panel_id,
@@ -148,6 +157,7 @@ class PTYManager:
                 panel_id=panel_id,
                 cwd=launch.cwd,
                 pid=process.pid,
+                command=launch.command,
                 target_kind=target_kind,
                 target_ref=target_ref,
             )
@@ -160,6 +170,7 @@ class PTYManager:
         if session is None:
             return
 
+        self._expected_exits.add(panel_id)
         if session.process.poll() is None:
             session.process.terminate()
             try:
@@ -224,10 +235,11 @@ class PTYManager:
         panel_id: str,
         process: subprocess.Popen[bytes],
         master_fd: int,
-        stop_event: object,
+        context: SupervisedTaskContext,
     ) -> None:
         while True:
-            if getattr(stop_event, "is_set")() and process.poll() is not None:
+            context.heartbeat("pty-reader-loop")
+            if context.stop_event.is_set() and process.poll() is not None:
                 break
 
             try:
@@ -251,15 +263,30 @@ class PTYManager:
                             chunk=decoded,
                         )
                     )
+                    context.heartbeat("output")
 
             if process.poll() is not None and not readable:
                 break
 
         exit_code = process.poll()
+        with self._lock:
+            expected = panel_id in self._expected_exits
+            if expected:
+                self._expected_exits.discard(panel_id)
+            current = self._sessions.get(panel_id)
+            cwd = current.cwd if current is not None else ""
+            command = current.launch_command if current is not None else ()
+            target_kind = current.target_kind if current is not None else SessionTargetKind.LOCAL
+            target_ref = current.target_ref if current is not None else None
         self._event_bus.publish(
             TerminalExited(
                 panel_id=panel_id,
                 exit_code=exit_code if exit_code is not None else -1,
+                cwd=cwd,
+                command=command,
+                expected=expected,
+                target_kind=target_kind,
+                target_ref=target_ref,
             )
         )
         with self._lock:

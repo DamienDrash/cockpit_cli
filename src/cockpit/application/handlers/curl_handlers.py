@@ -6,10 +6,22 @@ from cockpit.application.handlers.base import (
     CommandContextError,
     ConfirmationRequiredError,
     DispatchResult,
+    PolicyViolationError,
+)
+from cockpit.application.services.guard_policy_service import GuardPolicyService
+from cockpit.application.services.operations_diagnostics_service import (
+    OperationsDiagnosticsService,
 )
 from cockpit.domain.commands.command import Command
+from cockpit.domain.models.policy import GuardContext
 from cockpit.infrastructure.http.http_adapter import HttpAdapter
-from cockpit.shared.enums import SessionTargetKind
+from cockpit.shared.enums import (
+    ComponentKind,
+    GuardActionKind,
+    GuardDecisionOutcome,
+    OperationFamily,
+    SessionTargetKind,
+)
 from cockpit.shared.risk import classify_target_risk, risk_presentation
 
 
@@ -19,8 +31,16 @@ MUTATING_HTTP_METHODS = {"DELETE", "PATCH", "POST", "PUT"}
 class SendHttpRequestHandler:
     """Execute a structured HTTP request for the Curl panel."""
 
-    def __init__(self, http_adapter: HttpAdapter) -> None:
+    def __init__(
+        self,
+        http_adapter: HttpAdapter,
+        *,
+        guard_policy_service: GuardPolicyService,
+        operations_diagnostics_service: OperationsDiagnosticsService,
+    ) -> None:
         self._http_adapter = http_adapter
+        self._guard_policy_service = guard_policy_service
+        self._operations_diagnostics_service = operations_diagnostics_service
 
     def __call__(self, command: Command) -> DispatchResult:
         method, url, body = self._resolve_request(command)
@@ -30,13 +50,36 @@ class SendHttpRequestHandler:
         workspace_root = self._optional_str(command.context.get("workspace_root")) or ""
         workspace_name = self._optional_str(command.context.get("workspace_name")) or "workspace"
 
-        if method in MUTATING_HTTP_METHODS and not self._is_confirmed(command):
-            risk_level = classify_target_risk(
-                target_kind=target_kind,
-                target_ref=target_ref,
+        risk_level = classify_target_risk(
+            target_kind=target_kind,
+            target_ref=target_ref,
+            workspace_name=workspace_name,
+            workspace_root=workspace_root or url,
+        )
+        placeholders = self._extract_placeholders(url, body, headers)
+        decision = self._guard_policy_service.evaluate(
+            GuardContext(
+                command_id=command.id,
+                action_kind=self._guard_action_kind(method),
+                component_kind=ComponentKind.HTTP_REQUEST,
+                target_risk=risk_level,
+                workspace_id=self._optional_str(command.context.get("workspace_id")),
+                session_id=self._optional_str(command.context.get("session_id")),
                 workspace_name=workspace_name,
-                workspace_root=workspace_root or url,
+                target_ref=target_ref,
+                confirmed=self._is_confirmed(command),
+                elevated_mode=self._is_elevated(command),
+                subject_ref=url,
+                description=f"{method} {url}",
+                metadata={
+                    "method": method,
+                    "url": url,
+                    "subject_ref": url,
+                    "placeholder_names": placeholders,
+                },
             )
+        )
+        if decision.outcome is GuardDecisionOutcome.REQUIRE_CONFIRMATION:
             risk_label = risk_presentation(risk_level).label
             raise ConfirmationRequiredError(
                 f"Confirm {method} request to {url} ({risk_label}).",
@@ -45,10 +88,19 @@ class SendHttpRequestHandler:
                     "pending_args": dict(command.args),
                     "pending_context": dict(command.context),
                     "confirmation_message": (
-                        f"Send {method} request to {url}? "
+                        f"{decision.confirmation_message or f'Send {method} request to {url}?'} "
                         "Press Enter/Y to confirm or Esc/N to cancel."
                     ),
+                    "guard_decision": decision.to_dict(),
                 },
+            )
+        if decision.outcome in {
+            GuardDecisionOutcome.REQUIRE_ELEVATED_MODE,
+            GuardDecisionOutcome.BLOCK,
+        }:
+            raise PolicyViolationError(
+                decision.explanation,
+                payload={"guard_decision": decision.to_dict()},
             )
 
         result = self._http_adapter.send_request(
@@ -56,6 +108,25 @@ class SendHttpRequestHandler:
             url,
             headers=headers,
             body=body,
+        )
+        self._operations_diagnostics_service.record_operation(
+            family=OperationFamily.CURL,
+            component_id=f"http:{self._subject_key(url)}",
+            subject_ref=url,
+            success=result.success,
+            severity="info" if result.success else "high",
+            summary=result.message or f"{method} {url}",
+            payload={
+                "method": method,
+                "url": url,
+                "status_code": result.status_code,
+                "duration_ms": result.duration_ms,
+                "reason": result.reason,
+                "message": result.message,
+                "risk_level": risk_level.value,
+                "guard_outcome": decision.outcome.value,
+                "placeholder_names": placeholders,
+            },
         )
         return DispatchResult(
             success=result.success,
@@ -118,6 +189,11 @@ class SendHttpRequestHandler:
         return bool(confirmed is True or confirmed == "true")
 
     @staticmethod
+    def _is_elevated(command: Command) -> bool:
+        elevated = command.args.get("elevated_mode", command.args.get("elevated"))
+        return bool(elevated is True or elevated == "true")
+
+    @staticmethod
     def _optional_str(value: object) -> str | None:
         return value if isinstance(value, str) else None
 
@@ -131,3 +207,38 @@ class SendHttpRequestHandler:
             except ValueError:
                 return SessionTargetKind.LOCAL
         return SessionTargetKind.LOCAL
+
+    @staticmethod
+    def _guard_action_kind(method: str) -> GuardActionKind:
+        normalized = method.upper()
+        if normalized == "DELETE":
+            return GuardActionKind.HTTP_DESTRUCTIVE
+        if normalized in MUTATING_HTTP_METHODS:
+            return GuardActionKind.HTTP_MUTATION
+        return GuardActionKind.HTTP_READ
+
+    @staticmethod
+    def _extract_placeholders(
+        url: str,
+        body: str | None,
+        headers: dict[str, str],
+    ) -> list[str]:
+        haystack = "\n".join([url, body or "", *headers.values()])
+        placeholders: list[str] = []
+        index = 0
+        while True:
+            start = haystack.find("${", index)
+            if start < 0:
+                break
+            end = haystack.find("}", start + 2)
+            if end < 0:
+                break
+            name = haystack[start + 2 : end].strip()
+            if name and name not in placeholders:
+                placeholders.append(name)
+            index = end + 1
+        return placeholders
+
+    @staticmethod
+    def _subject_key(url: str) -> str:
+        return url.replace("://", "_").replace("/", "_")

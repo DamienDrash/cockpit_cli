@@ -21,6 +21,14 @@ class ConfirmationRequiredError(CommandHandlingError):
         self.payload = payload
 
 
+class PolicyViolationError(CommandHandlingError):
+    """Raised when a command is blocked or needs elevated mode."""
+
+    def __init__(self, message: str, *, payload: dict[str, object]) -> None:
+        super().__init__(message)
+        self.payload = payload
+
+
 @dataclass(slots=True)
 class DispatchResult:
     success: bool

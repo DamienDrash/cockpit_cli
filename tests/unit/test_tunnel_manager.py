@@ -88,7 +88,7 @@ class SSHTunnelManagerTests(unittest.TestCase):
         self.assertEqual(original.remote_host, "db.internal")
         self.assertEqual(replacement.remote_host, "cache.internal")
 
-    def test_lists_tunnel_diagnostics_and_prunes_stale_entries(self) -> None:
+    def test_lists_tunnel_diagnostics_and_keeps_stale_entries_visible(self) -> None:
         launcher = FakeLauncher()
         manager = SSHTunnelManager(launcher=launcher)
 
@@ -106,7 +106,7 @@ class SSHTunnelManagerTests(unittest.TestCase):
         self.assertFalse(diagnostics[0]["alive"])
         self.assertEqual(diagnostics[0]["reconnect_count"], 0)
         self.assertIn("last_failure", diagnostics[0])
-        self.assertEqual(manager.list_tunnels(), [])
+        self.assertEqual(len(manager.snapshot_tunnels()), 1)
 
     def test_reconnects_existing_tunnel(self) -> None:
         launcher = FakeLauncher()

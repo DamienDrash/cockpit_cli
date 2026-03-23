@@ -28,6 +28,16 @@ MUTATING_SQL_PREFIXES = {
     "update",
     "vacuum",
 }
+DESTRUCTIVE_SQL_PREFIXES = {
+    "alter",
+    "attach",
+    "detach",
+    "drop",
+    "reindex",
+    "replace",
+    "truncate",
+    "vacuum",
+}
 
 
 @dataclass(slots=True, frozen=True)
@@ -155,6 +165,12 @@ class DatabaseAdapter:
         normalized = query.strip().lstrip("(").lower()
         first_token = normalized.split(maxsplit=1)[0] if normalized else ""
         return first_token in MUTATING_SQL_PREFIXES
+
+    @staticmethod
+    def is_destructive_query(query: str) -> bool:
+        normalized = query.strip().lstrip("(").lower()
+        first_token = normalized.split(maxsplit=1)[0] if normalized else ""
+        return first_token in DESTRUCTIVE_SQL_PREFIXES
 
     @staticmethod
     def _walk_sqlite_files(root: Path, *, max_depth: int = 4) -> list[Path]:

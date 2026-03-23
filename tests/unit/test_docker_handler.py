@@ -7,8 +7,14 @@ from cockpit.application.handlers.docker_handlers import (
     StopDockerContainerHandler,
 )
 from cockpit.domain.commands.command import Command
+from cockpit.domain.models.policy import GuardDecision
 from cockpit.infrastructure.docker.docker_adapter import DockerActionResult
-from cockpit.shared.enums import CommandSource, SessionTargetKind
+from cockpit.shared.enums import (
+    CommandSource,
+    GuardDecisionOutcome,
+    SessionTargetKind,
+    TargetRiskLevel,
+)
 
 
 class FakeDockerAdapter:
@@ -46,10 +52,49 @@ class FakeDockerAdapter:
         return DockerActionResult(success=True, message=f"removed {container_id}")
 
 
+class FakeGuardPolicyService:
+    def __init__(self) -> None:
+        self.calls = []
+
+    def evaluate(self, context):
+        self.calls.append(context)
+        if not context.confirmed:
+            return GuardDecision(
+                command_id=context.command_id,
+                action_kind=context.action_kind,
+                component_kind=context.component_kind,
+                target_risk=context.target_risk,
+                outcome=GuardDecisionOutcome.REQUIRE_CONFIRMATION,
+                explanation="confirmation required",
+                requires_confirmation=True,
+                confirmation_message="Confirm docker action.",
+            )
+        return GuardDecision(
+            command_id=context.command_id,
+            action_kind=context.action_kind,
+            component_kind=context.component_kind,
+            target_risk=context.target_risk,
+            outcome=GuardDecisionOutcome.ALLOW,
+            explanation="allowed",
+        )
+
+
+class FakeOperationsDiagnosticsService:
+    def __init__(self) -> None:
+        self.calls = []
+
+    def record_operation(self, **payload):
+        self.calls.append(payload)
+
+
 class RestartDockerContainerHandlerTests(unittest.TestCase):
     def test_requires_confirmation_before_restart(self) -> None:
         adapter = FakeDockerAdapter()
-        handler = RestartDockerContainerHandler(adapter)
+        handler = RestartDockerContainerHandler(
+            adapter,
+            guard_policy_service=FakeGuardPolicyService(),
+            operations_diagnostics_service=FakeOperationsDiagnosticsService(),
+        )
         command = Command(
             id="cmd_1",
             source=CommandSource.KEYBINDING,
@@ -76,7 +121,12 @@ class RestartDockerContainerHandlerTests(unittest.TestCase):
 
     def test_restarts_selected_container_after_confirmation(self) -> None:
         adapter = FakeDockerAdapter()
-        handler = RestartDockerContainerHandler(adapter)
+        diagnostics = FakeOperationsDiagnosticsService()
+        handler = RestartDockerContainerHandler(
+            adapter,
+            guard_policy_service=FakeGuardPolicyService(),
+            operations_diagnostics_service=diagnostics,
+        )
         command = Command(
             id="cmd_2",
             source=CommandSource.KEYBINDING,
@@ -98,10 +148,15 @@ class RestartDockerContainerHandlerTests(unittest.TestCase):
         )
         self.assertEqual(result.data["refresh_panel_id"], "docker-panel")
         self.assertEqual(result.data["restarted_container_id"], "abc123")
+        self.assertEqual(len(diagnostics.calls), 1)
 
     def test_stops_selected_container_after_confirmation(self) -> None:
         adapter = FakeDockerAdapter()
-        handler = StopDockerContainerHandler(adapter)
+        handler = StopDockerContainerHandler(
+            adapter,
+            guard_policy_service=FakeGuardPolicyService(),
+            operations_diagnostics_service=FakeOperationsDiagnosticsService(),
+        )
         command = Command(
             id="cmd_3",
             source=CommandSource.KEYBINDING,
@@ -121,7 +176,11 @@ class RestartDockerContainerHandlerTests(unittest.TestCase):
 
     def test_removes_selected_container_after_confirmation(self) -> None:
         adapter = FakeDockerAdapter()
-        handler = RemoveDockerContainerHandler(adapter)
+        handler = RemoveDockerContainerHandler(
+            adapter,
+            guard_policy_service=FakeGuardPolicyService(),
+            operations_diagnostics_service=FakeOperationsDiagnosticsService(),
+        )
         command = Command(
             id="cmd_4",
             source=CommandSource.KEYBINDING,

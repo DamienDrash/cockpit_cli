@@ -3,8 +3,9 @@ import unittest
 from cockpit.application.handlers.base import ConfirmationRequiredError
 from cockpit.application.handlers.curl_handlers import SendHttpRequestHandler
 from cockpit.domain.commands.command import Command
+from cockpit.domain.models.policy import GuardDecision
 from cockpit.infrastructure.http.http_adapter import HttpResponseSummary
-from cockpit.shared.enums import CommandSource
+from cockpit.shared.enums import CommandSource, GuardDecisionOutcome
 
 
 class FakeHttpAdapter:
@@ -35,10 +36,54 @@ class FakeHttpAdapter:
         )
 
 
+class FakeGuardPolicyService:
+    def evaluate(self, context):
+        if context.action_kind.value == "http_read":
+            return GuardDecision(
+                command_id=context.command_id,
+                action_kind=context.action_kind,
+                component_kind=context.component_kind,
+                target_risk=context.target_risk,
+                outcome=GuardDecisionOutcome.ALLOW,
+                explanation="read-only",
+            )
+        if not context.confirmed:
+            return GuardDecision(
+                command_id=context.command_id,
+                action_kind=context.action_kind,
+                component_kind=context.component_kind,
+                target_risk=context.target_risk,
+                outcome=GuardDecisionOutcome.REQUIRE_CONFIRMATION,
+                explanation="confirmation required",
+                requires_confirmation=True,
+                confirmation_message="Confirm HTTP request.",
+            )
+        return GuardDecision(
+            command_id=context.command_id,
+            action_kind=context.action_kind,
+            component_kind=context.component_kind,
+            target_risk=context.target_risk,
+            outcome=GuardDecisionOutcome.ALLOW,
+            explanation="allowed",
+        )
+
+
+class FakeOperationsDiagnosticsService:
+    def __init__(self) -> None:
+        self.calls = []
+
+    def record_operation(self, **payload):
+        self.calls.append(payload)
+
+
 class SendHttpRequestHandlerTests(unittest.TestCase):
     def test_requires_confirmation_for_mutating_methods(self) -> None:
         adapter = FakeHttpAdapter()
-        handler = SendHttpRequestHandler(adapter)
+        handler = SendHttpRequestHandler(
+            adapter,
+            guard_policy_service=FakeGuardPolicyService(),
+            operations_diagnostics_service=FakeOperationsDiagnosticsService(),
+        )
         command = Command(
             id="cmd_1",
             source=CommandSource.SLASH,
@@ -54,7 +99,12 @@ class SendHttpRequestHandlerTests(unittest.TestCase):
 
     def test_sends_request_and_routes_result_to_curl_panel(self) -> None:
         adapter = FakeHttpAdapter()
-        handler = SendHttpRequestHandler(adapter)
+        diagnostics = FakeOperationsDiagnosticsService()
+        handler = SendHttpRequestHandler(
+            adapter,
+            guard_policy_service=FakeGuardPolicyService(),
+            operations_diagnostics_service=diagnostics,
+        )
         command = Command(
             id="cmd_2",
             source=CommandSource.SLASH,
@@ -75,6 +125,7 @@ class SendHttpRequestHandlerTests(unittest.TestCase):
             [("GET", "https://example.com/health", {"Accept": "application/json"}, None)],
         )
         self.assertEqual(result.data["result_panel_id"], "curl-panel")
+        self.assertEqual(len(diagnostics.calls), 1)
 
 
 if __name__ == "__main__":

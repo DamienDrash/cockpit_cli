@@ -9,6 +9,7 @@ from cockpit.application.dispatch.command_dispatcher import CommandDispatcher
 from cockpit.application.dispatch.command_parser import CommandParser
 from cockpit.application.dispatch.event_bus import EventBus
 from cockpit.application.services.datasource_service import DataSourceService
+from cockpit.application.services.guard_policy_service import GuardPolicyService
 from cockpit.application.handlers.curl_handlers import SendHttpRequestHandler
 from cockpit.application.handlers.cron_handlers import SetCronJobEnabledHandler
 from cockpit.application.handlers.db_handlers import RunDatabaseQueryHandler
@@ -17,13 +18,19 @@ from cockpit.application.handlers.docker_handlers import (
     RestartDockerContainerHandler,
     StopDockerContainerHandler,
 )
+from cockpit.application.services.incident_service import IncidentService
 from cockpit.application.handlers.layout_handlers import (
     AdjustActiveLayoutRatioHandler,
     ApplyDefaultLayoutHandler,
     FocusNextPanelHandler,
     ToggleActiveLayoutOrientationHandler,
 )
+from cockpit.application.services.operations_diagnostics_service import (
+    OperationsDiagnosticsService,
+)
+from cockpit.application.services.recovery_policy_service import RecoveryPolicyService
 from cockpit.application.handlers.session_handlers import RestoreSessionHandler
+from cockpit.application.services.self_healing_service import SelfHealingService
 from cockpit.application.handlers.tab_handlers import FocusTabHandler
 from cockpit.application.handlers.terminal_handlers import (
     CopyTerminalBufferHandler,
@@ -73,6 +80,13 @@ from cockpit.infrastructure.persistence.repositories import (
     WebAdminStateRepository,
     WorkspaceRepository,
 )
+from cockpit.infrastructure.persistence.ops_repositories import (
+    ComponentHealthRepository,
+    GuardDecisionRepository,
+    IncidentRepository,
+    OperationDiagnosticsRepository,
+    RecoveryAttemptRepository,
+)
 from cockpit.infrastructure.persistence.sqlite_store import SQLiteStore
 from cockpit.infrastructure.secrets.secret_resolver import SecretResolver
 from cockpit.infrastructure.shell.base import ShellAdapter
@@ -84,6 +98,7 @@ from cockpit.infrastructure.ssh.tunnel_manager import SSHTunnelManager
 from cockpit.infrastructure.system.clipboard import ClipboardService
 from cockpit.plugins.loader import PluginBootstrapContext, PluginLoader
 from cockpit.runtime.pty_manager import PTYManager
+from cockpit.runtime.health_monitor import RuntimeHealthMonitor
 from cockpit.runtime.stream_router import StreamRouter
 from cockpit.runtime.task_supervisor import TaskSupervisor
 from cockpit.shared.config import default_db_path, discover_project_root
@@ -114,6 +129,11 @@ class ApplicationContainer:
     secret_service: SecretService
     plugin_service: PluginService
     web_admin_service: WebAdminService
+    self_healing_service: SelfHealingService
+    incident_service: IncidentService
+    operations_diagnostics_service: OperationsDiagnosticsService
+    guard_policy_service: GuardPolicyService
+    health_monitor: RuntimeHealthMonitor
     stream_router: StreamRouter
     pty_manager: PTYManager
     cron_adapter: CronAdapter
@@ -128,6 +148,7 @@ class ApplicationContainer:
     store: SQLiteStore
 
     def shutdown(self) -> None:
+        self.health_monitor.stop()
         self.pty_manager.shutdown()
         self.plugin_service.shutdown()
         self.tunnel_manager.shutdown()
@@ -169,6 +190,11 @@ def build_container(
     datasource_repository = DataSourceProfileRepository(store)
     installed_plugin_repository = InstalledPluginRepository(store)
     web_admin_state_repository = WebAdminStateRepository(store)
+    component_health_repository = ComponentHealthRepository(store)
+    incident_repository = IncidentRepository(store)
+    recovery_attempt_repository = RecoveryAttemptRepository(store)
+    guard_decision_repository = GuardDecisionRepository(store)
+    operation_diagnostics_repository = OperationDiagnosticsRepository(store)
     stream_router = StreamRouter()
     task_supervisor = TaskSupervisor()
     ssh_command_runner = ssh_command_runner or SSHCommandRunner()
@@ -196,6 +222,8 @@ def build_container(
         stream_router=stream_router,
         task_supervisor=task_supervisor,
     )
+    recovery_policy_service = RecoveryPolicyService()
+    guard_policy_service = GuardPolicyService(guard_decision_repository)
     workspace_service = WorkspaceService(
         workspace_repository,
         connection_service=connection_service,
@@ -225,6 +253,39 @@ def build_container(
         )
         if isinstance(plugin_config.get("allowed_permissions", []), list)
         else (),
+    )
+    self_healing_service = SelfHealingService(
+        event_bus=event_bus,
+        recovery_policy_service=recovery_policy_service,
+        component_health_repository=component_health_repository,
+        incident_repository=incident_repository,
+        recovery_attempt_repository=recovery_attempt_repository,
+        pty_manager=pty_manager,
+        tunnel_manager=tunnel_manager,
+        task_supervisor=task_supervisor,
+    )
+    incident_service = IncidentService(
+        incident_repository=incident_repository,
+        recovery_attempt_repository=recovery_attempt_repository,
+        component_health_repository=component_health_repository,
+        self_healing_service=self_healing_service,
+    )
+    operations_diagnostics_service = OperationsDiagnosticsService(
+        docker_adapter=docker_adapter,
+        database_adapter=database_adapter,
+        http_adapter=http_adapter,
+        datasource_service=data_source_service,
+        tunnel_manager=tunnel_manager,
+        component_health_repository=component_health_repository,
+        incident_repository=incident_repository,
+        guard_decision_repository=guard_decision_repository,
+        operation_diagnostics_repository=operation_diagnostics_repository,
+    )
+    health_monitor = RuntimeHealthMonitor(
+        event_bus=event_bus,
+        task_supervisor=task_supervisor,
+        tunnel_manager=tunnel_manager,
+        self_healing_service=self_healing_service,
     )
     activity_log_service = ActivityLogService(
         history_repository=history_repository,
@@ -393,10 +454,29 @@ def build_container(
         "terminal.copy_selection", CopyTerminalSelectionHandler()
     )
     command_dispatcher.register(
-        "docker.restart", RestartDockerContainerHandler(docker_adapter)
+        "docker.restart",
+        RestartDockerContainerHandler(
+            docker_adapter,
+            guard_policy_service=guard_policy_service,
+            operations_diagnostics_service=operations_diagnostics_service,
+        ),
     )
-    command_dispatcher.register("docker.stop", StopDockerContainerHandler(docker_adapter))
-    command_dispatcher.register("docker.remove", RemoveDockerContainerHandler(docker_adapter))
+    command_dispatcher.register(
+        "docker.stop",
+        StopDockerContainerHandler(
+            docker_adapter,
+            guard_policy_service=guard_policy_service,
+            operations_diagnostics_service=operations_diagnostics_service,
+        ),
+    )
+    command_dispatcher.register(
+        "docker.remove",
+        RemoveDockerContainerHandler(
+            docker_adapter,
+            guard_policy_service=guard_policy_service,
+            operations_diagnostics_service=operations_diagnostics_service,
+        ),
+    )
     command_dispatcher.register(
         "cron.enable",
         SetCronJobEnabledHandler(cron_adapter, enabled=True),
@@ -406,10 +486,21 @@ def build_container(
         SetCronJobEnabledHandler(cron_adapter, enabled=False),
     )
     command_dispatcher.register(
-        "db.run_query", RunDatabaseQueryHandler(database_adapter, data_source_service)
+        "db.run_query",
+        RunDatabaseQueryHandler(
+            database_adapter,
+            data_source_service,
+            guard_policy_service=guard_policy_service,
+            operations_diagnostics_service=operations_diagnostics_service,
+        ),
     )
     command_dispatcher.register(
-        "curl.send", SendHttpRequestHandler(http_adapter)
+        "curl.send",
+        SendHttpRequestHandler(
+            http_adapter,
+            guard_policy_service=guard_policy_service,
+            operations_diagnostics_service=operations_diagnostics_service,
+        ),
     )
 
     plugin_loader = PluginLoader(allowed_module_prefixes=("cockpit.plugins.",))
@@ -433,12 +524,17 @@ def build_container(
         secret_service=secret_service,
         plugin_service=plugin_service,
         layout_service=layout_service,
+        incident_service=incident_service,
+        self_healing_service=self_healing_service,
+        operations_diagnostics_service=operations_diagnostics_service,
+        guard_policy_service=guard_policy_service,
         panel_registry=panel_registry,
         state_repository=web_admin_state_repository,
         command_catalog=tuple(command_catalog_entries),
         tunnel_manager=tunnel_manager,
         project_root=project_root,
     )
+    health_monitor.start()
 
     return ApplicationContainer(
         project_root=project_root,
@@ -454,6 +550,11 @@ def build_container(
         secret_service=secret_service,
         plugin_service=plugin_service,
         web_admin_service=web_admin_service,
+        self_healing_service=self_healing_service,
+        incident_service=incident_service,
+        operations_diagnostics_service=operations_diagnostics_service,
+        guard_policy_service=guard_policy_service,
+        health_monitor=health_monitor,
         stream_router=stream_router,
         pty_manager=pty_manager,
         cron_adapter=cron_adapter,
