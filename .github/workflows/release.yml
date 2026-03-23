@@ -339,3 +339,6 @@ jobs:
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
           packages-dir: release-assets/dist
+          attestations: false
+          verbose: true
+          print-hash: true
