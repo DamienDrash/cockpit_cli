@@ -88,6 +88,7 @@ PLUGIN_MANIFEST = PluginManifest(
     commands=["notes.append"],
     admin_pages=["plugins"],
     permissions=["ui.read", "commands.execute"],
+    runtime_mode="hosted",
 )
 
 

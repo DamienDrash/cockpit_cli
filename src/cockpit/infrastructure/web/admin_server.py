@@ -529,6 +529,7 @@ def _plugin_body(service: WebAdminService) -> str:
     for plugin in plugins:
         summary = plugin.manifest.get("summary", "")
         permissions = plugin.manifest.get("permissions", [])
+        runtime_mode = str(plugin.manifest.get("runtime_mode", "hosted"))
         permissions_text = ", ".join(
             str(item) for item in permissions if isinstance(item, str)
         ) or "(none)"
@@ -537,7 +538,7 @@ def _plugin_body(service: WebAdminService) -> str:
             f"<td><strong>{escape(plugin.name)}</strong><br><span class='muted'>{escape(plugin.module)}</span></td>"
             f"<td>{escape(plugin.requirement)}<br><span class='muted'>pin={escape(plugin.version_pin or '(none)')}</span></td>"
             f"<td>{escape(str(plugin.enabled))} / {escape(plugin.status)}</td>"
-            f"<td>{escape(str(summary))}<br><span class='muted'>compat={escape(str(plugin.manifest.get('compat_range', '*')))} integrity={escape(str(plugin.manifest.get('current_integrity_sha256', '(none)'))[:12])} perms={escape(permissions_text)}</span></td>"
+            f"<td>{escape(str(summary))}<br><span class='muted'>runtime={escape(runtime_mode)} compat={escape(str(plugin.manifest.get('compat_range', '*')))} integrity={escape(str(plugin.manifest.get('current_integrity_sha256', '(none)'))[:12])} perms={escape(permissions_text)}</span></td>"
             "<td>"
             f"<form class='inline' method='post' action='/plugins/update'><input type='hidden' name='plugin_id' value='{escape(plugin.id)}'><button type='submit'>Update</button></form> "
             f"<form class='inline' method='post' action='/plugins/toggle'><input type='hidden' name='plugin_id' value='{escape(plugin.id)}'><input type='hidden' name='enabled' value='{'0' if plugin.enabled else '1'}'><button type='submit'>{'Disable' if plugin.enabled else 'Enable'}</button></form> "
@@ -549,6 +550,10 @@ def _plugin_body(service: WebAdminService) -> str:
     plugin_diag = diagnostics["plugins"]
     trusted_sources = plugin_diag.get("trusted_sources", [])
     allowed_permissions = plugin_diag.get("allowed_permissions", [])
+    host_running = plugin_diag.get("host_running", 0)
+    host_failed = plugin_diag.get("host_failed", 0)
+    registered = plugin_diag.get("registered", 0)
+    host_payload = plugin_diag.get("hosts", {})
     return (
         "<div class='card'><h3>Install plugin</h3>"
         "<form method='post' action='/plugins/install'>"
@@ -564,6 +569,8 @@ def _plugin_body(service: WebAdminService) -> str:
         f"<p class='muted'>Cockpit version: <code>{escape(str(plugin_diag.get('app_version', 'unknown')))}</code></p>"
         f"<pre>{escape(json.dumps(trusted_sources, indent=2))}</pre>"
         f"<p class='muted'>Allowed permissions</p><pre>{escape(json.dumps(allowed_permissions, indent=2))}</pre>"
+        f"<p class='muted'>Runtime hosts: running={escape(str(host_running))} failed={escape(str(host_failed))} registered={escape(str(registered))}</p>"
+        f"<pre>{escape(json.dumps(host_payload, indent=2, sort_keys=True))}</pre>"
         "</div>"
         "<div class='card'><h3>Installed plugins</h3><table><thead><tr><th>Plugin</th><th>Requirement</th><th>Status</th><th>Summary</th><th>Actions</th></tr></thead>"
         f"<tbody>{''.join(rows) if rows else '<tr><td colspan=\"5\">No plugins installed.</td></tr>'}</tbody></table></div>"

@@ -19,7 +19,7 @@ class PluginManifest:
     datasources: list[str] = field(default_factory=list)
     admin_pages: list[str] = field(default_factory=list)
     permissions: list[str] = field(default_factory=list)
-    runtime_mode: str = "inprocess"
+    runtime_mode: str = "hosted"
 
     def to_dict(self) -> dict[str, object]:
         return serialize_contract(self)

@@ -36,6 +36,13 @@ class PluginBootstrapContext:
 class PluginLoader:
     """Load importable plugin modules declared in config."""
 
+    def __init__(self, *, allowed_module_prefixes: tuple[str, ...] = ()) -> None:
+        self._allowed_module_prefixes = tuple(
+            prefix.strip()
+            for prefix in allowed_module_prefixes
+            if isinstance(prefix, str) and prefix.strip()
+        )
+
     def load_from_config(
         self,
         payload: dict[str, object],
@@ -68,6 +75,13 @@ class PluginLoader:
         return None
 
     def _load_register_hook(self, module_name: str) -> PluginRegistrationHook:
+        if self._allowed_module_prefixes and not any(
+            module_name.startswith(prefix)
+            for prefix in self._allowed_module_prefixes
+        ):
+            raise ValueError(
+                f"Plugin module '{module_name}' is not permitted in the in-process loader."
+            )
         module = importlib.import_module(module_name)
         register = getattr(module, "register_plugin", None)
         if not callable(register):

@@ -129,6 +129,7 @@ class ApplicationContainer:
 
     def shutdown(self) -> None:
         self.pty_manager.shutdown()
+        self.plugin_service.shutdown()
         self.tunnel_manager.shutdown()
         self.store.close()
 
@@ -224,7 +225,6 @@ def build_container(
         if isinstance(plugin_config.get("allowed_permissions", []), list)
         else (),
     )
-    plugin_service.enable_runtime_paths()
     activity_log_service = ActivityLogService(
         history_repository=history_repository,
         audit_repository=audit_repository,
@@ -411,15 +411,8 @@ def build_container(
         "curl.send", SendHttpRequestHandler(http_adapter)
     )
 
-    plugin_loader = PluginLoader()
+    plugin_loader = PluginLoader(allowed_module_prefixes=("cockpit.plugins.",))
     plugin_payload = dict(plugin_config)
-    combined_plugins = plugin_payload.get("plugins", [])
-    if not isinstance(combined_plugins, list):
-        combined_plugins = []
-    combined_plugins.extend(
-        module_name for module_name in plugin_service.enabled_modules() if module_name not in combined_plugins
-    )
-    plugin_payload["plugins"] = combined_plugins
     plugin_loader.load_from_config(
         plugin_payload,
         context=PluginBootstrapContext(
@@ -428,6 +421,11 @@ def build_container(
             command_dispatcher=command_dispatcher,
             command_catalog=command_catalog_entries,
         ),
+    )
+    plugin_service.register_managed_plugins(
+        panel_registry=panel_registry,
+        command_dispatcher=command_dispatcher,
+        command_catalog=command_catalog_entries,
     )
     web_admin_service = WebAdminService(
         datasource_service=data_source_service,

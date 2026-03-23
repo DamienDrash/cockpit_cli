@@ -1,22 +1,26 @@
-"""Managed plugin installation and runtime activation."""
+"""Managed plugin installation, verification, and isolated host activation."""
 
 from __future__ import annotations
 
-import importlib
 from importlib import metadata as importlib_metadata
-import importlib.util
 import hashlib
 import os
+from pathlib import Path
 import shutil
 import subprocess
 import sys
 import tomllib
-from pathlib import Path
 
+from cockpit.application.handlers.base import DispatchResult
+from cockpit.domain.commands.command import Command
 from cockpit.domain.models.plugin import InstalledPlugin, PluginManifest
 from cockpit.infrastructure.persistence.repositories import InstalledPluginRepository
+from cockpit.plugins.runtime.contracts import PluginHostStartup
+from cockpit.plugins.runtime.host_client import PluginHostClient, PluginHostError
+from cockpit.plugins.runtime.remote_handler import RemotePluginCommandHandler
 from cockpit.shared.config import discover_project_root, state_dir
 from cockpit.shared.utils import make_id
+from cockpit.ui.panels.registry import PanelRegistry, PanelSpec
 
 try:  # pragma: no cover - optional dependency guard
     from packaging.specifiers import SpecifierSet
@@ -57,6 +61,7 @@ class PluginService:
     ) -> None:
         self._repository = repository
         self._start = start
+        self._project_root = discover_project_root(start)
         self._pip_runner = pip_runner or subprocess.run
         self._trusted_sources = tuple(
             item.strip()
@@ -69,6 +74,9 @@ class PluginService:
             if isinstance(item, str) and item.strip()
         )
         self._app_version = app_version or self._resolve_app_version()
+        self._host_clients: dict[str, PluginHostClient] = {}
+        self._host_exports: dict[str, PluginHostStartup] = {}
+        self._registered_plugin_ids: set[str] = set()
 
     def list_plugins(self) -> list[InstalledPlugin]:
         return self._runtime_plugins()
@@ -83,25 +91,10 @@ class PluginService:
         return updated
 
     def enable_runtime_paths(self) -> list[str]:
-        inserted: list[str] = []
-        for plugin in self._runtime_plugins():
-            if not plugin.enabled or not plugin.install_path:
-                continue
-            install_path = str(Path(plugin.install_path).resolve())
-            if install_path not in sys.path:
-                sys.path.insert(0, install_path)
-                inserted.append(install_path)
-        if inserted:
-            importlib.invalidate_caches()
-        return inserted
+        return []
 
     def enabled_modules(self) -> list[str]:
-        self.enable_runtime_paths()
-        return [
-            plugin.module
-            for plugin in self._runtime_plugins()
-            if plugin.enabled and plugin.status == "installed"
-        ]
+        return []
 
     def install_plugin(
         self,
@@ -121,16 +114,14 @@ class PluginService:
         plugin_id = make_id("plg")
         install_path = self._plugin_install_root(plugin_id)
         install_path.mkdir(parents=True, exist_ok=True)
-        install_spec = self._install_spec(requirement, version_pin)
-        self._run_pip_install(install_spec, install_path)
-        if str(install_path) not in sys.path:
-            sys.path.insert(0, str(install_path))
-        importlib.invalidate_caches()
-        manifest = self._load_manifest(module_name)
+        self._run_pip_install(self._install_spec(requirement, version_pin), install_path)
+        startup = self._inspect_plugin(plugin_id, module_name, install_path)
+        manifest = self._manifest_from_startup(startup)
         self._validate_manifest(manifest)
         runtime_manifest = self._with_runtime_manifest_data(
             manifest,
             install_path,
+            startup=startup,
             expected_integrity_sha256=integrity_sha256,
         )
         plugin = InstalledPlugin(
@@ -146,25 +137,25 @@ class PluginService:
             status="installed",
         )
         self._repository.save(plugin)
-        return plugin
+        return self.get_plugin(plugin_id) or plugin
 
     def update_plugin(self, plugin_id: str) -> InstalledPlugin:
         plugin = self._require_plugin(plugin_id)
         self._validate_requirement(plugin.requirement, plugin.source)
+        self._stop_host(plugin.id)
         install_path = Path(plugin.install_path or self._plugin_install_root(plugin_id))
         install_path.mkdir(parents=True, exist_ok=True)
         self._run_pip_install(
             self._install_spec(plugin.requirement, plugin.version_pin),
             install_path,
         )
-        if str(install_path) not in sys.path:
-            sys.path.insert(0, str(install_path))
-        importlib.invalidate_caches()
-        manifest = self._load_manifest(plugin.module)
+        startup = self._inspect_plugin(plugin.id, plugin.module, install_path)
+        manifest = self._manifest_from_startup(startup)
         self._validate_manifest(manifest)
         runtime_manifest = self._with_runtime_manifest_data(
             manifest,
             install_path,
+            startup=startup,
             expected_integrity_sha256=self._expected_integrity(plugin),
         )
         updated = InstalledPlugin(
@@ -180,10 +171,12 @@ class PluginService:
             status="installed",
         )
         self._repository.save(updated)
-        return updated
+        return self.get_plugin(plugin_id) or updated
 
     def set_enabled(self, plugin_id: str, enabled: bool) -> InstalledPlugin:
         plugin = self._require_plugin(plugin_id)
+        if not enabled:
+            self._stop_host(plugin.id)
         updated = InstalledPlugin(
             id=plugin.id,
             name=plugin.name,
@@ -197,7 +190,7 @@ class PluginService:
             status=plugin.status,
         )
         self._repository.save(updated)
-        return updated
+        return self.get_plugin(plugin_id) or updated
 
     def pin_version(self, plugin_id: str, version_pin: str | None) -> InstalledPlugin:
         plugin = self._require_plugin(plugin_id)
@@ -218,9 +211,15 @@ class PluginService:
 
     def remove_plugin(self, plugin_id: str) -> None:
         plugin = self._require_plugin(plugin_id)
+        self._stop_host(plugin.id)
         if plugin.install_path:
             shutil.rmtree(plugin.install_path, ignore_errors=True)
         self._repository.delete(plugin_id)
+        self._host_exports.pop(plugin_id, None)
+
+    def shutdown(self) -> None:
+        for plugin_id in list(self._host_clients):
+            self._stop_host(plugin_id)
 
     def diagnostics(self) -> dict[str, object]:
         plugins = self._runtime_plugins()
@@ -235,7 +234,128 @@ class PluginService:
             "incompatible": sum(1 for plugin in plugins if plugin.status == "incompatible"),
             "permission_denied": sum(1 for plugin in plugins if plugin.status == "permission_denied"),
             "runtime_unsupported": sum(1 for plugin in plugins if plugin.status == "runtime_unsupported"),
+            "host_running": sum(1 for plugin in plugins if plugin.status == "host_running"),
+            "host_failed": sum(1 for plugin in plugins if plugin.status == "host_failed"),
+            "registered": len(self._registered_plugin_ids),
+            "hosts": {
+                plugin_id: client.diagnostics()
+                for plugin_id, client in self._host_clients.items()
+            },
         }
+
+    def register_managed_plugins(
+        self,
+        *,
+        panel_registry: PanelRegistry,
+        command_dispatcher: object,
+        command_catalog: list[str],
+    ) -> None:
+        for plugin in self._runtime_plugins():
+            if not plugin.enabled or plugin.id in self._registered_plugin_ids:
+                continue
+            runtime_mode = str(plugin.manifest.get("runtime_mode", "hosted"))
+            if runtime_mode != "hosted":
+                continue
+            try:
+                startup = self._ensure_host(plugin)
+                self._register_hosted_exports(
+                    plugin=plugin,
+                    startup=startup,
+                    panel_registry=panel_registry,
+                    command_dispatcher=command_dispatcher,
+                    command_catalog=command_catalog,
+                )
+            except Exception:
+                failed = self._with_status(plugin, "host_failed")
+                self._repository.save(failed)
+
+    def invoke_command(
+        self,
+        *,
+        plugin_id: str,
+        command_name: str,
+        command: object,
+    ) -> DispatchResult:
+        plugin = self._require_hosted_plugin(plugin_id, required_permission="commands.execute")
+        startup = self._ensure_host(plugin)
+        if command_name not in {item.name for item in startup.commands}:
+            raise LookupError(f"Plugin command '{command_name}' is not exported.")
+        if not isinstance(command, Command):
+            raise TypeError("Plugin command proxy expects a Command payload.")
+        response = self._host_clients[plugin.id].call(
+            "command.invoke",
+            {
+                "command_name": command_name,
+                "command": command.to_dict(),
+            },
+        )
+        payload = response.get("dispatch_result", {})
+        if not isinstance(payload, dict):
+            return DispatchResult(success=False, message="Plugin host returned an invalid command result.")
+        return DispatchResult(
+            success=bool(payload.get("success", False)),
+            message=str(payload.get("message")) if payload.get("message") is not None else None,
+            data=dict(payload.get("data", {})) if isinstance(payload.get("data"), dict) else {},
+        )
+
+    def invoke_panel_action(
+        self,
+        *,
+        plugin_id: str,
+        panel_id: str,
+        action: str,
+        payload: dict[str, object],
+    ) -> dict[str, object]:
+        plugin = self._require_hosted_plugin(plugin_id, required_permission="ui.read")
+        startup = self._ensure_host(plugin)
+        if panel_id not in {item.panel_id for item in startup.panels}:
+            raise LookupError(f"Plugin panel '{panel_id}' is not exported.")
+        return self._host_clients[plugin.id].call(
+            f"panel.{action}",
+            {
+                "panel_id": panel_id,
+                "payload": payload,
+            },
+        )
+
+    def _register_hosted_exports(
+        self,
+        *,
+        plugin: InstalledPlugin,
+        startup: PluginHostStartup,
+        panel_registry: PanelRegistry,
+        command_dispatcher: object,
+        command_catalog: list[str],
+    ) -> None:
+        from cockpit.plugins.runtime.remote_panel import RemotePluginPanel
+
+        for panel_export in startup.panels:
+            panel_registry.register(
+                PanelSpec(
+                    panel_type=panel_export.panel_type,
+                    panel_id=panel_export.panel_id,
+                    display_name=panel_export.display_name,
+                    factory=lambda _container, panel_export=panel_export, plugin_id=plugin.id: RemotePluginPanel(
+                        plugin_service=self,
+                        plugin_id=plugin_id,
+                        panel_id=panel_export.panel_id,
+                        panel_type=panel_export.panel_type,
+                        display_name=panel_export.display_name,
+                    ),
+                )
+            )
+        for command_export in startup.commands:
+            command_dispatcher.register(
+                command_export.name,
+                RemotePluginCommandHandler(
+                    plugin_service=self,
+                    plugin_id=plugin.id,
+                    command_name=command_export.name,
+                ),
+            )
+            if command_export.name not in command_catalog:
+                command_catalog.append(command_export.name)
+        self._registered_plugin_ids.add(plugin.id)
 
     def _plugin_install_root(self, plugin_id: str) -> Path:
         return state_dir(self._start) / "plugins" / plugin_id
@@ -260,35 +380,6 @@ class PluginService:
             stderr = getattr(result, "stderr", "") or getattr(result, "stdout", "")
             raise RuntimeError(stderr.strip() or f"pip install failed for {requirement}.")
 
-    def _load_manifest(self, module_name: str) -> PluginManifest:
-        module = importlib.import_module(module_name)
-        raw_manifest = getattr(module, "PLUGIN_MANIFEST", None)
-        if callable(raw_manifest):
-            raw_manifest = raw_manifest()
-        if isinstance(raw_manifest, PluginManifest):
-            return raw_manifest
-        if isinstance(raw_manifest, dict):
-            return PluginManifest(
-                name=str(raw_manifest.get("name", module_name)),
-                module=str(raw_manifest.get("module", module_name)),
-                version=str(raw_manifest.get("version", self._distribution_version(module_name))),
-                compat_range=str(raw_manifest.get("compat_range", "*")),
-                summary=(
-                    str(raw_manifest["summary"])
-                    if raw_manifest.get("summary") is not None
-                    else None
-                ),
-                panels=[str(item) for item in raw_manifest.get("panels", []) if isinstance(item, str)],
-                commands=[str(item) for item in raw_manifest.get("commands", []) if isinstance(item, str)],
-                datasources=[str(item) for item in raw_manifest.get("datasources", []) if isinstance(item, str)],
-                admin_pages=[str(item) for item in raw_manifest.get("admin_pages", []) if isinstance(item, str)],
-                permissions=[str(item) for item in raw_manifest.get("permissions", []) if isinstance(item, str)],
-                runtime_mode=str(raw_manifest.get("runtime_mode", "inprocess")),
-            )
-        spec = importlib.util.find_spec(module_name)
-        version = self._distribution_version(module_name) if spec is not None else "0.0.0"
-        return PluginManifest(name=module_name, module=module_name, version=version)
-
     @staticmethod
     def _install_spec(requirement: str, version_pin: str | None) -> str:
         normalized = requirement.strip()
@@ -309,10 +400,121 @@ class PluginService:
             return f"{normalized}=={version_pin}"
         return normalized
 
+    def _inspect_plugin(
+        self,
+        plugin_id: str,
+        module_name: str,
+        install_path: Path,
+    ) -> PluginHostStartup:
+        client = self._build_host_client(
+            plugin_id=plugin_id,
+            module_name=module_name,
+            install_path=install_path,
+        )
+        try:
+            startup = client.start()
+            return startup
+        finally:
+            client.stop()
+
+    def _build_host_client(
+        self,
+        *,
+        plugin_id: str,
+        module_name: str,
+        install_path: Path,
+    ) -> PluginHostClient:
+        return PluginHostClient(
+            plugin_id=plugin_id,
+            module_name=module_name,
+            install_path=install_path,
+            project_root=self._project_root,
+            allowed_permissions=self._effective_allowed_permissions(),
+            app_version=self._app_version,
+        )
+
+    def _ensure_host(self, plugin: InstalledPlugin) -> PluginHostStartup:
+        client = self._host_clients.get(plugin.id)
+        if client is None:
+            if not plugin.install_path:
+                raise LookupError(f"Plugin '{plugin.id}' does not have an install path.")
+            client = self._build_host_client(
+                plugin_id=plugin.id,
+                module_name=plugin.module,
+                install_path=Path(plugin.install_path),
+            )
+            self._host_clients[plugin.id] = client
+        startup = client.start()
+        self._host_exports[plugin.id] = startup
+        runtime_state = self._with_status(plugin, "host_running")
+        self._repository.save(runtime_state)
+        return startup
+
+    def _stop_host(self, plugin_id: str) -> None:
+        client = self._host_clients.pop(plugin_id, None)
+        if client is not None:
+            client.stop()
+
+    def _manifest_from_startup(self, startup: PluginHostStartup) -> PluginManifest:
+        payload = dict(startup.manifest)
+        panels = [panel.panel_type for panel in startup.panels]
+        commands = [command.name for command in startup.commands]
+        return PluginManifest(
+            name=str(payload.get("name", startup.module)),
+            module=str(payload.get("module", startup.module)),
+            version=str(payload.get("version", "0.0.0")),
+            compat_range=str(payload.get("compat_range", "*")),
+            summary=str(payload["summary"]) if payload.get("summary") is not None else None,
+            panels=(
+                [str(item) for item in payload.get("panels", []) if isinstance(item, str)]
+                or panels
+            ),
+            commands=(
+                [str(item) for item in payload.get("commands", []) if isinstance(item, str)]
+                or commands
+            ),
+            datasources=[
+                str(item) for item in payload.get("datasources", []) if isinstance(item, str)
+            ],
+            admin_pages=[
+                str(item) for item in payload.get("admin_pages", []) if isinstance(item, str)
+            ],
+            permissions=[
+                str(item) for item in payload.get("permissions", []) if isinstance(item, str)
+            ],
+            runtime_mode=str(payload.get("runtime_mode", "hosted")),
+        )
+
     def _require_plugin(self, plugin_id: str) -> InstalledPlugin:
         plugin = self.get_plugin(plugin_id)
         if plugin is None:
             raise LookupError(f"Plugin '{plugin_id}' was not found.")
+        return plugin
+
+    def _require_hosted_plugin(
+        self,
+        plugin_id: str,
+        *,
+        required_permission: str,
+    ) -> InstalledPlugin:
+        plugin = self._require_plugin(plugin_id)
+        if not plugin.enabled:
+            raise RuntimeError(f"Plugin '{plugin.name}' is disabled.")
+        if str(plugin.manifest.get("runtime_mode", "hosted")) != "hosted":
+            raise RuntimeError(f"Plugin '{plugin.name}' is not available in hosted mode.")
+        if plugin.status in {
+            "integrity_failed",
+            "permission_denied",
+            "incompatible",
+            "runtime_unsupported",
+            "missing_install",
+        }:
+            raise RuntimeError(f"Plugin '{plugin.name}' is unavailable ({plugin.status}).")
+        permissions = plugin.manifest.get("permissions", [])
+        if isinstance(permissions, list) and required_permission not in permissions:
+            raise RuntimeError(
+                f"Plugin '{plugin.name}' does not declare permission '{required_permission}'."
+            )
         return plugin
 
     @staticmethod
@@ -392,8 +594,8 @@ class PluginService:
             return self._with_status(plugin, "missing_install")
         if not self._manifest_is_compatible(plugin.manifest):
             return self._with_status(plugin, "incompatible")
-        runtime_mode = plugin.manifest.get("runtime_mode")
-        if isinstance(runtime_mode, str) and runtime_mode.strip() and runtime_mode != "inprocess":
+        runtime_mode = str(plugin.manifest.get("runtime_mode", "hosted"))
+        if runtime_mode != "hosted":
             return self._with_status(plugin, "runtime_unsupported")
         if not self._permissions_allowed(plugin.manifest):
             return self._with_status(plugin, "permission_denied")
@@ -414,6 +616,13 @@ class PluginService:
                 manifest=manifest,
                 status="integrity_failed",
             )
+        host_client = self._host_clients.get(plugin.id)
+        status = "installed"
+        if plugin.enabled and host_client is not None:
+            if host_client.is_running():
+                status = "host_running"
+            elif host_client.last_error:
+                status = "host_failed"
         return InstalledPlugin(
             id=plugin.id,
             name=plugin.name,
@@ -424,7 +633,7 @@ class PluginService:
             enabled=plugin.enabled,
             source=plugin.source,
             manifest=manifest,
-            status="installed",
+            status=status,
         )
 
     def _manifest_is_compatible(self, manifest_payload: dict[str, object]) -> bool:
@@ -458,9 +667,12 @@ class PluginService:
         manifest: PluginManifest,
         install_path: Path,
         *,
+        startup: PluginHostStartup,
         expected_integrity_sha256: str | None = None,
     ) -> dict[str, object]:
         manifest_payload = manifest.to_dict()
+        manifest_payload["exported_panels"] = [panel.to_dict() for panel in startup.panels]
+        manifest_payload["exported_commands"] = [command.to_dict() for command in startup.commands]
         installed_integrity = self._compute_install_integrity(install_path)
         manifest_payload["installed_integrity_sha256"] = installed_integrity
         manifest_payload["current_integrity_sha256"] = installed_integrity
@@ -510,15 +722,28 @@ class PluginService:
 
     def _permissions_allowed(self, manifest_payload: dict[str, object]) -> bool:
         raw_permissions = manifest_payload.get("permissions", [])
-        if not isinstance(raw_permissions, list):
-            return True
+        declared = {
+            permission.strip()
+            for permission in raw_permissions
+            if isinstance(permission, str) and permission.strip()
+        }
         allowed_permissions = set(self._effective_allowed_permissions())
-        for permission in raw_permissions:
-            if not isinstance(permission, str):
-                continue
-            normalized = permission.strip()
-            if normalized and normalized not in allowed_permissions:
-                return False
+        if any(permission not in allowed_permissions for permission in declared):
+            return False
+        exported_panels = manifest_payload.get("exported_panels", [])
+        exported_commands = manifest_payload.get("exported_commands", [])
+        if (
+            isinstance(exported_panels, list)
+            and exported_panels
+            and "ui.read" not in declared
+        ):
+            return False
+        if (
+            isinstance(exported_commands, list)
+            and exported_commands
+            and "commands.execute" not in declared
+        ):
+            return False
         return True
 
     @staticmethod
