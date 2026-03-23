@@ -1,4 +1,4 @@
-# Releasing Cockpit
+# Releasing cockpit-cli
 
 ## Overview
 
@@ -129,8 +129,8 @@ Verify a wheel against its Sigstore bundle:
 
 ```bash
 python -m pip install sigstore
-python -m sigstore verify github cockpit-0.1.0-py3-none-any.whl \
-  --bundle cockpit-0.1.0-py3-none-any.whl.sigstore.json \
+python -m sigstore verify github cockpit_cli-0.1.0-py3-none-any.whl \
+  --bundle cockpit_cli-0.1.0-py3-none-any.whl.sigstore.json \
   --repository DamienDrash/cockpit_cli \
   --ref refs/tags/v0.1.0 \
   --trigger push
@@ -139,7 +139,7 @@ python -m sigstore verify github cockpit-0.1.0-py3-none-any.whl \
 Verify GitHub provenance:
 
 ```bash
-gh attestation verify cockpit-0.1.0-py3-none-any.whl \
+gh attestation verify cockpit_cli-0.1.0-py3-none-any.whl \
   --repo DamienDrash/cockpit_cli
 ```
 

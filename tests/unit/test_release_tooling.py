@@ -58,7 +58,7 @@ class ReleaseToolingTests(unittest.TestCase):
             root = Path(tmp)
             release_root = root / "release-assets"
             (release_root / "dist").mkdir(parents=True)
-            wheel = release_root / "dist" / "cockpit-0.1.0-py3-none-any.whl"
+            wheel = release_root / "dist" / "cockpit_cli-0.1.0-py3-none-any.whl"
             sbom = release_root / "sbom.json"
             wheel.write_text("wheel", encoding="utf-8")
             sbom.write_text("sbom", encoding="utf-8")
@@ -71,10 +71,10 @@ class ReleaseToolingTests(unittest.TestCase):
 
             manifest_payload = json.loads(manifest.read_text(encoding="utf-8"))
             paths = [artifact["path"] for artifact in manifest_payload["artifacts"]]
-            self.assertIn("dist/cockpit-0.1.0-py3-none-any.whl", paths)
+            self.assertIn("dist/cockpit_cli-0.1.0-py3-none-any.whl", paths)
             self.assertIn("sbom.json", paths)
             checksum_lines = checksums.read_text(encoding="utf-8").splitlines()
-            self.assertTrue(any(line.endswith("  dist/cockpit-0.1.0-py3-none-any.whl") for line in checksum_lines))
+            self.assertTrue(any(line.endswith("  dist/cockpit_cli-0.1.0-py3-none-any.whl") for line in checksum_lines))
 
 
 if __name__ == "__main__":

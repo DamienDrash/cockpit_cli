@@ -1,7 +1,12 @@
 from argparse import Namespace
 import unittest
 
-from cockpit.app import completion_script, list_connections_text, startup_command_text_from_args
+from cockpit.app import (
+    build_arg_parser,
+    completion_script,
+    list_connections_text,
+    startup_command_text_from_args,
+)
 
 
 class CockpitCliTests(unittest.TestCase):
@@ -33,6 +38,12 @@ class CockpitCliTests(unittest.TestCase):
         script = completion_script("bash")
 
         self.assertIn("open resume connections datasources admin completion", script)
+        self.assertIn("cockpit-cli", script)
+
+    def test_parser_prog_uses_public_command_name(self) -> None:
+        parser = build_arg_parser()
+
+        self.assertEqual(parser.prog, "cockpit-cli")
 
     def test_connections_listing_handles_empty_config(self) -> None:
         text = list_connections_text()

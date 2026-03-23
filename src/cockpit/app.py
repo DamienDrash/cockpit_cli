@@ -16,7 +16,7 @@ from cockpit.infrastructure.web.admin_server import LocalWebAdminServer
 
 def build_arg_parser() -> ArgumentParser:
     """Create the cockpit CLI parser."""
-    parser = ArgumentParser(prog="cockpit")
+    parser = ArgumentParser(prog="cockpit-cli")
     subparsers = parser.add_subparsers(dest="subcommand")
 
     open_parser = subparsers.add_parser("open", help="Open a workspace when the app starts")
@@ -88,7 +88,7 @@ def completion_script(shell: str) -> str:
         return "\n".join(
             [
                 "#compdef cockpit",
-                "_cockpit() {",
+                "_cockpit_cli() {",
                 "  local -a commands",
                 "  commands=(",
                 "    'open:Open a workspace'",
@@ -117,12 +117,12 @@ def completion_script(shell: str) -> str:
                 "      ;;",
                 "  esac",
                 "}",
-                "compdef _cockpit cockpit",
+                "compdef _cockpit_cli cockpit-cli",
             ]
         )
     return "\n".join(
         [
-            "_cockpit() {",
+            "_cockpit_cli() {",
             "  local cur prev words cword",
             "  _init_completion || return",
             "  if [[ ${cword} -eq 1 ]]; then",
@@ -144,7 +144,7 @@ def completion_script(shell: str) -> str:
             "      ;;",
             "  esac",
             "}",
-            "complete -F _cockpit cockpit",
+            "complete -F _cockpit_cli cockpit-cli",
         ]
     )
 

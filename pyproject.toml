@@ -3,7 +3,7 @@ requires = ["hatchling>=1.27.0"]
 build-backend = "hatchling.build"
 
 [project]
-name = "cockpit"
+name = "cockpit-cli"
 version = "0.1.0"
 description = "Keyboard-first TUI platform for developer workspaces."
 readme = "README.md"
@@ -88,7 +88,7 @@ release = [
 ]
 
 [project.scripts]
-cockpit = "cockpit.app:main"
+cockpit-cli = "cockpit.app:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/cockpit"]

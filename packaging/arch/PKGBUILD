@@ -1,4 +1,4 @@
-pkgname=cockpit
+pkgname=cockpit-cli
 pkgver=0.1.0
 pkgrel=1
 pkgdesc="Keyboard-first TUI platform for developer workspaces"

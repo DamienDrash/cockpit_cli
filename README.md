@@ -1,8 +1,8 @@
-# cockpit
+# cockpit-cli
 
 Keyboard-first developer workspace cockpit for Linux.
 
-`cockpit` combines a Textual TUI, a local web admin plane, persisted sessions,
+`cockpit-cli` combines a Textual TUI, a local web admin plane, persisted sessions,
 guarded mutating actions, and a plugin-capable datasource platform. The app is
 Linux-first and optimized for local development, SSH-backed environments, and
 operator workflows that need one command/event model across terminal, Git,
@@ -112,31 +112,31 @@ pip install -e '.[release]'
 Open the current directory:
 
 ```bash
-cockpit open .
+cockpit-cli open .
 ```
 
 Resume the last session:
 
 ```bash
-cockpit resume
+cockpit-cli resume
 ```
 
 List connection aliases:
 
 ```bash
-cockpit connections
+cockpit-cli connections
 ```
 
 List configured datasource profiles:
 
 ```bash
-cockpit datasources
+cockpit-cli datasources
 ```
 
 Run the local web admin:
 
 ```bash
-cockpit admin --open-browser
+cockpit-cli admin --open-browser
 ```
 
 ## TUI Commands
@@ -200,8 +200,8 @@ connections:
 Then open through either form:
 
 ```bash
-cockpit open --connection prod /srv/app
-cockpit open @prod:/srv/app/current
+cockpit-cli open --connection prod /srv/app
+cockpit-cli open @prod:/srv/app/current
 ```
 
 ## Datasource Profiles
@@ -338,8 +338,8 @@ Verify a signed artifact:
 
 ```bash
 python -m pip install sigstore
-python -m sigstore verify github cockpit-0.1.0-py3-none-any.whl \
-  --bundle cockpit-0.1.0-py3-none-any.whl.sigstore.json \
+python -m sigstore verify github cockpit_cli-0.1.0-py3-none-any.whl \
+  --bundle cockpit_cli-0.1.0-py3-none-any.whl.sigstore.json \
   --repository DamienDrash/cockpit_cli \
   --ref refs/tags/v0.1.0 \
   --trigger push
@@ -348,7 +348,7 @@ python -m sigstore verify github cockpit-0.1.0-py3-none-any.whl \
 Verify provenance:
 
 ```bash
-gh attestation verify cockpit-0.1.0-py3-none-any.whl \
+gh attestation verify cockpit_cli-0.1.0-py3-none-any.whl \
   --repo DamienDrash/cockpit_cli
 ```
 

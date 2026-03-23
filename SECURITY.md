@@ -2,13 +2,13 @@
 
 ## Supported Versions
 
-`cockpit` currently ships as a Linux-first project on the `0.1.x` line.
+`cockpit-cli` currently ships as a Linux-first project on the `0.1.x` line.
 Security fixes are applied on the latest `main` branch and the latest tagged
 release.
 
 ## Reporting A Vulnerability
 
-If you believe you found a security issue in `cockpit`, please do not open a
+If you believe you found a security issue in `cockpit-cli`, please do not open a
 public issue with exploit details first.
 
 Send the report to the repository maintainer through GitHub Security Advisories
