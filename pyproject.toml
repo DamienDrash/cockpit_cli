@@ -77,8 +77,6 @@ all-datasources = [
 ]
 dev = [
   "build>=1.2",
-  "cyclonedx-bom>=4.2",
-  "sigstore>=3.6",
   "textual>=0.58.0",
 ]
 release = [
