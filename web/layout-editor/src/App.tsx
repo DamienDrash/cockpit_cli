@@ -9,7 +9,7 @@ import {
   cloneLayout,
   defaultPanel,
   duplicateTab,
-  movePanel,
+  moveNode,
   removeSelected,
   renameTab,
   replacePanel,
@@ -243,13 +243,13 @@ export function App() {
               )
             }
             onClearDrag={() => setDraggedPath(null)}
-            onDropPanel={(sourcePath, targetPath) => {
+            onDropNode={(sourcePath, targetPath) => {
               if (JSON.stringify(sourcePath) === JSON.stringify(targetPath)) {
                 return;
               }
               commit(
-                movePanel(draftLayout, selectedTabId, sourcePath, targetPath),
-                "Moved panel node inside the split tree.",
+                moveNode(draftLayout, selectedTabId, sourcePath, targetPath),
+                "Moved node inside the split tree.",
               );
               setDraggedPath(null);
             }}

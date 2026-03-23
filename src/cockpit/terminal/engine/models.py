@@ -10,6 +10,7 @@ class TerminalCell:
     """Renderable terminal cell."""
 
     text: str = " "
+    width: int = 1
     fg: str | None = None
     bg: str | None = None
     bold: bool = False
@@ -64,6 +65,8 @@ class TerminalEngineSnapshot:
     cols: int
     lines: tuple[str, ...]
     scrollback: tuple[str, ...] = field(default_factory=tuple)
+    cells: tuple[tuple[TerminalCell, ...], ...] = field(default_factory=tuple)
+    scrollback_cells: tuple[tuple[TerminalCell, ...], ...] = field(default_factory=tuple)
     cursor: TerminalCursorState = field(default_factory=TerminalCursorState)
     title: str | None = None
     alternate_screen_active: bool = False
@@ -75,3 +78,15 @@ class TerminalEngineSnapshot:
             lines.pop()
         return "\n".join(lines)
 
+    def render_rows(self) -> tuple[tuple[TerminalCell, ...], ...]:
+        """Return the scrollback and visible rows as terminal cells."""
+        if self.scrollback_cells or self.cells:
+            return self.scrollback_cells + self.cells
+        rows = tuple(_row_from_text(line) for line in self.scrollback + self.lines)
+        return rows or (tuple(),)
+
+
+def _row_from_text(text: str) -> tuple[TerminalCell, ...]:
+    if not text:
+        return tuple()
+    return tuple(TerminalCell(text=character) for character in text)

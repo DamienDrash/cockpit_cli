@@ -125,7 +125,9 @@ class EmbeddedTerminalWidgetTests(unittest.IsolatedAsyncioTestCase):
             await pilot.pause()
 
             self.assertTrue(found)
-            self.assertIn("> error: failed", self._rendered_text(terminal))
+            self.assertIn("error: failed", self._rendered_text(terminal))
+            self.assertFalse(self._rendered_text(terminal).startswith("> "))
+            self.assertGreater(len(self._rendered_spans(terminal)), 0)
 
     async def test_export_writes_terminal_buffer_to_file(self) -> None:
         app = TerminalWidgetTestApp()
@@ -155,9 +157,11 @@ class EmbeddedTerminalWidgetTests(unittest.IsolatedAsyncioTestCase):
             await pilot.pause()
 
             rendered = self._rendered_text(terminal)
-            self.assertIn("* delta", rendered)
-            self.assertIn("* gamma", rendered)
+            self.assertIn("delta", rendered)
+            self.assertIn("gamma", rendered)
+            self.assertNotIn("* delta", rendered)
             self.assertEqual(terminal.selected_text(), "beta\ngamma\ndelta")
+            self.assertGreater(len(self._rendered_spans(terminal)), 0)
 
     async def test_direct_selection_and_scroll_helpers_update_view(self) -> None:
         app = TerminalWidgetTestApp()
@@ -179,9 +183,22 @@ class EmbeddedTerminalWidgetTests(unittest.IsolatedAsyncioTestCase):
     @staticmethod
     def _rendered_text(widget: object) -> str:
         renderable = getattr(widget, "renderable", None)
-        if renderable is not None:
-            return str(renderable)
-        return str(getattr(widget, "render")())
+        if renderable is not None and hasattr(renderable, "plain"):
+            return str(getattr(renderable, "plain"))
+        rendered = getattr(widget, "render")()
+        if hasattr(rendered, "plain"):
+            return str(getattr(rendered, "plain"))
+        return str(rendered)
+
+    @staticmethod
+    def _rendered_spans(widget: object) -> list[object]:
+        renderable = getattr(widget, "renderable", None)
+        if renderable is not None and hasattr(renderable, "spans"):
+            return list(getattr(renderable, "spans"))
+        rendered = getattr(widget, "render")()
+        if hasattr(rendered, "spans"):
+            return list(getattr(rendered, "spans"))
+        return []
 
 
 if TEXTUAL_AVAILABLE:

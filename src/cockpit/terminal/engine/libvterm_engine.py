@@ -7,7 +7,7 @@ import re
 from cockpit.terminal.bindings.libvterm_ffi import load_libvterm
 from cockpit.terminal.engine.base import TerminalEngine
 from cockpit.terminal.engine.fallback import FallbackTerminalEngine
-from cockpit.terminal.engine.models import TerminalCursorState, TerminalEngineSnapshot
+from cockpit.terminal.engine.models import TerminalCell, TerminalCursorState, TerminalEngineSnapshot
 
 
 ALTSCREEN_SEQUENCE_RE = re.compile(r"(\x1b\[\?1049[hl])")
@@ -67,7 +67,9 @@ class LibVTermTerminalEngine(TerminalEngine):
         self._lib.vterm_screen_flush_damage(self._screen)
 
     def snapshot(self) -> TerminalEngineSnapshot:
-        lines = self._visible_lines()
+        cell_rows = self._visible_cell_rows()
+        lines = tuple(self._line_from_cells(row) for row in cell_rows)
+        trimmed_lines = self._trimmed_lines(lines)
         cursor = self._ffi.new("VTermPos *")
         self._lib.vterm_state_get_cursorpos(self._state, cursor)
         transcript_lines = list(self._transcript_engine.snapshot().lines)
@@ -76,13 +78,15 @@ class LibVTermTerminalEngine(TerminalEngine):
             if self._alternate_active:
                 scrollback = tuple(transcript_lines)
             else:
-                cutoff = min(len(lines), len(transcript_lines))
+                cutoff = min(len(trimmed_lines), len(transcript_lines))
                 scrollback = tuple(transcript_lines[:-cutoff]) if cutoff else tuple(transcript_lines)
         return TerminalEngineSnapshot(
             rows=self._rows,
             cols=self._cols,
-            lines=tuple(lines),
+            lines=trimmed_lines,
             scrollback=scrollback,
+            cells=tuple(cell_rows),
+            scrollback_cells=tuple(self._cells_from_text(line) for line in scrollback),
             cursor=TerminalCursorState(
                 row=max(0, int(cursor.row)),
                 col=max(0, int(cursor.col)),
@@ -108,28 +112,69 @@ class LibVTermTerminalEngine(TerminalEngine):
             if not self._alternate_active:
                 self._transcript_engine.feed(part)
 
-    def _visible_lines(self) -> list[str]:
-        lines: list[str] = []
+    def _visible_cell_rows(self) -> tuple[tuple[TerminalCell, ...], ...]:
+        rows: list[tuple[TerminalCell, ...]] = []
         for row_index in range(self._rows):
-            rect = self._ffi.new(
-                "VTermRect *",
-                {
-                    "start_row": row_index,
-                    "end_row": row_index + 1,
-                    "start_col": 0,
-                    "end_col": self._cols,
-                },
-            )[0]
-            buffer_len = max(1, (self._cols + 1) * 4)
-            raw_buffer = self._ffi.new("char[]", buffer_len)
-            read_count = self._lib.vterm_screen_get_text(
-                self._screen,
-                raw_buffer,
-                buffer_len,
-                rect,
-            )
-            line = self._ffi.buffer(raw_buffer, read_count)[:].decode("utf-8", errors="ignore")
-            lines.append(line.rstrip("\n").rstrip())
-        while lines and lines[-1] == "":
-            lines.pop()
-        return lines or [""]
+            rows.append(tuple(self._cell_at(row_index, col_index) for col_index in range(self._cols)))
+        return tuple(rows)
+
+    def _cell_at(self, row: int, col: int) -> TerminalCell:
+        cell = self._ffi.new("VTermScreenCell *")
+        pos = self._ffi.new("VTermPos *", {"row": row, "col": col})
+        result = self._lib.vterm_screen_get_cell(self._screen, pos[0], cell)
+        if result == 0:
+            return TerminalCell(text=" ")
+        raw_cell = cell[0]
+        width = self._byte_to_int(raw_cell.width)
+        return TerminalCell(
+            text=self._decode_cell_text(raw_cell),
+            width=max(0, width),
+            fg=self._color_to_hex(raw_cell.fg, default_mask=0x02),
+            bg=self._color_to_hex(raw_cell.bg, default_mask=0x04),
+            bold=bool(raw_cell.attrs.bold),
+            italic=bool(raw_cell.attrs.italic),
+            underline=bool(raw_cell.attrs.underline),
+            reverse=bool(raw_cell.attrs.reverse),
+        )
+
+    def _decode_cell_text(self, raw_cell) -> str:
+        codepoints = [int(raw_cell.chars[index]) for index in range(6) if int(raw_cell.chars[index])]
+        if not codepoints:
+            return "" if self._byte_to_int(raw_cell.width) == 0 else " "
+        return "".join(chr(codepoint) for codepoint in codepoints)
+
+    def _color_to_hex(self, color, *, default_mask: int) -> str | None:
+        converted = self._ffi.new("VTermColor *")
+        converted[0] = color
+        if self._byte_to_int(converted.type) & default_mask:
+            return None
+        self._lib.vterm_screen_convert_color_to_rgb(self._screen, converted)
+        return "#{:02x}{:02x}{:02x}".format(
+            self._byte_to_int(converted.rgb.red),
+            self._byte_to_int(converted.rgb.green),
+            self._byte_to_int(converted.rgb.blue),
+        )
+
+    @staticmethod
+    def _byte_to_int(value) -> int:
+        if isinstance(value, bytes):
+            return value[0] if value else 0
+        return int(value)
+
+    @staticmethod
+    def _line_from_cells(row: tuple[TerminalCell, ...]) -> str:
+        rendered = "".join(cell.text for cell in row if cell.width != 0)
+        return rendered.rstrip()
+
+    @staticmethod
+    def _trimmed_lines(lines: tuple[str, ...]) -> tuple[str, ...]:
+        trimmed = list(lines)
+        while trimmed and trimmed[-1] == "":
+            trimmed.pop()
+        return tuple(trimmed or [""])
+
+    @staticmethod
+    def _cells_from_text(text: str) -> tuple[TerminalCell, ...]:
+        if not text:
+            return tuple()
+        return tuple(TerminalCell(text=character) for character in text)

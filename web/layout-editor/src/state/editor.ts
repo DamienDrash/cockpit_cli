@@ -14,6 +14,40 @@ export function describePath(path: NodePath): string {
   return path.length ? path.join(".") : "root";
 }
 
+function samePath(left: NodePath, right: NodePath): boolean {
+  return describePath(left) === describePath(right);
+}
+
+function isAncestorPath(ancestor: NodePath, descendant: NodePath): boolean {
+  if (ancestor.length >= descendant.length) {
+    return false;
+  }
+  return ancestor.every((segment, index) => descendant[index] === segment);
+}
+
+function adjustPathAfterRemoval(sourcePath: NodePath, targetPath: NodePath): NodePath | null {
+  if (samePath(sourcePath, targetPath)) {
+    return null;
+  }
+  if (isAncestorPath(sourcePath, targetPath)) {
+    return null;
+  }
+  if (sourcePath.length === 0) {
+    return null;
+  }
+  const adjusted = [...targetPath];
+  const parentPath = sourcePath.slice(0, -1);
+  const depth = parentPath.length;
+  if (
+    adjusted.length > depth &&
+    parentPath.every((segment, index) => adjusted[index] === segment) &&
+    sourcePath[sourcePath.length - 1] < adjusted[depth]
+  ) {
+    adjusted[depth] -= 1;
+  }
+  return adjusted;
+}
+
 export function defaultPanel(panels: PanelMeta[]): PanelRef {
   const panel = panels[0] ?? {
     panel_id: "work-panel",
@@ -206,20 +240,24 @@ export function removeSelected(layout: LayoutDocument, tabId: string, path: Node
   });
 }
 
-export function movePanel(
+export function moveNode(
   layout: LayoutDocument,
   tabId: string,
   sourcePath: NodePath,
   targetPath: NodePath,
 ): LayoutDocument {
-  const root = getTab(layout, tabId).root_split;
-  const sourceNode = getNode(root, sourcePath);
-  if (!isPanelRef(sourceNode)) {
+  if (sourcePath.length === 0) {
     return layout;
   }
+  const adjustedTargetPath = adjustPathAfterRemoval(sourcePath, targetPath);
+  if (!adjustedTargetPath) {
+    return layout;
+  }
+  const root = getTab(layout, tabId).root_split;
+  const sourceNode = getNode(root, sourcePath);
   const withoutSource = removeSelected(layout, tabId, sourcePath);
   return updateTabRoot(withoutSource, tabId, (nextRoot) =>
-    updateNodeInSplit(nextRoot, targetPath, (target) => {
+    updateNodeInSplit(nextRoot, adjustedTargetPath, (target) => {
       if (isPanelRef(target)) {
         return {
           orientation: "horizontal",
@@ -233,6 +271,20 @@ export function movePanel(
       };
     }),
   );
+}
+
+export function movePanel(
+  layout: LayoutDocument,
+  tabId: string,
+  sourcePath: NodePath,
+  targetPath: NodePath,
+): LayoutDocument {
+  const root = getTab(layout, tabId).root_split;
+  const sourceNode = getNode(root, sourcePath);
+  if (!isPanelRef(sourceNode)) {
+    return layout;
+  }
+  return moveNode(layout, tabId, sourcePath, targetPath);
 }
 
 export function addTab(layout: LayoutDocument, title: string, panel: PanelRef): LayoutDocument {

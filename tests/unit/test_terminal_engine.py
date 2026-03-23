@@ -14,6 +14,7 @@ class FallbackTerminalEngineTests(unittest.TestCase):
         snapshot = engine.snapshot()
 
         self.assertEqual(snapshot.lines, ("alpha", "beta"))
+        self.assertEqual("".join(cell.text for cell in snapshot.cells[0]), "alpha")
         self.assertEqual(snapshot.cursor.row, 1)
         self.assertEqual(snapshot.cursor.col, 4)
 
@@ -54,6 +55,7 @@ class LibVTermTerminalEngineTests(unittest.TestCase):
 
         self.assertEqual(snapshot.scrollback, ("line 1", "line 2", "line 3", "line 4"))
         self.assertEqual(snapshot.lines[-1], "line 7")
+        self.assertTrue(snapshot.cells)
 
     def test_alternate_screen_keeps_normal_scrollback(self) -> None:
         engine = LibVTermTerminalEngine(rows=4, cols=40)

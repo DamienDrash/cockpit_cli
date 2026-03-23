@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 import re
 
-from cockpit.terminal.engine.models import TerminalCursorState, TerminalEngineSnapshot
+from cockpit.terminal.engine.models import TerminalCell, TerminalCursorState, TerminalEngineSnapshot
 
 
 OSC_RE = re.compile(r"\x1b\][^\x07]*(?:\x07|\x1b\\)")
@@ -56,10 +56,12 @@ class FallbackTerminalEngine:
             lines.pop()
         if not lines:
             lines = [""]
+        cells = tuple(self._cells_from_line(line) for line in lines)
         return TerminalEngineSnapshot(
             rows=self._rows,
             cols=self._cols,
             lines=tuple(lines),
+            cells=cells,
             cursor=TerminalCursorState(
                 row=max(0, state.row),
                 col=max(0, state.col),
@@ -67,6 +69,12 @@ class FallbackTerminalEngine:
             ),
             alternate_screen_active=self._alternate_active,
         )
+
+    @staticmethod
+    def _cells_from_line(line: str) -> tuple[TerminalCell, ...]:
+        if not line:
+            return tuple()
+        return tuple(TerminalCell(text=character) for character in line)
 
     def _state(self) -> _ScreenState:
         return self._alternate if self._alternate_active else self._primary
@@ -211,4 +219,3 @@ class FallbackTerminalEngine:
         line = state.lines[state.row]
         for index in range(min(state.col + 1, len(line))):
             line[index] = " "
-

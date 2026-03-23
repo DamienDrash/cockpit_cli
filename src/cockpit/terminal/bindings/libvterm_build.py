@@ -30,8 +30,42 @@ def create_builder() -> FFI:
         typedef struct VTerm VTerm;
         typedef struct VTermState VTermState;
         typedef struct VTermScreen VTermScreen;
+        typedef union {
+            uint8_t type;
+            struct {
+                uint8_t type;
+                uint8_t red;
+                uint8_t green;
+                uint8_t blue;
+            } rgb;
+            struct {
+                uint8_t type;
+                uint8_t idx;
+            } indexed;
+        } VTermColor;
         typedef struct { int row; int col; } VTermPos;
         typedef struct { int start_row; int end_row; int start_col; int end_col; } VTermRect;
+        typedef struct {
+            unsigned int bold : 1;
+            unsigned int underline : 2;
+            unsigned int italic : 1;
+            unsigned int blink : 1;
+            unsigned int reverse : 1;
+            unsigned int conceal : 1;
+            unsigned int strike : 1;
+            unsigned int font : 4;
+            unsigned int dwl : 1;
+            unsigned int dhl : 2;
+            unsigned int small : 1;
+            unsigned int baseline : 2;
+        } VTermScreenCellAttrs;
+        typedef struct {
+            uint32_t chars[6];
+            char width;
+            VTermScreenCellAttrs attrs;
+            VTermColor fg;
+            VTermColor bg;
+        } VTermScreenCell;
         typedef enum { VTERM_DAMAGE_CELL, VTERM_DAMAGE_ROW, VTERM_DAMAGE_SCREEN, VTERM_DAMAGE_SCROLL } VTermDamageSize;
         VTerm *vterm_new(int rows, int cols);
         void vterm_free(VTerm *vt);
@@ -47,6 +81,8 @@ def create_builder() -> FFI:
         void vterm_screen_flush_damage(VTermScreen *screen);
         void vterm_screen_reset(VTermScreen *screen, int hard);
         size_t vterm_screen_get_text(const VTermScreen *screen, char *str, size_t len, const VTermRect rect);
+        int vterm_screen_get_cell(const VTermScreen *screen, VTermPos pos, VTermScreenCell *cell);
+        void vterm_screen_convert_color_to_rgb(const VTermScreen *screen, VTermColor *col);
         """
     )
     ffi.set_source(
