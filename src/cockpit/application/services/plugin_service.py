@@ -33,6 +33,14 @@ DEFAULT_TRUSTED_SOURCE_PREFIXES = (
     "git+ssh://git@github.com/",
 )
 
+DEFAULT_ALLOWED_PLUGIN_PERMISSIONS = (
+    "ui.read",
+    "commands.execute",
+    "datasource.read",
+    "layout.read",
+    "web.read",
+)
+
 
 class PluginService:
     """Install, pin, remove, and activate Cockpit plugins."""
@@ -44,6 +52,7 @@ class PluginService:
         start: Path | None = None,
         pip_runner: object | None = None,
         trusted_sources: tuple[str, ...] = (),
+        allowed_permissions: tuple[str, ...] = (),
         app_version: str | None = None,
     ) -> None:
         self._repository = repository
@@ -54,13 +63,24 @@ class PluginService:
             for item in trusted_sources
             if isinstance(item, str) and item.strip()
         )
+        self._allowed_permissions = tuple(
+            item.strip()
+            for item in allowed_permissions
+            if isinstance(item, str) and item.strip()
+        )
         self._app_version = app_version or self._resolve_app_version()
 
     def list_plugins(self) -> list[InstalledPlugin]:
-        return self._repository.list_all()
+        return self._runtime_plugins()
 
     def get_plugin(self, plugin_id: str) -> InstalledPlugin | None:
-        return self._repository.get(plugin_id)
+        plugin = self._repository.get(plugin_id)
+        if plugin is None:
+            return None
+        updated = self._runtime_state_for(plugin)
+        if updated != plugin:
+            self._repository.save(updated)
+        return updated
 
     def enable_runtime_paths(self) -> list[str]:
         inserted: list[str] = []
@@ -209,9 +229,12 @@ class PluginService:
             "enabled": sum(1 for plugin in plugins if plugin.enabled),
             "modules": [plugin.module for plugin in plugins],
             "trusted_sources": list(self._effective_trusted_sources()),
+            "allowed_permissions": list(self._effective_allowed_permissions()),
             "app_version": self._app_version,
             "integrity_failed": sum(1 for plugin in plugins if plugin.status == "integrity_failed"),
             "incompatible": sum(1 for plugin in plugins if plugin.status == "incompatible"),
+            "permission_denied": sum(1 for plugin in plugins if plugin.status == "permission_denied"),
+            "runtime_unsupported": sum(1 for plugin in plugins if plugin.status == "runtime_unsupported"),
         }
 
     def _plugin_install_root(self, plugin_id: str) -> Path:
@@ -259,6 +282,8 @@ class PluginService:
                 commands=[str(item) for item in raw_manifest.get("commands", []) if isinstance(item, str)],
                 datasources=[str(item) for item in raw_manifest.get("datasources", []) if isinstance(item, str)],
                 admin_pages=[str(item) for item in raw_manifest.get("admin_pages", []) if isinstance(item, str)],
+                permissions=[str(item) for item in raw_manifest.get("permissions", []) if isinstance(item, str)],
+                runtime_mode=str(raw_manifest.get("runtime_mode", "inprocess")),
             )
         spec = importlib.util.find_spec(module_name)
         version = self._distribution_version(module_name) if spec is not None else "0.0.0"
@@ -352,7 +377,7 @@ class PluginService:
 
     def _runtime_plugins(self) -> list[InstalledPlugin]:
         refreshed: list[InstalledPlugin] = []
-        for plugin in self.list_plugins():
+        for plugin in self._repository.list_all():
             updated = self._runtime_state_for(plugin)
             if updated != plugin:
                 self._repository.save(updated)
@@ -367,6 +392,11 @@ class PluginService:
             return self._with_status(plugin, "missing_install")
         if not self._manifest_is_compatible(plugin.manifest):
             return self._with_status(plugin, "incompatible")
+        runtime_mode = plugin.manifest.get("runtime_mode")
+        if isinstance(runtime_mode, str) and runtime_mode.strip() and runtime_mode != "inprocess":
+            return self._with_status(plugin, "runtime_unsupported")
+        if not self._permissions_allowed(plugin.manifest):
+            return self._with_status(plugin, "permission_denied")
         current_integrity = self._compute_install_integrity(install_path)
         expected_integrity = self._expected_integrity(plugin)
         manifest = dict(plugin.manifest)
@@ -472,6 +502,24 @@ class PluginService:
         if self._trusted_sources:
             return self._trusted_sources
         return DEFAULT_TRUSTED_SOURCE_PREFIXES
+
+    def _effective_allowed_permissions(self) -> tuple[str, ...]:
+        if self._allowed_permissions:
+            return self._allowed_permissions
+        return DEFAULT_ALLOWED_PLUGIN_PERMISSIONS
+
+    def _permissions_allowed(self, manifest_payload: dict[str, object]) -> bool:
+        raw_permissions = manifest_payload.get("permissions", [])
+        if not isinstance(raw_permissions, list):
+            return True
+        allowed_permissions = set(self._effective_allowed_permissions())
+        for permission in raw_permissions:
+            if not isinstance(permission, str):
+                continue
+            normalized = permission.strip()
+            if normalized and normalized not in allowed_permissions:
+                return False
+        return True
 
     @staticmethod
     def _is_local_requirement(requirement: str) -> bool:

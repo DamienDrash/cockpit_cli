@@ -141,6 +141,8 @@ def _redirect_target(path: str) -> str:
         return "/plugins"
     if path.startswith("/layouts"):
         return "/layouts"
+    if path.startswith("/diagnostics"):
+        return "/diagnostics"
     return "/"
 
 
@@ -166,6 +168,10 @@ def _handle_post(service: WebAdminService, path: str, form: dict[str, str]) -> t
         purge_value = form.get("purge_value", "0") == "1"
         service.delete_secret(name, purge_value=purge_value)
         return "/secrets", f"Deleted secret reference {name}."
+    if path == "/secrets/rotate":
+        name = form.get("name", "")
+        rotated = service.rotate_secret(name, secret_value=form.get("secret_value", ""))
+        return "/secrets", f"Rotated secret reference {rotated.name}."
     if path == "/plugins/install":
         plugin = service.install_plugin(form)
         return "/plugins", f"Installed plugin {plugin.name}."
@@ -225,10 +231,22 @@ def _handle_post(service: WebAdminService, path: str, form: dict[str, str]) -> t
             form.get("replacement_panel_type", ""),
         )
         return "/layouts", f"Replaced panel in {layout.id}."
+    if path == "/layouts/move-panel":
+        layout = service.move_panel_in_layout(
+            form.get("layout_id", ""),
+            form.get("tab_id", ""),
+            form.get("panel_id", ""),
+            form.get("direction", "next"),
+        )
+        return "/layouts", f"Moved panel in {layout.id}."
     if path == "/diagnostics/close-tunnel":
         profile_id = form.get("profile_id", "")
         service.close_tunnel(profile_id)
         return "/diagnostics", f"Closed tunnel for {profile_id}."
+    if path == "/diagnostics/reconnect-tunnel":
+        profile_id = form.get("profile_id", "")
+        service.reconnect_tunnel(profile_id)
+        return "/diagnostics", f"Reconnected tunnel for {profile_id}."
     raise ValueError(f"Unknown admin action '{path}'.")
 
 
@@ -240,7 +258,7 @@ def _home_body(service: WebAdminService) -> str:
     return (
         "<div class='grid'>"
         f"<div class='card'><h3>Datasources</h3><p>{escape(str(datasource_diag['total_profiles']))} total / {escape(str(datasource_diag['enabled_profiles']))} enabled</p></div>"
-        f"<div class='card'><h3>Secrets</h3><p>{escape(str(secret_diag['total_entries']))} managed / keyring={escape(str(secret_diag['keyring_available']))}</p></div>"
+        f"<div class='card'><h3>Secrets</h3><p>{escape(str(secret_diag['total_entries']))} managed / {escape(str(secret_diag.get('rotated_entries', 0)))} rotated / keyring={escape(str(secret_diag['keyring_available']))}</p></div>"
         f"<div class='card'><h3>Plugins</h3><p>{escape(str(plugin_diag['count']))} installed / {escape(str(plugin_diag['enabled']))} enabled</p></div>"
         f"<div class='card'><h3>Trusted Plugin Sources</h3><p>{escape(str(len(plugin_diag.get('trusted_sources', []))))} configured</p></div>"
         f"<div class='card'><h3>Panels</h3><p>{escape(', '.join(diagnostics['panel_types']))}</p></div>"
@@ -350,12 +368,21 @@ def _secret_body(service: WebAdminService) -> str:
     entries = service.list_secrets()
     rows = []
     for entry in entries:
+        rotate_form = ""
+        if entry.provider == "keyring":
+            rotate_form = (
+                f"<form class='inline' method='post' action='/secrets/rotate'>"
+                f"<input type='hidden' name='name' value='{escape(entry.name)}'>"
+                "<input name='secret_value' type='password' placeholder='New value'>"
+                "<button type='submit'>Rotate</button></form> "
+            )
         rows.append(
             "<tr>"
             f"<td><strong>{escape(entry.name)}</strong><br><span class='muted'>{escape(entry.provider)}</span></td>"
-            f"<td><code>{escape(json.dumps(entry.reference, sort_keys=True))}</code></td>"
-            f"<td>{escape(entry.description or '')}</td>"
+            f"<td><code>{escape(_masked_secret_reference(entry.reference))}</code></td>"
+            f"<td>{escape(entry.description or '')}<br><span class='muted'>rev={escape(str(entry.revision))} updated={escape(str(entry.updated_at or '(never)'))}</span></td>"
             "<td>"
+            f"{rotate_form}"
             f"<form class='inline' method='post' action='/secrets/delete'><input type='hidden' name='name' value='{escape(entry.name)}'><button type='submit'>Delete</button></form> "
             f"<form class='inline' method='post' action='/secrets/delete'><input type='hidden' name='name' value='{escape(entry.name)}'><input type='hidden' name='purge_value' value='1'><button type='submit'>Delete + Purge</button></form>"
             "</td>"
@@ -387,12 +414,16 @@ def _plugin_body(service: WebAdminService) -> str:
     rows = []
     for plugin in plugins:
         summary = plugin.manifest.get("summary", "")
+        permissions = plugin.manifest.get("permissions", [])
+        permissions_text = ", ".join(
+            str(item) for item in permissions if isinstance(item, str)
+        ) or "(none)"
         rows.append(
             "<tr>"
             f"<td><strong>{escape(plugin.name)}</strong><br><span class='muted'>{escape(plugin.module)}</span></td>"
             f"<td>{escape(plugin.requirement)}<br><span class='muted'>pin={escape(plugin.version_pin or '(none)')}</span></td>"
             f"<td>{escape(str(plugin.enabled))} / {escape(plugin.status)}</td>"
-            f"<td>{escape(str(summary))}<br><span class='muted'>compat={escape(str(plugin.manifest.get('compat_range', '*')))} integrity={escape(str(plugin.manifest.get('current_integrity_sha256', '(none)'))[:12])}</span></td>"
+            f"<td>{escape(str(summary))}<br><span class='muted'>compat={escape(str(plugin.manifest.get('compat_range', '*')))} integrity={escape(str(plugin.manifest.get('current_integrity_sha256', '(none)'))[:12])} perms={escape(permissions_text)}</span></td>"
             "<td>"
             f"<form class='inline' method='post' action='/plugins/update'><input type='hidden' name='plugin_id' value='{escape(plugin.id)}'><button type='submit'>Update</button></form> "
             f"<form class='inline' method='post' action='/plugins/toggle'><input type='hidden' name='plugin_id' value='{escape(plugin.id)}'><input type='hidden' name='enabled' value='{'0' if plugin.enabled else '1'}'><button type='submit'>{'Disable' if plugin.enabled else 'Enable'}</button></form> "
@@ -403,6 +434,7 @@ def _plugin_body(service: WebAdminService) -> str:
     diagnostics = service.diagnostics()
     plugin_diag = diagnostics["plugins"]
     trusted_sources = plugin_diag.get("trusted_sources", [])
+    allowed_permissions = plugin_diag.get("allowed_permissions", [])
     return (
         "<div class='card'><h3>Install plugin</h3>"
         "<form method='post' action='/plugins/install'>"
@@ -417,6 +449,7 @@ def _plugin_body(service: WebAdminService) -> str:
         "<div class='card'><h3>Plugin trust policy</h3>"
         f"<p class='muted'>Cockpit version: <code>{escape(str(plugin_diag.get('app_version', 'unknown')))}</code></p>"
         f"<pre>{escape(json.dumps(trusted_sources, indent=2))}</pre>"
+        f"<p class='muted'>Allowed permissions</p><pre>{escape(json.dumps(allowed_permissions, indent=2))}</pre>"
         "</div>"
         "<div class='card'><h3>Installed plugins</h3><table><thead><tr><th>Plugin</th><th>Requirement</th><th>Status</th><th>Summary</th><th>Actions</th></tr></thead>"
         f"<tbody>{''.join(rows) if rows else '<tr><td colspan=\"5\">No plugins installed.</td></tr>'}</tbody></table></div>"
@@ -472,6 +505,13 @@ def _layout_body(service: WebAdminService) -> str:
                 "<div><label>Replacement panel id</label><input name='replacement_panel_id'></div>"
                 "<div><label>Replacement panel type</label><input name='replacement_panel_type'></div>"
                 "</div><p><button type='submit'>Replace panel</button></p></form>"
+                "<form method='post' action='/layouts/move-panel'>"
+                f"<input type='hidden' name='layout_id' value='{escape(layout.id)}'>"
+                f"<input type='hidden' name='tab_id' value='{escape(tab.id)}'>"
+                "<div class='grid'>"
+                "<div><label>Panel id</label><input name='panel_id' placeholder='db-panel'></div>"
+                "<div><label>Direction</label><select name='direction'><option value='previous'>previous</option><option value='next'>next</option></select></div>"
+                "</div><p><button type='submit'>Move panel</button></p></form>"
                 "</div>"
             )
         blocks.append(
@@ -557,9 +597,11 @@ def _tunnel_table(tunnels: object) -> str:
             f"<td>{escape(str(tunnel.get('target_ref', '')))}</td>"
             f"<td>{escape(str(tunnel.get('remote_host', '')))}:{escape(str(tunnel.get('remote_port', '')))}</td>"
             f"<td>127.0.0.1:{escape(str(tunnel.get('local_port', '')))}</td>"
-            f"<td>{escape(str(tunnel.get('alive', False)))}</td>"
+            f"<td>{escape(str(tunnel.get('alive', False)))}<br><span class='muted'>reconnects={escape(str(tunnel.get('reconnect_count', 0)))}</span></td>"
             "<td>"
+            f"<form class='inline' method='post' action='/diagnostics/reconnect-tunnel'><input type='hidden' name='profile_id' value='{escape(profile_id)}'><button type='submit'>Reconnect</button></form> "
             f"<form class='inline' method='post' action='/diagnostics/close-tunnel'><input type='hidden' name='profile_id' value='{escape(profile_id)}'><button type='submit'>Close</button></form>"
+            f"<div class='muted'>{escape(str(tunnel.get('last_failure', '')))}</div>"
             "</td>"
             "</tr>"
         )
@@ -567,3 +609,29 @@ def _tunnel_table(tunnels: object) -> str:
         "<table><thead><tr><th>Profile</th><th>Target</th><th>Remote</th><th>Local</th><th>Alive</th><th>Actions</th></tr></thead>"
         f"<tbody>{''.join(rows)}</tbody></table>"
     )
+
+
+def _masked_secret_reference(reference: object) -> str:
+    if not isinstance(reference, dict):
+        return "{}"
+    masked = dict(reference)
+    provider = masked.get("provider")
+    if provider == "keyring":
+        username = masked.get("username")
+        if isinstance(username, str) and username:
+            masked["username"] = _mask_text(username)
+    if provider == "file":
+        path = masked.get("path")
+        if isinstance(path, str) and path:
+            masked["path"] = f".../{path.split('/')[-1]}"
+    if provider == "env":
+        name = masked.get("name")
+        if isinstance(name, str) and name:
+            masked["name"] = _mask_text(name)
+    return json.dumps(masked, sort_keys=True)
+
+
+def _mask_text(value: str) -> str:
+    if len(value) <= 4:
+        return "*" * len(value)
+    return f"{value[:2]}***{value[-2:]}"

@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from threading import Thread
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
@@ -35,6 +36,8 @@ class FakeWebAdminService:
         self.created_datasources: list[dict[str, object]] = []
         self.created_secrets: list[dict[str, object]] = []
         self.closed_tunnels: list[str] = []
+        self.rotated_secrets: list[str] = []
+        self.reconnected_tunnels: list[str] = []
 
     def diagnostics(self) -> dict[str, object]:
         return {
@@ -50,6 +53,7 @@ class FakeWebAdminService:
                 "enabled": 0,
                 "modules": [],
                 "trusted_sources": ["git+https://github.com/"],
+                "allowed_permissions": ["ui.read", "commands.execute"],
                 "app_version": "0.1.0",
             },
             "tunnels": [
@@ -98,6 +102,11 @@ class FakeWebAdminService:
 
     def delete_secret(self, name: str, *, purge_value: bool = False) -> None:
         del name, purge_value
+
+    def rotate_secret(self, name: str, *, secret_value: str):
+        del secret_value
+        self.rotated_secrets.append(name)
+        return _SecretObject(name=name, provider="keyring", reference={"provider": "keyring", "service": "cockpit", "username": name})
 
     def list_plugins(self):
         return []
@@ -155,11 +164,24 @@ class FakeWebAdminService:
         del layout_id, tab_id, existing_panel_id, replacement_panel_id, replacement_panel_type
         return _NamedObject(name="Layout")
 
+    def move_panel_in_layout(
+        self,
+        layout_id: str,
+        tab_id: str,
+        panel_id: str,
+        direction: str,
+    ):
+        del layout_id, tab_id, panel_id, direction
+        return _NamedObject(name="Layout")
+
     def available_panels(self):
         return []
 
     def close_tunnel(self, profile_id: str) -> None:
         self.closed_tunnels.append(profile_id)
+
+    def reconnect_tunnel(self, profile_id: str) -> None:
+        self.reconnected_tunnels.append(profile_id)
 
 
 @dataclass
@@ -168,6 +190,8 @@ class _SecretObject:
     provider: str = "env"
     reference: dict[str, object] = None  # type: ignore[assignment]
     description: str | None = "DB password"
+    updated_at: datetime | None = datetime(2026, 3, 23, tzinfo=UTC)
+    revision: int = 1
 
     def __post_init__(self) -> None:
         if self.reference is None:
@@ -263,6 +287,21 @@ class LocalWebAdminServerTests(unittest.TestCase):
             self.assertIn("Saved secret reference redis-pass.", secret_body)
             self.assertEqual(service.created_secrets[0]["env_name"], "REDIS_PASSWORD")
 
+            rotate_request = Request(
+                f"{base_url}/secrets/rotate",
+                data=urlencode(
+                    {
+                        "name": "analytics-pass",
+                        "secret_value": "rotated",
+                    }
+                ).encode("utf-8"),
+                method="POST",
+            )
+            with urlopen(rotate_request) as response:
+                rotate_body = response.read().decode("utf-8")
+            self.assertIn("Rotated secret reference analytics-pass.", rotate_body)
+            self.assertEqual(service.rotated_secrets, ["analytics-pass"])
+
             close_tunnel_request = Request(
                 f"{base_url}/diagnostics/close-tunnel",
                 data=urlencode({"profile_id": "pg-main"}).encode("utf-8"),
@@ -272,6 +311,16 @@ class LocalWebAdminServerTests(unittest.TestCase):
                 diagnostics_body = response.read().decode("utf-8")
             self.assertIn("Closed tunnel for pg-main.", diagnostics_body)
             self.assertEqual(service.closed_tunnels, ["pg-main"])
+
+            reconnect_tunnel_request = Request(
+                f"{base_url}/diagnostics/reconnect-tunnel",
+                data=urlencode({"profile_id": "pg-main"}).encode("utf-8"),
+                method="POST",
+            )
+            with urlopen(reconnect_tunnel_request) as response:
+                reconnect_body = response.read().decode("utf-8")
+            self.assertIn("Reconnected tunnel for pg-main.", reconnect_body)
+            self.assertEqual(service.reconnected_tunnels, ["pg-main"])
 
             self.assertIn("/diagnostics", service.saved_pages)
             self.assertIn("/plugins", service.saved_pages)

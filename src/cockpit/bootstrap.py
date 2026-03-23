@@ -216,6 +216,13 @@ def build_container(
         )
         if isinstance(plugin_config.get("trusted_sources", []), list)
         else (),
+        allowed_permissions=tuple(
+            item
+            for item in plugin_config.get("allowed_permissions", [])
+            if isinstance(item, str) and item
+        )
+        if isinstance(plugin_config.get("allowed_permissions", []), list)
+        else (),
     )
     plugin_service.enable_runtime_paths()
     activity_log_service = ActivityLogService(

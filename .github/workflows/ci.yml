@@ -36,3 +36,71 @@ jobs:
 
       - name: Build packages
         run: python -m build
+
+  service-matrix:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: cockpit
+          POSTGRES_DB: cockpit
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d cockpit"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+      mysql:
+        image: mysql:8
+        env:
+          MYSQL_ALLOW_EMPTY_PASSWORD: "yes"
+          MYSQL_DATABASE: cockpit
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd "mysqladmin ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+      redis:
+        image: redis:7
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+      mongodb:
+        image: mongo:7
+        ports:
+          - 27017:27017
+        options: >-
+          --health-cmd "mongosh --eval 'db.adminCommand({ ping: 1 })'"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      COCKPIT_LIVE_SERVICES: "1"
+      COCKPIT_TEST_POSTGRES_URL: postgresql+psycopg://postgres:cockpit@127.0.0.1:5432/cockpit
+      COCKPIT_TEST_MYSQL_URL: mysql+pymysql://root@127.0.0.1:3306/cockpit
+      COCKPIT_TEST_REDIS_URL: redis://127.0.0.1:6379/0
+      COCKPIT_TEST_MONGODB_URL: mongodb://127.0.0.1:27017/admin
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install package with live backend extras
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .[dev,postgres,mysql,redis,mongo]
+
+      - name: Run live datasource integration tests
+        run: PYTHONPATH=src python -m unittest tests.integration.test_datasource_live_backends -v

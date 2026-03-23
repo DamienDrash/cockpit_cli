@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from textual import events
 from textual.widgets import Static
 
 from cockpit.ui.widgets.terminal_buffer import TerminalBuffer
@@ -25,6 +26,7 @@ class EmbeddedTerminal(Static):
         self._active_match_index = -1
         self._selection_anchor_line: int | None = None
         self._selection_focus_line: int | None = None
+        self._drag_selection_active = False
 
     def clear(self, message: str = "Launching terminal...") -> None:
         self._buffer.reset()
@@ -35,6 +37,7 @@ class EmbeddedTerminal(Static):
         self._active_match_index = -1
         self._selection_anchor_line = None
         self._selection_focus_line = None
+        self._drag_selection_active = False
         self.update(message)
 
     def append_output(self, chunk: str) -> None:
@@ -159,14 +162,39 @@ class EmbeddedTerminal(Static):
         lines = self._buffer_lines()
         return "\n".join(lines[start : end + 1])
 
+    def scroll_up_lines(self, count: int = 1) -> None:
+        lines = self._buffer_lines()
+        if not lines:
+            return
+        max_offset = max(0, len(lines) - self._viewport_step())
+        self._viewport_offset = min(max_offset, self._viewport_offset + max(1, int(count)))
+        self._refresh_view()
+
+    def scroll_down_lines(self, count: int = 1) -> None:
+        if self._viewport_offset == 0:
+            return
+        self._viewport_offset = max(0, self._viewport_offset - max(1, int(count)))
+        self._refresh_view()
+
+    def select_line(self, line_index: int, *, extend: bool = False) -> bool:
+        lines = self._buffer_lines()
+        if not lines:
+            return False
+        normalized_line = max(0, min(len(lines) - 1, int(line_index)))
+        if not extend or self._selection_anchor_line is None:
+            self._selection_anchor_line = normalized_line
+        self._selection_focus_line = normalized_line
+        self._scroll_to_line(normalized_line)
+        self._refresh_view()
+        return True
+
     def _refresh_view(self) -> None:
         buffer_text = self._trimmed_buffer()
         if not buffer_text:
             self.update(self._placeholder)
             return
         lines = self._buffer_lines(buffer_text)
-        end = len(lines) - self._viewport_offset if self._viewport_offset else len(lines)
-        start = max(0, end - self._viewport_step())
+        start, end = self._visible_window(lines)
         visible = lines[start:end]
         active_match_line = self._active_match_line()
         selection = self._selection_bounds()
@@ -205,6 +233,13 @@ class EmbeddedTerminal(Static):
             content_size = getattr(self, "content_size", None)
             height = getattr(content_size, "height", 0) if content_size is not None else 0
         return max(1, int(height) if height else 10)
+
+    def _visible_window(self, lines: list[str] | None = None) -> tuple[int, int]:
+        if lines is None:
+            lines = self._buffer_lines()
+        end = len(lines) - self._viewport_offset if self._viewport_offset else len(lines)
+        start = max(0, end - self._viewport_step())
+        return start, end
 
     def _refresh_search_matches(self) -> None:
         query = self._search_query
@@ -266,6 +301,17 @@ class EmbeddedTerminal(Static):
             max(self._selection_anchor_line, self._selection_focus_line),
         )
 
+    def _line_from_y(self, y: int) -> int | None:
+        lines = self._buffer_lines()
+        if not lines:
+            return None
+        start, end = self._visible_window(lines)
+        visible_count = max(0, end - start)
+        if visible_count <= 0:
+            return None
+        normalized_y = max(0, min(visible_count - 1, int(y)))
+        return start + normalized_y
+
     @staticmethod
     def _decorate_visible_line(
         absolute_index: int,
@@ -285,3 +331,32 @@ class EmbeddedTerminal(Static):
         if active_match:
             return f"> {line}"
         return line
+
+    def on_mouse_scroll_up(self, event: events.MouseScrollUp) -> None:
+        self.scroll_up_lines()
+        event.stop()
+
+    def on_mouse_scroll_down(self, event: events.MouseScrollDown) -> None:
+        self.scroll_down_lines()
+        event.stop()
+
+    def on_mouse_down(self, event: events.MouseDown) -> None:
+        line_index = self._line_from_y(event.y)
+        if line_index is None:
+            return
+        self._drag_selection_active = True
+        self.select_line(line_index, extend=bool(getattr(event, "shift", False)))
+        event.stop()
+
+    def on_mouse_move(self, event: events.MouseMove) -> None:
+        if not self._drag_selection_active:
+            return
+        line_index = self._line_from_y(event.y)
+        if line_index is None:
+            return
+        self.select_line(line_index, extend=True)
+        event.stop()
+
+    def on_mouse_up(self, event: events.MouseUp) -> None:
+        self._drag_selection_active = False
+        event.stop()

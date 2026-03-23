@@ -203,3 +203,45 @@ class PluginServiceTests(unittest.TestCase):
             assert updated is not None
             self.assertEqual(updated.status, "integrity_failed")
             store.close()
+
+    def test_runtime_permission_denial_blocks_plugin_loading(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            package_root = root / "plugin-source"
+            package_root.mkdir()
+            (package_root / "sample_plugin_permissions.py").write_text(
+                textwrap.dedent(
+                    """
+                    from cockpit.domain.models.plugin import PluginManifest
+
+                    PLUGIN_MANIFEST = PluginManifest(
+                        name="Sample Plugin",
+                        module="sample_plugin_permissions",
+                        version="1.2.3",
+                        permissions=["shell.execute"],
+                    )
+                    """
+                ),
+                encoding="utf-8",
+            )
+            store = SQLiteStore(root / "cockpit.db")
+            repo = InstalledPluginRepository(store)
+            service = PluginService(
+                repo,
+                start=root,
+                pip_runner=FakePipRunner(package_root),
+                allowed_permissions=("ui.read",),
+            )
+
+            plugin = service.install_plugin(
+                requirement=str(package_root),
+                module_name="sample_plugin_permissions",
+            )
+
+            self.assertEqual(service.enabled_modules(), [])
+            updated = service.get_plugin(plugin.id)
+            self.assertIsNotNone(updated)
+            assert updated is not None
+            self.assertEqual(updated.status, "permission_denied")
+            self.assertEqual(service.diagnostics()["permission_denied"], 1)
+            store.close()

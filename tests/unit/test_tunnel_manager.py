@@ -104,4 +104,21 @@ class SSHTunnelManagerTests(unittest.TestCase):
 
         self.assertEqual(len(diagnostics), 1)
         self.assertFalse(diagnostics[0]["alive"])
+        self.assertEqual(diagnostics[0]["reconnect_count"], 0)
+        self.assertIn("last_failure", diagnostics[0])
         self.assertEqual(manager.list_tunnels(), [])
+
+    def test_reconnects_existing_tunnel(self) -> None:
+        launcher = FakeLauncher()
+        manager = SSHTunnelManager(launcher=launcher)
+
+        manager.open_tunnel(
+            profile_id="dsp_1",
+            target_ref="deploy@example.com",
+            remote_host="db.internal",
+            remote_port=5432,
+        )
+        reconnected = manager.reconnect_tunnel("dsp_1")
+
+        self.assertEqual(len(launcher.calls), 2)
+        self.assertEqual(reconnected.reconnect_count, 1)

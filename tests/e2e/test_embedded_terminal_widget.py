@@ -159,6 +159,23 @@ class EmbeddedTerminalWidgetTests(unittest.IsolatedAsyncioTestCase):
             self.assertIn("* gamma", rendered)
             self.assertEqual(terminal.selected_text(), "beta\ngamma\ndelta")
 
+    async def test_direct_selection_and_scroll_helpers_update_view(self) -> None:
+        app = TerminalWidgetTestApp()
+
+        async with app.run_test(size=(80, 8)) as pilot:
+            terminal = app.query_one(EmbeddedTerminal)
+            terminal.clear("ready")
+            terminal.append_output("".join(f"line {index}\n" for index in range(1, 21)))
+            await pilot.pause()
+
+            terminal.scroll_up_lines(3)
+            terminal.select_line(10)
+            terminal.select_line(12, extend=True)
+            await pilot.pause()
+
+            self.assertGreater(terminal.viewport_offset(), 0)
+            self.assertEqual(terminal.selected_text(), "line 11\nline 12\nline 13")
+
     @staticmethod
     def _rendered_text(widget: object) -> str:
         renderable = getattr(widget, "renderable", None)

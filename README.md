@@ -17,11 +17,11 @@ Docker, Cron, DB, HTTP, and layout management.
 - command palette, slash commands, and keybindings through one dispatcher
 - guarded mutating flows for Docker, Cron, DB, and HTTP actions
 - local web admin for datasource profiles, plugin installs, layouts, and diagnostics
-- managed secret references with optional keyring-backed values
+- managed secret references with optional keyring-backed values and keyring rotation
 - plugin install/update/pin/remove with repo or package requirements
-- plugin compatibility and on-disk integrity verification before runtime activation
+- plugin compatibility, permission allowlists, and on-disk integrity verification before runtime activation
 - broad datasource support through SQLAlchemy dialects plus non-SQL adapters
-- terminal scrollback, search, selection, export, and clipboard copy
+- terminal scrollback, search, keyboard or mouse-assisted selection, export, and clipboard copy
 
 ## Supported Datasource Families
 
@@ -248,6 +248,7 @@ Managed plugin installs support:
 - local paths
 - git requirements
 - trusted source prefix enforcement
+- permission allowlists before runtime activation
 - compatibility checks against the running cockpit version
 - install-time and runtime integrity hashes
 
@@ -269,6 +270,7 @@ Release artifacts included in the repo:
 - `wheel`
 - Arch/CachyOS `PKGBUILD` in [packaging/arch/PKGBUILD](/home/damien/Dokumente/cockpit/packaging/arch/PKGBUILD)
 - tag-driven GitHub release workflow in [.github/workflows/release.yml](/home/damien/Dokumente/cockpit/.github/workflows/release.yml)
+- release checksum manifest generation (`SHA256SUMS.txt`)
 
 ## Development
 
@@ -287,7 +289,7 @@ PYTHONPATH=src:/tmp/cockpit-deps python -m unittest \
 ```
 
 CI lives in [.github/workflows/ci.yml](/home/damien/Dokumente/cockpit/.github/workflows/ci.yml).
-It compiles the code, runs the unittest suite, and builds `sdist` plus `wheel`.
+It compiles the code, runs the unittest suite, builds `sdist` plus `wheel`, and runs a live service matrix against PostgreSQL, MySQL, Redis, and MongoDB.
 Tagged pushes additionally publish release artifacts through [.github/workflows/release.yml](/home/damien/Dokumente/cockpit/.github/workflows/release.yml).
 
 ## Operator Notes
@@ -298,12 +300,25 @@ Terminal selection flow:
 - `Shift+Up` and `Shift+Down` expand the active selection
 - `Ctrl+Shift+C` copies the selection
 - `Ctrl+Alt+C` copies the full terminal buffer
+- mouse wheel scrolls through scrollback
+- clicking and dragging inside the embedded terminal expands the current line selection
 
 Managed secrets:
 
 - create them in the web admin under `Secrets`
 - reference them inside datasource `secret_refs` as `stored:secret-name`
 - keyring-backed entries can store the actual value directly if the optional `keyring` extra is installed
+- keyring-backed entries can be rotated in place from the web admin without changing datasource references
+
+Plugin trust policy:
+
+- `config/plugins.yaml` can define `trusted_sources` and `allowed_permissions`
+- plugins requesting permissions outside the configured allowlist stay installed but do not activate at runtime
+
+Tunnel operations:
+
+- remote datasource tunnels show reconnect counts and last-failure diagnostics in the web admin
+- dead tunnels can be reconnected directly from the diagnostics page
 
 Contribution and release notes:
 

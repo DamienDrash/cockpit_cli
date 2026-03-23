@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 import socket
 import subprocess
 from typing import Protocol
+
+from cockpit.shared.utils import utc_now
 
 
 class TunnelProcess(Protocol):
@@ -16,7 +19,7 @@ class TunnelProcess(Protocol):
     def kill(self) -> None: ...
 
 
-@dataclass(slots=True, frozen=True)
+@dataclass(slots=True)
 class ActiveTunnel:
     profile_id: str
     target_ref: str
@@ -24,6 +27,10 @@ class ActiveTunnel:
     remote_port: int
     local_port: int
     process: TunnelProcess
+    opened_at: datetime
+    last_checked_at: datetime
+    reconnect_count: int = 0
+    last_failure: str | None = None
 
 
 class SSHTunnelManager:
@@ -44,6 +51,7 @@ class SSHTunnelManager:
         current = self._tunnels.get(profile_id)
         if current is not None and current.process.poll() is None:
             if current.remote_host == remote_host and current.remote_port == remote_port:
+                current.last_checked_at = utc_now()
                 return current
             self.close_tunnel(profile_id)
 
@@ -63,6 +71,13 @@ class SSHTunnelManager:
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
         )
+        returncode = process.poll()
+        if returncode is not None:
+            raise RuntimeError(
+                f"SSH tunnel for {profile_id} exited immediately with code {returncode}."
+            )
+        current_time = utc_now()
+        reconnect_count = (current.reconnect_count + 1) if current is not None else 0
         tunnel = ActiveTunnel(
             profile_id=profile_id,
             target_ref=target_ref,
@@ -70,9 +85,27 @@ class SSHTunnelManager:
             remote_port=int(remote_port),
             local_port=local_port,
             process=process,
+            opened_at=current_time,
+            last_checked_at=current_time,
+            reconnect_count=reconnect_count,
         )
         self._tunnels[profile_id] = tunnel
         return tunnel
+
+    def reconnect_tunnel(self, profile_id: str) -> ActiveTunnel:
+        tunnel = self._tunnels.get(profile_id)
+        if tunnel is None:
+            raise LookupError(f"Tunnel '{profile_id}' was not found.")
+        reconnect_count = tunnel.reconnect_count + 1
+        self.close_tunnel(profile_id)
+        reopened = self.open_tunnel(
+            profile_id=profile_id,
+            target_ref=tunnel.target_ref,
+            remote_host=tunnel.remote_host,
+            remote_port=tunnel.remote_port,
+        )
+        reopened.reconnect_count = reconnect_count
+        return reopened
 
     def close_tunnel(self, profile_id: str) -> None:
         tunnel = self._tunnels.pop(profile_id, None)
@@ -95,8 +128,11 @@ class SSHTunnelManager:
         items: list[dict[str, object]] = []
         stale: list[str] = []
         for profile_id, tunnel in self._tunnels.items():
+            tunnel.last_checked_at = utc_now()
             returncode = tunnel.process.poll()
             alive = returncode is None
+            if not alive and tunnel.last_failure is None:
+                tunnel.last_failure = f"process exited with code {returncode}"
             items.append(
                 {
                     "profile_id": profile_id,
@@ -106,6 +142,10 @@ class SSHTunnelManager:
                     "local_port": tunnel.local_port,
                     "alive": alive,
                     "returncode": returncode,
+                    "reconnect_count": tunnel.reconnect_count,
+                    "opened_at": tunnel.opened_at.isoformat(),
+                    "last_checked_at": tunnel.last_checked_at.isoformat(),
+                    "last_failure": tunnel.last_failure,
                 }
             )
             if not alive:

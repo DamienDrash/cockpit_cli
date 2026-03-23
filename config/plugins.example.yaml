@@ -2,6 +2,13 @@ trusted_sources:
   - git+https://github.com/
   - https://github.com/
 
+allowed_permissions:
+  - ui.read
+  - commands.execute
+  - datasource.read
+  - layout.read
+  - web.read
+
 plugins:
   - module: cockpit.plugins.notes_plugin
     enabled: true

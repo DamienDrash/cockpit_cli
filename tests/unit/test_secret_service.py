@@ -53,6 +53,12 @@ class SecretServiceTests(unittest.TestCase):
             self.assertEqual(service.lookup_reference("analytics-pass"), keyring_entry.reference)
             self.assertEqual(len(service.list_entries()), 3)
             self.assertEqual(service.diagnostics().total_entries, 3)
+            self.assertEqual(keyring_entry.revision, 1)
+
+            rotated = service.rotate_entry("analytics-pass", secret_value="newsecret")
+            self.assertEqual(rotated.revision, 2)
+            self.assertIsNotNone(rotated.rotated_at)
+            self.assertEqual(service.diagnostics().rotated_entries, 1)
 
             service.delete_entry("analytics-pass", purge_value=True)
             self.assertIsNone(service.get_entry("analytics-pass"))

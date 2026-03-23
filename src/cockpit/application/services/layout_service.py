@@ -207,6 +207,39 @@ class LayoutService:
         self._layout_repository.save(updated)
         return updated
 
+    def move_panel_in_tab(
+        self,
+        *,
+        layout_id: str,
+        tab_id: str,
+        panel_id: str,
+        direction: str,
+    ) -> Layout:
+        layout = self._require_layout(layout_id)
+        normalized_direction = direction.strip().lower()
+        if normalized_direction not in {"previous", "next"}:
+            raise ValueError("Layout panel direction must be 'previous' or 'next'.")
+        updated_tabs: list[TabLayout] = []
+        for tab in layout.tabs:
+            if tab.id != tab_id:
+                updated_tabs.append(self._clone_tab(tab))
+                continue
+            moved_root, _moved = self._move_panel(
+                tab.root_split,
+                panel_id,
+                normalized_direction,
+            )
+            updated_tabs.append(
+                TabLayout(
+                    id=tab.id,
+                    name=tab.name,
+                    root_split=moved_root,
+                )
+            )
+        updated = replace(layout, tabs=updated_tabs)
+        self._layout_repository.save(updated)
+        return updated
+
     def _layout_from_payload(self, payload: dict[str, object]) -> Layout:
         raw_tabs = payload.get("tabs", [])
         tabs: list[TabLayout] = []
@@ -311,3 +344,53 @@ class LayoutService:
             else:
                 next_children.append(self._replace_panel(child, existing_panel_id, replacement))
         return SplitNode(orientation=node.orientation, ratio=node.ratio, children=next_children)
+
+    def _move_panel(
+        self,
+        node: SplitNode,
+        panel_id: str,
+        direction: str,
+    ) -> tuple[SplitNode, bool]:
+        next_children: list[SplitNode | PanelRef] = []
+        moved = False
+        for child in node.children:
+            if isinstance(child, PanelRef):
+                next_children.append(
+                    PanelRef(panel_id=child.panel_id, panel_type=child.panel_type)
+                )
+                continue
+            moved_child, child_moved = self._move_panel(child, panel_id, direction)
+            next_children.append(moved_child)
+            moved = moved or child_moved
+        if moved:
+            return SplitNode(
+                orientation=node.orientation,
+                ratio=node.ratio,
+                children=next_children,
+            ), True
+
+        panel_indexes = [
+            index
+            for index, child in enumerate(next_children)
+            if isinstance(child, PanelRef) and child.panel_id == panel_id
+        ]
+        if not panel_indexes:
+            return SplitNode(
+                orientation=node.orientation,
+                ratio=node.ratio,
+                children=next_children,
+            ), False
+        index = panel_indexes[0]
+        target = index - 1 if direction == "previous" else index + 1
+        if target < 0 or target >= len(next_children):
+            return SplitNode(
+                orientation=node.orientation,
+                ratio=node.ratio,
+                children=next_children,
+            ), False
+        next_children[index], next_children[target] = next_children[target], next_children[index]
+        return SplitNode(
+            orientation=node.orientation,
+            ratio=node.ratio,
+            children=next_children,
+        ), True

@@ -142,6 +142,9 @@ class WebAdminService:
     def delete_secret(self, name: str, *, purge_value: bool = False) -> None:
         self._secret_service.delete_entry(name, purge_value=purge_value)
 
+    def rotate_secret(self, name: str, *, secret_value: str) -> ManagedSecretEntry:
+        return self._secret_service.rotate_entry(name, secret_value=secret_value)
+
     def list_plugins(self):
         return self._plugin_service.list_plugins()
 
@@ -214,6 +217,20 @@ class WebAdminService:
             replacement_panel_type=replacement_panel_type,
         )
 
+    def move_panel_in_layout(
+        self,
+        layout_id: str,
+        tab_id: str,
+        panel_id: str,
+        direction: str,
+    ) -> Layout:
+        return self._layout_service.move_panel_in_tab(
+            layout_id=layout_id,
+            tab_id=tab_id,
+            panel_id=panel_id,
+            direction=direction,
+        )
+
     def available_panels(self) -> list[tuple[str, str, str]]:
         specs = self._panel_registry.specs_by_type()
         return sorted(
@@ -232,6 +249,9 @@ class WebAdminService:
 
     def close_tunnel(self, profile_id: str) -> None:
         self._tunnel_manager.close_tunnel(profile_id)
+
+    def reconnect_tunnel(self, profile_id: str) -> None:
+        self._tunnel_manager.reconnect_tunnel(profile_id)
 
     @staticmethod
     def _json_mapping(raw_value: object) -> dict[str, object]:
