@@ -23,6 +23,8 @@ class EmbeddedTerminal(Static):
         self._search_query: str | None = None
         self._search_match_lines: list[int] = []
         self._active_match_index = -1
+        self._selection_anchor_line: int | None = None
+        self._selection_focus_line: int | None = None
 
     def clear(self, message: str = "Launching terminal...") -> None:
         self._buffer.reset()
@@ -31,6 +33,8 @@ class EmbeddedTerminal(Static):
         self._search_query = None
         self._search_match_lines = []
         self._active_match_index = -1
+        self._selection_anchor_line = None
+        self._selection_focus_line = None
         self.update(message)
 
     def append_output(self, chunk: str) -> None:
@@ -114,6 +118,47 @@ class EmbeddedTerminal(Static):
         path.write_text(self.current_output(), encoding="utf-8")
         return path
 
+    def toggle_selection(self) -> bool:
+        if self._selection_anchor_line is None:
+            target_line = self._default_selection_line()
+            self._selection_anchor_line = target_line
+            self._selection_focus_line = target_line
+            self._scroll_to_line(target_line)
+            self._refresh_view()
+            return True
+        self.clear_selection()
+        return False
+
+    def clear_selection(self) -> None:
+        self._selection_anchor_line = None
+        self._selection_focus_line = None
+        self._refresh_view()
+
+    def has_selection(self) -> bool:
+        return self._selection_anchor_line is not None and self._selection_focus_line is not None
+
+    def expand_selection(self, delta: int) -> bool:
+        lines = self._buffer_lines()
+        if not lines:
+            return False
+        if self._selection_anchor_line is None or self._selection_focus_line is None:
+            target_line = self._default_selection_line()
+            self._selection_anchor_line = target_line
+            self._selection_focus_line = target_line
+        next_line = max(0, min(len(lines) - 1, self._selection_focus_line + delta))
+        self._selection_focus_line = next_line
+        self._scroll_to_line(next_line)
+        self._refresh_view()
+        return True
+
+    def selected_text(self) -> str:
+        selection = self._selection_bounds()
+        if selection is None:
+            return ""
+        start, end = selection
+        lines = self._buffer_lines()
+        return "\n".join(lines[start : end + 1])
+
     def _refresh_view(self) -> None:
         buffer_text = self._trimmed_buffer()
         if not buffer_text:
@@ -124,9 +169,20 @@ class EmbeddedTerminal(Static):
         start = max(0, end - self._viewport_step())
         visible = lines[start:end]
         active_match_line = self._active_match_line()
+        selection = self._selection_bounds()
         if active_match_line is not None:
             visible = [
-                self._decorate_visible_line(start + index, line, active_match_line)
+                self._decorate_visible_line(
+                    start + index,
+                    line,
+                    active_match_line,
+                    selection,
+                )
+                for index, line in enumerate(visible)
+            ]
+        elif selection is not None:
+            visible = [
+                self._decorate_visible_line(start + index, line, None, selection)
                 for index, line in enumerate(visible)
             ]
         self.update("\n".join(visible))
@@ -180,17 +236,52 @@ class EmbeddedTerminal(Static):
         if not lines:
             self._viewport_offset = 0
             return
+        self._scroll_to_line(line_index)
+
+    def _scroll_to_line(self, line_index: int) -> None:
+        lines = self._buffer_lines()
+        if not lines:
+            self._viewport_offset = 0
+            return
         step = self._viewport_step()
         end = min(len(lines), max(step, line_index + 1))
         start = max(0, end - step)
         self._viewport_offset = max(0, len(lines) - (start + step))
 
+    def _default_selection_line(self) -> int:
+        active_match_line = self._active_match_line()
+        if active_match_line is not None:
+            return active_match_line
+        lines = self._buffer_lines()
+        if not lines:
+            return 0
+        end = len(lines) - self._viewport_offset if self._viewport_offset else len(lines)
+        return max(0, end - 1)
+
+    def _selection_bounds(self) -> tuple[int, int] | None:
+        if self._selection_anchor_line is None or self._selection_focus_line is None:
+            return None
+        return (
+            min(self._selection_anchor_line, self._selection_focus_line),
+            max(self._selection_anchor_line, self._selection_focus_line),
+        )
+
     @staticmethod
     def _decorate_visible_line(
         absolute_index: int,
         line: str,
-        active_match_line: int,
+        active_match_line: int | None,
+        selection: tuple[int, int] | None,
     ) -> str:
-        if absolute_index != active_match_line:
-            return line
-        return f"> {line}"
+        selected = (
+            selection is not None
+            and selection[0] <= absolute_index <= selection[1]
+        )
+        active_match = active_match_line is not None and absolute_index == active_match_line
+        if selected and active_match:
+            return f"*> {line}"
+        if selected:
+            return f"* {line}"
+        if active_match:
+            return f"> {line}"
+        return line

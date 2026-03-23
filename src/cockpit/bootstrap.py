@@ -27,6 +27,7 @@ from cockpit.application.handlers.session_handlers import RestoreSessionHandler
 from cockpit.application.handlers.tab_handlers import FocusTabHandler
 from cockpit.application.handlers.terminal_handlers import (
     CopyTerminalBufferHandler,
+    CopyTerminalSelectionHandler,
     ExportTerminalBufferHandler,
     FocusTerminalHandler,
     NavigateTerminalSearchHandler,
@@ -42,6 +43,7 @@ from cockpit.application.services.connection_service import ConnectionService
 from cockpit.application.services.layout_service import LayoutService
 from cockpit.application.services.navigation_controller import NavigationController
 from cockpit.application.services.plugin_service import PluginService
+from cockpit.application.services.secret_service import SecretService
 from cockpit.application.services.session_service import SessionService
 from cockpit.application.services.web_admin_service import WebAdminService
 from cockpit.application.services.workspace_service import WorkspaceService
@@ -109,6 +111,7 @@ class ApplicationContainer:
     session_service: SessionService
     activity_log_service: ActivityLogService
     data_source_service: DataSourceService
+    secret_service: SecretService
     plugin_service: PluginService
     web_admin_service: WebAdminService
     stream_router: StreamRouter
@@ -178,7 +181,11 @@ def build_container(
     http_adapter = http_adapter or HttpAdapter()
     git_adapter = GitAdapter(ssh_command_runner=ssh_command_runner)
     remote_filesystem_adapter = RemoteFilesystemAdapter(ssh_command_runner)
-    secret_resolver = SecretResolver(base_path=project_root)
+    secret_service = SecretService(web_admin_state_repository)
+    secret_resolver = SecretResolver(
+        base_path=project_root,
+        named_reference_lookup=secret_service.lookup_reference,
+    )
     tunnel_manager = SSHTunnelManager()
     clipboard_service = ClipboardService()
     pty_manager = PTYManager(
@@ -375,6 +382,9 @@ def build_container(
         "terminal.copy", CopyTerminalBufferHandler()
     )
     command_dispatcher.register(
+        "terminal.copy_selection", CopyTerminalSelectionHandler()
+    )
+    command_dispatcher.register(
         "docker.restart", RestartDockerContainerHandler(docker_adapter)
     )
     command_dispatcher.register("docker.stop", StopDockerContainerHandler(docker_adapter))
@@ -414,11 +424,13 @@ def build_container(
     )
     web_admin_service = WebAdminService(
         datasource_service=data_source_service,
+        secret_service=secret_service,
         plugin_service=plugin_service,
         layout_service=layout_service,
         panel_registry=panel_registry,
         state_repository=web_admin_state_repository,
         command_catalog=tuple(command_catalog_entries),
+        tunnel_manager=tunnel_manager,
         project_root=project_root,
     )
 
@@ -433,6 +445,7 @@ def build_container(
         session_service=session_service,
         activity_log_service=activity_log_service,
         data_source_service=data_source_service,
+        secret_service=secret_service,
         plugin_service=plugin_service,
         web_admin_service=web_admin_service,
         stream_router=stream_router,

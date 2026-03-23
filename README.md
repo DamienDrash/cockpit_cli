@@ -17,9 +17,11 @@ Docker, Cron, DB, HTTP, and layout management.
 - command palette, slash commands, and keybindings through one dispatcher
 - guarded mutating flows for Docker, Cron, DB, and HTTP actions
 - local web admin for datasource profiles, plugin installs, layouts, and diagnostics
+- managed secret references with optional keyring-backed values
 - plugin install/update/pin/remove with repo or package requirements
+- plugin compatibility and on-disk integrity verification before runtime activation
 - broad datasource support through SQLAlchemy dialects plus non-SQL adapters
-- terminal scrollback, search, export, and clipboard copy
+- terminal scrollback, search, selection, export, and clipboard copy
 
 ## Supported Datasource Families
 
@@ -166,9 +168,11 @@ Common commands:
 The local web admin exposes:
 
 - datasource profile creation and deletion
+- datasource execution for quick operator queries and mutations
+- managed secret references for env/file/keyring providers
 - plugin install/update/pin/enable/remove
 - layout cloning and split edits
-- diagnostics for commands, panels, datasources, plugins, and tool availability
+- diagnostics for commands, panels, datasources, secrets, plugins, tunnels, and tool availability
 
 It runs locally only and reuses the same application services as the TUI.
 
@@ -245,6 +249,7 @@ Managed plugin installs support:
 - git requirements
 - trusted source prefix enforcement
 - compatibility checks against the running cockpit version
+- install-time and runtime integrity hashes
 
 Plugins can contribute:
 
@@ -263,6 +268,7 @@ Release artifacts included in the repo:
 - `sdist`
 - `wheel`
 - Arch/CachyOS `PKGBUILD` in [packaging/arch/PKGBUILD](/home/damien/Dokumente/cockpit/packaging/arch/PKGBUILD)
+- tag-driven GitHub release workflow in [.github/workflows/release.yml](/home/damien/Dokumente/cockpit/.github/workflows/release.yml)
 
 ## Development
 
@@ -282,6 +288,22 @@ PYTHONPATH=src:/tmp/cockpit-deps python -m unittest \
 
 CI lives in [.github/workflows/ci.yml](/home/damien/Dokumente/cockpit/.github/workflows/ci.yml).
 It compiles the code, runs the unittest suite, and builds `sdist` plus `wheel`.
+Tagged pushes additionally publish release artifacts through [.github/workflows/release.yml](/home/damien/Dokumente/cockpit/.github/workflows/release.yml).
+
+## Operator Notes
+
+Terminal selection flow:
+
+- `Ctrl+Space` starts or clears a terminal line selection
+- `Shift+Up` and `Shift+Down` expand the active selection
+- `Ctrl+Shift+C` copies the selection
+- `Ctrl+Alt+C` copies the full terminal buffer
+
+Managed secrets:
+
+- create them in the web admin under `Secrets`
+- reference them inside datasource `secret_refs` as `stored:secret-name`
+- keyring-backed entries can store the actual value directly if the optional `keyring` extra is installed
 
 Contribution and release notes:
 

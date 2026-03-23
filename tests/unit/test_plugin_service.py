@@ -157,3 +157,49 @@ class PluginServiceTests(unittest.TestCase):
             install_spec,
             "git+https://github.com/example/plugin.git@1.2.3",
         )
+
+    def test_runtime_integrity_failure_blocks_enabled_module_loading(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            package_root = root / "plugin-source"
+            package_root.mkdir()
+            (package_root / "sample_plugin_integrity.py").write_text(
+                textwrap.dedent(
+                    """
+                    from cockpit.domain.models.plugin import PluginManifest
+
+                    PLUGIN_MANIFEST = PluginManifest(
+                        name="Sample Plugin",
+                        module="sample_plugin_integrity",
+                        version="1.2.3",
+                    )
+                    """
+                ),
+                encoding="utf-8",
+            )
+            store = SQLiteStore(root / "cockpit.db")
+            repo = InstalledPluginRepository(store)
+            service = PluginService(
+                repo,
+                start=root,
+                pip_runner=FakePipRunner(package_root),
+            )
+
+            plugin = service.install_plugin(
+                requirement=str(package_root),
+                module_name="sample_plugin_integrity",
+            )
+            assert plugin.install_path is not None
+            Path(plugin.install_path, "sample_plugin_integrity.py").write_text(
+                "tampered = True\n",
+                encoding="utf-8",
+            )
+
+            modules = service.enabled_modules()
+            updated = service.get_plugin(plugin.id)
+
+            self.assertEqual(modules, [])
+            self.assertIsNotNone(updated)
+            assert updated is not None
+            self.assertEqual(updated.status, "integrity_failed")
+            store.close()

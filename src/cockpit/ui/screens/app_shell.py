@@ -57,6 +57,7 @@ class CockpitApp(App[None]):
         ("ctrl+]", "focus_next_panel", "Focus Next Panel"),
         ("ctrl+r", "restart_terminal", "Restart Terminal"),
         ("ctrl+alt+c", "copy_terminal_buffer", "Copy Terminal Buffer"),
+        ("ctrl+shift+c", "copy_terminal_selection", "Copy Terminal Selection"),
         ("f8", "restart_selected_docker", "Restart Container"),
         ("f9", "stop_selected_docker", "Stop Container"),
         ("f10", "remove_selected_docker", "Remove Container"),
@@ -275,6 +276,16 @@ class CockpitApp(App[None]):
             )
         )
 
+    def action_copy_terminal_selection(self) -> None:
+        self._dispatch_command(
+            Command(
+                id=make_id("cmd"),
+                source=CommandSource.KEYBINDING,
+                name="terminal.copy_selection",
+                context=self._command_context(),
+            )
+        )
+
     def action_toggle_layout_orientation(self) -> None:
         self._dispatch_command(
             Command(
@@ -370,6 +381,7 @@ class CockpitApp(App[None]):
             "terminal.search_prev",
             "terminal.export",
             "terminal.copy",
+            "terminal.copy_selection",
             "docker.restart",
             "docker.stop",
             "docker.remove",
@@ -653,6 +665,10 @@ class CockpitApp(App[None]):
             "terminal.copy": (
                 "Copy Terminal Buffer",
                 "terminal copy",
+            ),
+            "terminal.copy_selection": (
+                "Copy Terminal Selection",
+                "terminal copy_selection",
             ),
         }
         items: list[PaletteItem] = []

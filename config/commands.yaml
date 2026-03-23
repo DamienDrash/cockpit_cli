@@ -15,6 +15,7 @@ commands:
   - terminal.search_prev
   - terminal.export
   - terminal.copy
+  - terminal.copy_selection
   - docker.restart
   - docker.stop
   - docker.remove

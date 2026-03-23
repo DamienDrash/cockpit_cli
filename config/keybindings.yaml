@@ -19,6 +19,8 @@ bindings:
     action: terminal.restart
   - key: ctrl+alt+c
     action: terminal.copy
+  - key: ctrl+shift+c
+    action: terminal.copy_selection
   - key: ctrl+]
     action: panel.focus_next
   - key: ctrl+t

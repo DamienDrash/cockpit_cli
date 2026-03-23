@@ -255,12 +255,18 @@ class SQLiteRepositoryTests(unittest.TestCase):
             datasource = datasource_repo.get("pg-main")
             plugins = plugin_repo.list_all()
             state = web_admin_repo.get("web_admin:last_page")
+            web_admin_repo.save("secret:analytics-pass", {"name": "analytics-pass", "provider": "env", "reference": {"provider": "env", "name": "ANALYTICS_DB_PASS"}})
+            prefixed = web_admin_repo.list_prefix("secret:")
+            web_admin_repo.delete("secret:analytics-pass")
+            removed = web_admin_repo.get("secret:analytics-pass")
 
             self.assertIsNotNone(datasource)
             assert datasource is not None
             self.assertEqual(datasource.backend, "postgres")
             self.assertEqual(plugins[0].version_pin, "1.0.0")
             self.assertEqual(state, {"page": "/plugins"})
+            self.assertEqual(prefixed[0][0], "secret:analytics-pass")
+            self.assertIsNone(removed)
             store.close()
 
 

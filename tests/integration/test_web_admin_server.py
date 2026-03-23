@@ -33,6 +33,8 @@ class FakeWebAdminService:
     def __init__(self) -> None:
         self.saved_pages: list[str] = []
         self.created_datasources: list[dict[str, object]] = []
+        self.created_secrets: list[dict[str, object]] = []
+        self.closed_tunnels: list[str] = []
 
     def diagnostics(self) -> dict[str, object]:
         return {
@@ -42,6 +44,7 @@ class FakeWebAdminService:
             "command_count": 4,
             "panel_types": ["work", "db"],
             "datasources": {"total_profiles": 0, "enabled_profiles": 0, "backends": []},
+            "secrets": {"total_entries": 1, "providers": ["env"], "keyring_available": True},
             "plugins": {
                 "count": 0,
                 "enabled": 0,
@@ -49,6 +52,16 @@ class FakeWebAdminService:
                 "trusted_sources": ["git+https://github.com/"],
                 "app_version": "0.1.0",
             },
+            "tunnels": [
+                {
+                    "profile_id": "pg-main",
+                    "target_ref": "deploy@example.com",
+                    "remote_host": "db.internal",
+                    "remote_port": 5432,
+                    "local_port": 15432,
+                    "alive": True,
+                }
+            ],
             "tools": {"git": True, "docker": True, "ssh": True},
         }
 
@@ -68,6 +81,23 @@ class FakeWebAdminService:
     def inspect_datasource(self, profile_id: str):
         del profile_id
         return _NamedObject(name="Inspection")
+
+    def execute_datasource(self, profile_id: str, statement: str, *, operation: str):
+        del profile_id, statement, operation
+        return SimpleResult("Datasource command executed.")
+
+    def last_datasource_result(self):
+        return {"profile_id": "pg-main", "result": {"message": "ok"}}
+
+    def list_secrets(self):
+        return [_SecretObject()]
+
+    def create_secret(self, payload: dict[str, object]):
+        self.created_secrets.append(dict(payload))
+        return _SecretObject(name=str(payload.get("name", "analytics-pass")))
+
+    def delete_secret(self, name: str, *, purge_value: bool = False) -> None:
+        del name, purge_value
 
     def list_plugins(self):
         return []
@@ -128,6 +158,26 @@ class FakeWebAdminService:
     def available_panels(self):
         return []
 
+    def close_tunnel(self, profile_id: str) -> None:
+        self.closed_tunnels.append(profile_id)
+
+
+@dataclass
+class _SecretObject:
+    name: str = "analytics-pass"
+    provider: str = "env"
+    reference: dict[str, object] = None  # type: ignore[assignment]
+    description: str | None = "DB password"
+
+    def __post_init__(self) -> None:
+        if self.reference is None:
+            self.reference = {"provider": "env", "name": "ANALYTICS_DB_PASS"}
+
+
+@dataclass
+class SimpleResult:
+    message: str
+
 
 class LocalWebAdminServerTests(unittest.TestCase):
     def test_serves_pages_and_handles_post_actions(self) -> None:
@@ -154,6 +204,10 @@ class LocalWebAdminServerTests(unittest.TestCase):
                 plugin_body = response.read().decode("utf-8")
             self.assertIn("git+https://github.com/", plugin_body)
 
+            with urlopen(f"{base_url}/secrets") as response:
+                secrets_body = response.read().decode("utf-8")
+            self.assertIn("analytics-pass", secrets_body)
+
             request = Request(
                 f"{base_url}/datasources/create",
                 data=urlencode(
@@ -177,8 +231,51 @@ class LocalWebAdminServerTests(unittest.TestCase):
                 service.created_datasources[0]["secret_refs_json"],
                 '{"DB_PASS":"env:APP_DB_PASS"}',
             )
+
+            execute_request = Request(
+                f"{base_url}/datasources/execute",
+                data=urlencode(
+                    {
+                        "profile_id": "pg-main",
+                        "statement": "SELECT 1",
+                        "operation": "query",
+                    }
+                ).encode("utf-8"),
+                method="POST",
+            )
+            with urlopen(execute_request) as response:
+                execute_body = response.read().decode("utf-8")
+            self.assertIn("Datasource command executed.", execute_body)
+
+            secret_request = Request(
+                f"{base_url}/secrets/create",
+                data=urlencode(
+                    {
+                        "name": "redis-pass",
+                        "provider": "env",
+                        "env_name": "REDIS_PASSWORD",
+                    }
+                ).encode("utf-8"),
+                method="POST",
+            )
+            with urlopen(secret_request) as response:
+                secret_body = response.read().decode("utf-8")
+            self.assertIn("Saved secret reference redis-pass.", secret_body)
+            self.assertEqual(service.created_secrets[0]["env_name"], "REDIS_PASSWORD")
+
+            close_tunnel_request = Request(
+                f"{base_url}/diagnostics/close-tunnel",
+                data=urlencode({"profile_id": "pg-main"}).encode("utf-8"),
+                method="POST",
+            )
+            with urlopen(close_tunnel_request) as response:
+                diagnostics_body = response.read().decode("utf-8")
+            self.assertIn("Closed tunnel for pg-main.", diagnostics_body)
+            self.assertEqual(service.closed_tunnels, ["pg-main"])
+
             self.assertIn("/diagnostics", service.saved_pages)
             self.assertIn("/plugins", service.saved_pages)
+            self.assertIn("/secrets", service.saved_pages)
             self.assertIn("/datasources", service.saved_pages)
         finally:
             server.shutdown()

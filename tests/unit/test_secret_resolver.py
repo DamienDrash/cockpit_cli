@@ -44,3 +44,12 @@ class SecretResolverTests(unittest.TestCase):
 
         with self.assertRaisesRegex(ValueError, "not defined"):
             resolver.resolve_text("value=${MISSING}", {})
+
+    def test_resolves_managed_secret_references(self) -> None:
+        resolver = SecretResolver(
+            named_reference_lookup=lambda name: {"provider": "literal", "value": f"value-for-{name}"},
+        )
+
+        value = resolver.resolve_text("postgres://${TOKEN}", {"TOKEN": "stored:analytics-pass"})
+
+        self.assertEqual(value, "postgres://value-for-analytics-pass")

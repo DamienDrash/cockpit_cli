@@ -278,6 +278,8 @@ class DBPanel(Static):
                 lines.append(f"{marker} {entry.label} [{entry.kind}:{entry.detail}]")
         lines.extend(["", "Last query result:"])
         lines.extend(self._render_result_lines())
+        lines.extend(["", "Examples:"])
+        lines.extend(self._render_example_lines())
         lines.extend(
             [
                 "",
@@ -352,6 +354,49 @@ class DBPanel(Static):
                 elif isinstance(value, str) and value:
                     lines.append(f"{key}={value}")
         return lines or ["No inspection available."]
+
+    def _render_example_lines(self) -> list[str]:
+        backend = self._selected_backend()
+        if backend in {
+            "postgres",
+            "postgresql",
+            "mysql",
+            "mariadb",
+            "mssql",
+            "duckdb",
+            "bigquery",
+            "snowflake",
+            "sqlite",
+        }:
+            return [
+                "SELECT 1;",
+                "SELECT name FROM sqlite_master ORDER BY name LIMIT 10;",
+            ]
+        if backend == "mongodb":
+            return [
+                '{"database":"app","collection":"users","operation":"find","filter":{"active":true}}',
+                '{"database":"app","collection":"users","operation":"update_many","filter":{"active":false},"update":{"$set":{"archived":true}}}',
+            ]
+        if backend == "redis":
+            return [
+                "GET session:123",
+                "SCAN 0 MATCH app:* COUNT 20",
+            ]
+        if backend == "chromadb":
+            return [
+                '{"collection":"docs","operation":"query","query_texts":["search term"]}',
+                '{"collection":"docs","operation":"add","ids":["doc-1"],"documents":["hello world"]}',
+            ]
+        return [self._message or "Select a datasource to see backend-specific examples."]
+
+    def _selected_backend(self) -> str | None:
+        if isinstance(self._selected_profile_id, str) and self._selected_profile_id:
+            profile = self._datasource_service.get_profile(self._selected_profile_id)
+            if profile is not None:
+                return profile.backend.lower()
+        if isinstance(self._selected_database_path, str) and self._selected_database_path:
+            return "sqlite"
+        return None
 
     def _publish_panel_state(self) -> None:
         self._event_bus.publish(

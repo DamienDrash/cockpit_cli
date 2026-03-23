@@ -5,6 +5,7 @@ from __future__ import annotations
 import importlib
 from importlib import metadata as importlib_metadata
 import importlib.util
+import hashlib
 import os
 import shutil
 import subprocess
@@ -63,7 +64,7 @@ class PluginService:
 
     def enable_runtime_paths(self) -> list[str]:
         inserted: list[str] = []
-        for plugin in self.list_plugins():
+        for plugin in self._runtime_plugins():
             if not plugin.enabled or not plugin.install_path:
                 continue
             install_path = str(Path(plugin.install_path).resolve())
@@ -76,7 +77,11 @@ class PluginService:
 
     def enabled_modules(self) -> list[str]:
         self.enable_runtime_paths()
-        return [plugin.module for plugin in self.list_plugins() if plugin.enabled]
+        return [
+            plugin.module
+            for plugin in self._runtime_plugins()
+            if plugin.enabled and plugin.status == "installed"
+        ]
 
     def install_plugin(
         self,
@@ -86,6 +91,7 @@ class PluginService:
         display_name: str | None = None,
         version_pin: str | None = None,
         source: str | None = None,
+        integrity_sha256: str | None = None,
     ) -> InstalledPlugin:
         if not requirement.strip():
             raise ValueError("Plugin requirement must not be empty.")
@@ -102,6 +108,11 @@ class PluginService:
         importlib.invalidate_caches()
         manifest = self._load_manifest(module_name)
         self._validate_manifest(manifest)
+        runtime_manifest = self._with_runtime_manifest_data(
+            manifest,
+            install_path,
+            expected_integrity_sha256=integrity_sha256,
+        )
         plugin = InstalledPlugin(
             id=plugin_id,
             name=display_name or manifest.name,
@@ -111,7 +122,7 @@ class PluginService:
             install_path=str(install_path),
             enabled=True,
             source=source,
-            manifest=manifest.to_dict(),
+            manifest=runtime_manifest,
             status="installed",
         )
         self._repository.save(plugin)
@@ -131,6 +142,11 @@ class PluginService:
         importlib.invalidate_caches()
         manifest = self._load_manifest(plugin.module)
         self._validate_manifest(manifest)
+        runtime_manifest = self._with_runtime_manifest_data(
+            manifest,
+            install_path,
+            expected_integrity_sha256=self._expected_integrity(plugin),
+        )
         updated = InstalledPlugin(
             id=plugin.id,
             name=plugin.name,
@@ -140,7 +156,7 @@ class PluginService:
             install_path=str(install_path),
             enabled=plugin.enabled,
             source=plugin.source,
-            manifest=manifest.to_dict(),
+            manifest=runtime_manifest,
             status="installed",
         )
         self._repository.save(updated)
@@ -187,13 +203,15 @@ class PluginService:
         self._repository.delete(plugin_id)
 
     def diagnostics(self) -> dict[str, object]:
-        plugins = self.list_plugins()
+        plugins = self._runtime_plugins()
         return {
             "count": len(plugins),
             "enabled": sum(1 for plugin in plugins if plugin.enabled),
             "modules": [plugin.module for plugin in plugins],
             "trusted_sources": list(self._effective_trusted_sources()),
             "app_version": self._app_version,
+            "integrity_failed": sum(1 for plugin in plugins if plugin.status == "integrity_failed"),
+            "incompatible": sum(1 for plugin in plugins if plugin.status == "incompatible"),
         }
 
     def _plugin_install_root(self, plugin_id: str) -> Path:
@@ -331,6 +349,124 @@ class PluginService:
             raise RuntimeError(
                 f"Plugin '{manifest.name}' is incompatible with cockpit {self._app_version}."
             )
+
+    def _runtime_plugins(self) -> list[InstalledPlugin]:
+        refreshed: list[InstalledPlugin] = []
+        for plugin in self.list_plugins():
+            updated = self._runtime_state_for(plugin)
+            if updated != plugin:
+                self._repository.save(updated)
+            refreshed.append(updated)
+        return refreshed
+
+    def _runtime_state_for(self, plugin: InstalledPlugin) -> InstalledPlugin:
+        if not plugin.install_path:
+            return plugin
+        install_path = Path(plugin.install_path)
+        if not install_path.exists():
+            return self._with_status(plugin, "missing_install")
+        if not self._manifest_is_compatible(plugin.manifest):
+            return self._with_status(plugin, "incompatible")
+        current_integrity = self._compute_install_integrity(install_path)
+        expected_integrity = self._expected_integrity(plugin)
+        manifest = dict(plugin.manifest)
+        manifest["current_integrity_sha256"] = current_integrity
+        if expected_integrity and current_integrity != expected_integrity:
+            return InstalledPlugin(
+                id=plugin.id,
+                name=plugin.name,
+                module=plugin.module,
+                requirement=plugin.requirement,
+                version_pin=plugin.version_pin,
+                install_path=plugin.install_path,
+                enabled=plugin.enabled,
+                source=plugin.source,
+                manifest=manifest,
+                status="integrity_failed",
+            )
+        return InstalledPlugin(
+            id=plugin.id,
+            name=plugin.name,
+            module=plugin.module,
+            requirement=plugin.requirement,
+            version_pin=plugin.version_pin,
+            install_path=plugin.install_path,
+            enabled=plugin.enabled,
+            source=plugin.source,
+            manifest=manifest,
+            status="installed",
+        )
+
+    def _manifest_is_compatible(self, manifest_payload: dict[str, object]) -> bool:
+        compat_range = manifest_payload.get("compat_range")
+        if not isinstance(compat_range, str) or not compat_range or compat_range == "*":
+            return True
+        if SpecifierSet is None or Version is None:
+            return True
+        return SpecifierSet(compat_range).contains(
+            Version(self._app_version),
+            prereleases=True,
+        )
+
+    @staticmethod
+    def _with_status(plugin: InstalledPlugin, status: str) -> InstalledPlugin:
+        return InstalledPlugin(
+            id=plugin.id,
+            name=plugin.name,
+            module=plugin.module,
+            requirement=plugin.requirement,
+            version_pin=plugin.version_pin,
+            install_path=plugin.install_path,
+            enabled=plugin.enabled,
+            source=plugin.source,
+            manifest=dict(plugin.manifest),
+            status=status,
+        )
+
+    def _with_runtime_manifest_data(
+        self,
+        manifest: PluginManifest,
+        install_path: Path,
+        *,
+        expected_integrity_sha256: str | None = None,
+    ) -> dict[str, object]:
+        manifest_payload = manifest.to_dict()
+        installed_integrity = self._compute_install_integrity(install_path)
+        manifest_payload["installed_integrity_sha256"] = installed_integrity
+        manifest_payload["current_integrity_sha256"] = installed_integrity
+        if isinstance(expected_integrity_sha256, str) and expected_integrity_sha256.strip():
+            expected = expected_integrity_sha256.strip().lower()
+            if installed_integrity != expected:
+                raise RuntimeError(
+                    f"Plugin '{manifest.name}' does not match the expected integrity hash."
+                )
+            manifest_payload["expected_integrity_sha256"] = expected
+        return manifest_payload
+
+    @staticmethod
+    def _expected_integrity(plugin: InstalledPlugin) -> str | None:
+        expected = plugin.manifest.get("expected_integrity_sha256")
+        if isinstance(expected, str) and expected.strip():
+            return expected.strip().lower()
+        installed = plugin.manifest.get("installed_integrity_sha256")
+        if isinstance(installed, str) and installed.strip():
+            return installed.strip().lower()
+        return None
+
+    @staticmethod
+    def _compute_install_integrity(install_path: Path) -> str:
+        digest = hashlib.sha256()
+        for path in sorted(install_path.rglob("*")):
+            if not path.is_file():
+                continue
+            if "__pycache__" in path.parts or path.suffix in {".pyc", ".pyo"}:
+                continue
+            relative = path.relative_to(install_path).as_posix()
+            digest.update(relative.encode("utf-8"))
+            digest.update(b"\0")
+            digest.update(path.read_bytes())
+            digest.update(b"\0")
+        return digest.hexdigest()
 
     def _effective_trusted_sources(self) -> tuple[str, ...]:
         if self._trusted_sources:

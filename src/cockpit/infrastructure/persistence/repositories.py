@@ -540,6 +540,27 @@ class WebAdminStateRepository:
             return None
         return _load_json(row["value_json"])
 
+    def delete(self, key: str) -> None:
+        self._store.execute(
+            "DELETE FROM web_admin_state WHERE key = ?",
+            (key,),
+        )
+
+    def list_prefix(self, prefix: str) -> list[tuple[str, dict[str, object]]]:
+        rows = self._store.fetchall(
+            """
+            SELECT key, value_json
+            FROM web_admin_state
+            WHERE key LIKE ?
+            ORDER BY key ASC
+            """,
+            (f"{prefix}%",),
+        )
+        return [
+            (str(row["key"]), _load_json(row["value_json"]))
+            for row in rows
+        ]
+
 
 def _workspace_from_payload(payload: dict[str, object]) -> Workspace:
     target_payload = payload.get("target", {})

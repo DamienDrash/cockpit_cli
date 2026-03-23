@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 import os
 import re
+from typing import Protocol
 
 try:  # pragma: no cover - optional dependency
     import keyring
@@ -15,11 +16,21 @@ except Exception:  # pragma: no cover - optional dependency
 PLACEHOLDER_RE = re.compile(r"\$\{([A-Za-z0-9_]+)\}")
 
 
+class NamedReferenceLookup(Protocol):
+    def __call__(self, name: str) -> object | None: ...
+
+
 class SecretResolver:
     """Resolve secret references from env, files, keyring, or literals."""
 
-    def __init__(self, *, base_path: Path | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        base_path: Path | None = None,
+        named_reference_lookup: NamedReferenceLookup | None = None,
+    ) -> None:
         self._base_path = base_path
+        self._named_reference_lookup = named_reference_lookup
 
     def resolve_text(self, text: str | None, refs: dict[str, object]) -> str | None:
         if text is None:
@@ -96,6 +107,16 @@ class SecretResolver:
                     f"Keyring entry '{service}/{username}' could not be resolved."
                 )
             return value
+        if provider == "stored":
+            name = str(ref.get("name") or ref.get("key") or "").strip()
+            if not name:
+                raise ValueError("Stored secret refs require 'name'.")
+            if self._named_reference_lookup is None:
+                raise ValueError("No managed secret lookup is configured.")
+            stored_ref = self._named_reference_lookup(name)
+            if stored_ref is None:
+                raise ValueError(f"Managed secret '{name}' was not found.")
+            return self.resolve_ref(stored_ref)
         raise ValueError(f"Unsupported secret provider '{provider}'.")
 
     def _resolve_shorthand(self, ref: str) -> str:
@@ -116,4 +137,6 @@ class SecretResolver:
                     "username": payload[2],
                 }
             )
+        if ref.startswith("stored:"):
+            return self.resolve_ref({"provider": "stored", "name": ref.split(":", 1)[1]})
         return ref

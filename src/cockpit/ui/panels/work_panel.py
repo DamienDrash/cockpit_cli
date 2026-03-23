@@ -185,6 +185,27 @@ class WorkPanel(BasePanel):
             terminal.scroll_to_end()
             event.stop()
             return
+        if event.key == "ctrl+space":
+            enabled = terminal.toggle_selection()
+            note = "Terminal selection started." if enabled else "Terminal selection cleared."
+            self.query_one("#work-panel-note", Static).update(note)
+            event.stop()
+            return
+        if event.key == "shift+up":
+            if terminal.expand_selection(-1):
+                self.query_one("#work-panel-note", Static).update("Terminal selection expanded upward.")
+            event.stop()
+            return
+        if event.key == "shift+down":
+            if terminal.expand_selection(1):
+                self.query_one("#work-panel-note", Static).update("Terminal selection expanded downward.")
+            event.stop()
+            return
+        if event.key == "escape" and terminal.has_selection():
+            terminal.clear_selection()
+            self.query_one("#work-panel-note", Static).update("Terminal selection cleared.")
+            event.stop()
+            return
         payload = self._terminal_payload_for_key(event)
         if payload is None:
             return
@@ -264,6 +285,18 @@ class WorkPanel(BasePanel):
                 note.update(str(exc))
                 return
             note.update(f"Terminal buffer copied via {backend}.")
+            return
+        if terminal_action == "copy_selection":
+            selection = terminal.selected_text()
+            if not selection:
+                note.update("No terminal selection is active.")
+                return
+            try:
+                backend = self._clipboard_service.copy_text(selection)
+            except ClipboardError as exc:
+                note.update(str(exc))
+                return
+            note.update(f"Terminal selection copied via {backend}.")
             return
 
     def _render_context(self) -> None:

@@ -12,9 +12,12 @@ import sys
 from cockpit.application.services.datasource_service import DataSourceService
 from cockpit.application.services.layout_service import LayoutService
 from cockpit.application.services.plugin_service import PluginService
+from cockpit.application.services.secret_service import SecretService
 from cockpit.domain.models.datasource import DataSourceOperationResult, DataSourceProfile
 from cockpit.domain.models.layout import Layout
+from cockpit.domain.models.secret import ManagedSecretEntry
 from cockpit.infrastructure.persistence.repositories import WebAdminStateRepository
+from cockpit.infrastructure.ssh.tunnel_manager import SSHTunnelManager
 from cockpit.shared.enums import SessionTargetKind
 from cockpit.ui.panels.registry import PanelRegistry
 
@@ -26,23 +29,28 @@ class WebAdminService:
         self,
         *,
         datasource_service: DataSourceService,
+        secret_service: SecretService,
         plugin_service: PluginService,
         layout_service: LayoutService,
         panel_registry: PanelRegistry,
         state_repository: WebAdminStateRepository,
         command_catalog: tuple[str, ...],
+        tunnel_manager: SSHTunnelManager,
         project_root: Path,
     ) -> None:
         self._datasource_service = datasource_service
+        self._secret_service = secret_service
         self._plugin_service = plugin_service
         self._layout_service = layout_service
         self._panel_registry = panel_registry
         self._state_repository = state_repository
         self._command_catalog = command_catalog
+        self._tunnel_manager = tunnel_manager
         self._project_root = project_root
 
     def diagnostics(self) -> dict[str, object]:
         datasource_diagnostics = self._datasource_service.diagnostics()
+        secret_diagnostics = self._secret_service.diagnostics()
         plugin_diagnostics = self._plugin_service.diagnostics()
         return {
             "project_root": str(self._project_root),
@@ -51,7 +59,9 @@ class WebAdminService:
             "command_count": len(self._command_catalog),
             "panel_types": sorted(self._panel_registry.specs_by_type().keys()),
             "datasources": asdict(datasource_diagnostics),
+            "secrets": asdict(secret_diagnostics),
             "plugins": plugin_diagnostics,
+            "tunnels": self._tunnel_manager.list_tunnels(),
             "tools": {
                 "git": shutil.which("git") is not None,
                 "docker": shutil.which("docker") is not None,
@@ -94,11 +104,43 @@ class WebAdminService:
         *,
         operation: str,
     ) -> DataSourceOperationResult:
-        return self._datasource_service.run_statement(
+        result = self._datasource_service.run_statement(
             profile_id,
             statement,
             operation=operation,
         )
+        self._state_repository.save(
+            "web_admin:last_datasource_result",
+            {
+                "profile_id": profile_id,
+                "statement": statement,
+                "result": result.to_dict(),
+            },
+        )
+        return result
+
+    def last_datasource_result(self) -> dict[str, object] | None:
+        return self._state_repository.get("web_admin:last_datasource_result")
+
+    def list_secrets(self) -> list[ManagedSecretEntry]:
+        return self._secret_service.list_entries()
+
+    def create_secret(self, payload: dict[str, object]) -> ManagedSecretEntry:
+        provider = str(payload.get("provider", "env"))
+        return self._secret_service.upsert_entry(
+            name=str(payload.get("name", "")),
+            provider=provider,
+            description=self._optional_str(payload.get("description")),
+            tags=self._csv_list(payload.get("tags")),
+            env_name=self._optional_str(payload.get("env_name")),
+            file_path=self._optional_str(payload.get("file_path")),
+            keyring_service=self._optional_str(payload.get("keyring_service")),
+            keyring_username=self._optional_str(payload.get("keyring_username")),
+            secret_value=self._optional_str(payload.get("secret_value")),
+        )
+
+    def delete_secret(self, name: str, *, purge_value: bool = False) -> None:
+        self._secret_service.delete_entry(name, purge_value=purge_value)
 
     def list_plugins(self):
         return self._plugin_service.list_plugins()
@@ -110,6 +152,7 @@ class WebAdminService:
             display_name=payload.get("name") or None,
             version_pin=payload.get("version_pin") or None,
             source=payload.get("source") or None,
+            integrity_sha256=payload.get("integrity_sha256") or None,
         )
 
     def update_plugin(self, plugin_id: str):
@@ -187,6 +230,9 @@ class WebAdminService:
             return str(payload["page"])
         return None
 
+    def close_tunnel(self, profile_id: str) -> None:
+        self._tunnel_manager.close_tunnel(profile_id)
+
     @staticmethod
     def _json_mapping(raw_value: object) -> dict[str, object]:
         if raw_value is None:
@@ -208,3 +254,10 @@ class WebAdminService:
             for item in str(raw_value).split(",")
             if item.strip()
         ]
+
+    @staticmethod
+    def _optional_str(raw_value: object) -> str | None:
+        if raw_value is None:
+            return None
+        text = str(raw_value).strip()
+        return text or None

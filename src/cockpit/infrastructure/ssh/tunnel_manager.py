@@ -91,6 +91,29 @@ class SSHTunnelManager:
         for profile_id in list(self._tunnels):
             self.close_tunnel(profile_id)
 
+    def list_tunnels(self) -> list[dict[str, object]]:
+        items: list[dict[str, object]] = []
+        stale: list[str] = []
+        for profile_id, tunnel in self._tunnels.items():
+            returncode = tunnel.process.poll()
+            alive = returncode is None
+            items.append(
+                {
+                    "profile_id": profile_id,
+                    "target_ref": tunnel.target_ref,
+                    "remote_host": tunnel.remote_host,
+                    "remote_port": tunnel.remote_port,
+                    "local_port": tunnel.local_port,
+                    "alive": alive,
+                    "returncode": returncode,
+                }
+            )
+            if not alive:
+                stale.append(profile_id)
+        for profile_id in stale:
+            self._tunnels.pop(profile_id, None)
+        return items
+
     @staticmethod
     def _allocate_local_port() -> int:
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:

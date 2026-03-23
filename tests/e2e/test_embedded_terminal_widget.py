@@ -141,6 +141,24 @@ class EmbeddedTerminalWidgetTests(unittest.IsolatedAsyncioTestCase):
                 terminal.export_text(target)
                 self.assertEqual(target.read_text(encoding="utf-8"), "alpha\nbeta")
 
+    async def test_selection_marks_lines_and_returns_selected_text(self) -> None:
+        app = TerminalWidgetTestApp()
+
+        async with app.run_test(size=(80, 8)) as pilot:
+            terminal = app.query_one(EmbeddedTerminal)
+            terminal.clear("ready")
+            terminal.append_output("alpha\nbeta\ngamma\ndelta\n")
+            await pilot.pause()
+
+            self.assertTrue(terminal.toggle_selection())
+            self.assertTrue(terminal.expand_selection(-2))
+            await pilot.pause()
+
+            rendered = self._rendered_text(terminal)
+            self.assertIn("* delta", rendered)
+            self.assertIn("* gamma", rendered)
+            self.assertEqual(terminal.selected_text(), "beta\ngamma\ndelta")
+
     @staticmethod
     def _rendered_text(widget: object) -> str:
         renderable = getattr(widget, "renderable", None)

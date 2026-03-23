@@ -87,3 +87,21 @@ class SSHTunnelManagerTests(unittest.TestCase):
         self.assertTrue(launcher.processes[0].terminated)
         self.assertEqual(original.remote_host, "db.internal")
         self.assertEqual(replacement.remote_host, "cache.internal")
+
+    def test_lists_tunnel_diagnostics_and_prunes_stale_entries(self) -> None:
+        launcher = FakeLauncher()
+        manager = SSHTunnelManager(launcher=launcher)
+
+        manager.open_tunnel(
+            profile_id="dsp_1",
+            target_ref="deploy@example.com",
+            remote_host="db.internal",
+            remote_port=5432,
+        )
+        launcher.processes[0].returncode = 255
+
+        diagnostics = manager.list_tunnels()
+
+        self.assertEqual(len(diagnostics), 1)
+        self.assertFalse(diagnostics[0]["alive"])
+        self.assertEqual(manager.list_tunnels(), [])
