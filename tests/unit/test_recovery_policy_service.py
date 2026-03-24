@@ -105,6 +105,19 @@ class RecoveryPolicyServiceTests(unittest.TestCase):
         self.assertTrue(evaluation.should_quarantine)
         self.assertFalse(evaluation.should_schedule_attempt)
 
+    def test_stage2_component_kinds_have_explicit_policies(self) -> None:
+        service = RecoveryPolicyService()
+
+        plugin_policy = service.policy_for(ComponentKind.PLUGIN_HOST)
+        web_admin_policy = service.policy_for(ComponentKind.WEB_ADMIN)
+        datasource_watch_policy = service.policy_for(ComponentKind.DATASOURCE_WATCH)
+        docker_watch_policy = service.policy_for(ComponentKind.DOCKER_CONTAINER_WATCH)
+
+        self.assertEqual(plugin_policy.max_attempts, 3)
+        self.assertEqual(web_admin_policy.base_backoff_seconds, 1)
+        self.assertEqual(datasource_watch_policy.cooldown_seconds, 180)
+        self.assertEqual(docker_watch_policy.max_backoff_seconds, 30)
+
 
 if __name__ == "__main__":
     unittest.main()

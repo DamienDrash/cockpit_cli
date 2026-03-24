@@ -15,9 +15,11 @@ from cockpit.domain.events.health_events import (
     ComponentHealthChanged,
     ComponentQuarantineCleared,
     ComponentQuarantined,
+    ComponentWatchObserved,
     IncidentOpened,
     IncidentStatusChanged,
     RecoveryAttemptRecorded,
+    TaskExitedUnexpectedly,
     TaskHeartbeatMissed,
     TunnelFailureDetected,
 )
@@ -89,6 +91,8 @@ class SelfHealingService:
         pty_manager: PTYManager,
         tunnel_manager: SSHTunnelManager,
         task_supervisor: TaskSupervisor,
+        plugin_service: object | None = None,
+        component_watch_service: object | None = None,
         now_factory: Callable[[], datetime] | None = None,
     ) -> None:
         self._event_bus = event_bus
@@ -99,13 +103,17 @@ class SelfHealingService:
         self._pty_manager = pty_manager
         self._tunnel_manager = tunnel_manager
         self._task_supervisor = task_supervisor
+        self._plugin_service = plugin_service
+        self._component_watch_service = component_watch_service
         self._now_factory = now_factory or utc_now
 
         self._event_bus.subscribe(PTYStarted, self._on_pty_started)
         self._event_bus.subscribe(PTYStartupFailed, self._on_pty_startup_failed)
         self._event_bus.subscribe(TerminalExited, self._on_terminal_exited)
         self._event_bus.subscribe(TaskHeartbeatMissed, self._on_task_heartbeat_missed)
+        self._event_bus.subscribe(TaskExitedUnexpectedly, self._on_task_exited_unexpectedly)
         self._event_bus.subscribe(TunnelFailureDetected, self._on_tunnel_failure_detected)
+        self._event_bus.subscribe(ComponentWatchObserved, self._on_component_watch_observed)
 
     def list_health_states(self) -> list[ComponentHealthState]:
         return self._component_health_repository.list_all()
@@ -171,11 +179,7 @@ class SelfHealingService:
         return True
 
     def observe_task_snapshot(self, snapshot: TaskSnapshot) -> None:
-        component_ref = ComponentRef(
-            component_id=f"task:{snapshot.name}",
-            kind=ComponentKind.BACKGROUND_TASK,
-            display_name=snapshot.name,
-        )
+        component_ref = self._task_component_ref(snapshot)
         state = self._component_health_repository.get(component_ref.component_id)
         if snapshot.stale or not snapshot.alive:
             return
@@ -184,7 +188,7 @@ class SelfHealingService:
             component_kind=component_ref.kind,
             display_name=component_ref.display_name,
             status=HealthStatus.HEALTHY,
-            target_kind=SessionTargetKind.LOCAL,
+            target_kind=self._task_target_kind(snapshot),
         )
         self._mark_component_healthy(
             state=state,
@@ -194,6 +198,8 @@ class SelfHealingService:
                 "restartable": snapshot.restartable,
                 "restart_count": snapshot.restart_count,
                 "metadata": snapshot.metadata,
+                "component_kind": component_ref.kind.value,
+                "component_id": component_ref.component_id,
             },
         )
 
@@ -257,9 +263,21 @@ class SelfHealingService:
                 continue
             if state.component_kind is ComponentKind.BACKGROUND_TASK:
                 self._run_task_recovery(state, attempt)
+                continue
+            if state.component_kind is ComponentKind.WEB_ADMIN:
+                self._run_task_recovery(state, attempt)
+                continue
+            if state.component_kind is ComponentKind.PLUGIN_HOST:
+                self._run_plugin_host_recovery(state, attempt)
+                continue
+            if state.component_kind in {
+                ComponentKind.DATASOURCE_WATCH,
+                ComponentKind.DOCKER_CONTAINER_WATCH,
+            }:
+                self._run_watch_recovery(state, attempt)
 
     def _run_pty_recovery(self, state: ComponentHealthState, attempt: RecoveryAttempt) -> None:
-        payload = state.payload
+        payload = self._runtime_payload(state)
         panel_id = str(payload.get("panel_id", "")).strip() or state.component_id.removeprefix("pty:")
         cwd = str(payload.get("cwd", "")).strip()
         raw_command = payload.get("command", [])
@@ -299,8 +317,9 @@ class SelfHealingService:
             )
 
     def _run_tunnel_recovery(self, state: ComponentHealthState, attempt: RecoveryAttempt) -> None:
+        payload = self._runtime_payload(state)
         profile_id = (
-            str(state.payload.get("profile_id", "")).strip()
+            str(payload.get("profile_id", "")).strip()
             or state.component_id.removeprefix("ssh-tunnel:")
         )
         try:
@@ -341,8 +360,9 @@ class SelfHealingService:
         )
 
     def _run_task_recovery(self, state: ComponentHealthState, attempt: RecoveryAttempt) -> None:
+        payload = self._runtime_payload(state)
         task_name = (
-            str(state.payload.get("task_name", "")).strip()
+            str(payload.get("task_name", "")).strip()
             or state.component_id.removeprefix("task:")
         )
         try:
@@ -355,11 +375,15 @@ class SelfHealingService:
             self._handle_failure(
                 component_ref=ComponentRef(
                     component_id=state.component_id,
-                    kind=ComponentKind.BACKGROUND_TASK,
+                    kind=state.component_kind,
                     display_name=state.display_name,
                 ),
                 reason=str(exc),
-                severity=IncidentSeverity.WARNING,
+                severity=(
+                    IncidentSeverity.HIGH
+                    if state.component_kind is ComponentKind.WEB_ADMIN
+                    else IncidentSeverity.WARNING
+                ),
                 target_kind=SessionTargetKind.LOCAL,
                 target_ref=None,
                 workspace_id=state.workspace_id,
@@ -374,6 +398,68 @@ class SelfHealingService:
         snapshot = self._task_supervisor.get_snapshot(task.name)
         if snapshot is not None:
             self.observe_task_snapshot(snapshot)
+
+    def _run_plugin_host_recovery(self, state: ComponentHealthState, attempt: RecoveryAttempt) -> None:
+        payload = self._runtime_payload(state)
+        plugin_id = str(payload.get("plugin_id", "")).strip()
+        restart_host = getattr(self._plugin_service, "restart_host", None)
+        if not plugin_id or not callable(restart_host):
+            attempt.status = RecoveryAttemptStatus.FAILED
+            attempt.finished_at = self._now()
+            attempt.error_message = "Plugin host recovery is unavailable."
+            self._recovery_attempt_repository.save(attempt)
+            return
+        try:
+            restart_host(plugin_id)
+        except Exception as exc:
+            attempt.status = RecoveryAttemptStatus.FAILED
+            attempt.finished_at = self._now()
+            attempt.error_message = str(exc)
+            self._recovery_attempt_repository.save(attempt)
+            self._handle_failure(
+                component_ref=ComponentRef(
+                    component_id=state.component_id,
+                    kind=ComponentKind.PLUGIN_HOST,
+                    display_name=state.display_name,
+                ),
+                reason=str(exc),
+                severity=IncidentSeverity.HIGH,
+                target_kind=SessionTargetKind.LOCAL,
+                target_ref=None,
+                workspace_id=state.workspace_id,
+                session_id=state.session_id,
+                payload=dict(state.payload),
+                pending_attempt_already_failed=True,
+            )
+            return
+        attempt.status = RecoveryAttemptStatus.SUCCEEDED
+        attempt.finished_at = self._now()
+        self._recovery_attempt_repository.save(attempt)
+        self._mark_component_healthy(
+            state=state,
+            heartbeat_at=self._now(),
+            payload=dict(payload),
+        )
+
+    def _run_watch_recovery(self, state: ComponentHealthState, attempt: RecoveryAttempt) -> None:
+        probe_watch = getattr(self._component_watch_service, "probe_watch_for_component", None)
+        if not callable(probe_watch):
+            attempt.status = RecoveryAttemptStatus.FAILED
+            attempt.finished_at = self._now()
+            attempt.error_message = "Watch recovery is unavailable."
+            self._recovery_attempt_repository.save(attempt)
+            return
+        try:
+            probe_watch(state.component_id)
+        except Exception as exc:
+            attempt.status = RecoveryAttemptStatus.FAILED
+            attempt.finished_at = self._now()
+            attempt.error_message = str(exc)
+            self._recovery_attempt_repository.save(attempt)
+            return
+        attempt.status = RecoveryAttemptStatus.SUCCEEDED
+        attempt.finished_at = self._now()
+        self._recovery_attempt_repository.save(attempt)
 
     def _on_pty_started(self, event: PTYStarted) -> None:
         component_id = f"pty:{event.panel_id}"
@@ -450,22 +536,60 @@ class SelfHealingService:
         )
 
     def _on_task_heartbeat_missed(self, event: TaskHeartbeatMissed) -> None:
+        component_id = str(event.metadata.get("component_id", f"task:{event.task_name}"))
+        component_kind = self._component_kind_from_metadata(
+            event.metadata.get("component_kind"),
+            default=ComponentKind.BACKGROUND_TASK,
+        )
+        display_name = str(event.metadata.get("display_name", event.task_name))
         self._handle_failure(
             component_ref=ComponentRef(
-                component_id=f"task:{event.task_name}",
-                kind=ComponentKind.BACKGROUND_TASK,
-                display_name=event.task_name,
+                component_id=component_id,
+                kind=component_kind,
+                display_name=display_name,
             ),
             reason=f"heartbeat stale after {event.age_seconds:.1f}s",
             severity=IncidentSeverity.WARNING,
-            target_kind=SessionTargetKind.LOCAL,
-            target_ref=None,
+            target_kind=self._target_kind_from_metadata(event.metadata.get("target_kind")),
+            target_ref=(
+                str(event.metadata.get("target_ref"))
+                if isinstance(event.metadata.get("target_ref"), str)
+                else None
+            ),
             payload={
                 "task_name": event.task_name,
                 "heartbeat_timeout_seconds": event.heartbeat_timeout_seconds,
                 "age_seconds": event.age_seconds,
                 "restartable": event.restartable,
                 "metadata": dict(event.metadata),
+                "component_kind": component_kind.value,
+                "component_id": component_id,
+            },
+        )
+
+    def _on_task_exited_unexpectedly(self, event: TaskExitedUnexpectedly) -> None:
+        component_id = str(event.metadata.get("component_id", f"task:{event.task_name}"))
+        component_kind = self._component_kind_from_metadata(
+            event.metadata.get("component_kind"),
+            default=ComponentKind.BACKGROUND_TASK,
+        )
+        display_name = str(event.metadata.get("display_name", event.task_name))
+        self._handle_failure(
+            component_ref=ComponentRef(
+                component_id=component_id,
+                kind=component_kind,
+                display_name=display_name,
+            ),
+            reason=event.error_message or f"task '{event.task_name}' exited unexpectedly",
+            severity=IncidentSeverity.HIGH,
+            target_kind=SessionTargetKind.LOCAL,
+            target_ref=None,
+            payload={
+                "task_name": event.task_name,
+                "restartable": event.restartable,
+                "metadata": dict(event.metadata),
+                "component_kind": component_kind.value,
+                "component_id": component_id,
             },
         )
 
@@ -488,6 +612,43 @@ class SelfHealingService:
                 "reconnect_count": event.reconnect_count,
                 "metadata": dict(event.metadata),
             },
+        )
+
+    def _on_component_watch_observed(self, event: ComponentWatchObserved) -> None:
+        target_kind = self._target_kind_from_metadata(event.metadata.get("target_kind"))
+        payload = dict(event.metadata)
+        payload["summary"] = event.summary
+        if event.outcome.value == "success":
+            state = self._component_health_repository.get(event.component_id) or ComponentHealthState(
+                component_id=event.component_id,
+                component_kind=event.component_kind,
+                display_name=str(payload.get("display_name", event.component_id)),
+                status=HealthStatus.HEALTHY,
+                target_kind=target_kind,
+                target_ref=event.target_ref,
+            )
+            self._mark_component_healthy(
+                state=state,
+                heartbeat_at=self._now(),
+                payload=payload,
+            )
+            return
+        severity = (
+            IncidentSeverity.CRITICAL
+            if event.component_kind is ComponentKind.PLUGIN_HOST
+            else IncidentSeverity.HIGH
+        )
+        self._handle_failure(
+            component_ref=ComponentRef(
+                component_id=event.component_id,
+                kind=event.component_kind,
+                display_name=str(payload.get("display_name", event.component_id)),
+            ),
+            reason=event.summary,
+            severity=severity,
+            target_kind=target_kind,
+            target_ref=event.target_ref,
+            payload=payload,
         )
 
     def _handle_failure(
@@ -827,5 +988,65 @@ class SelfHealingService:
             raise LookupError(f"Component '{component_id}' was not found.")
         return state
 
+    def _task_component_ref(self, snapshot: TaskSnapshot) -> ComponentRef:
+        metadata = dict(snapshot.metadata)
+        return ComponentRef(
+            component_id=str(metadata.get("component_id", f"task:{snapshot.name}")),
+            kind=self._component_kind_from_metadata(
+                metadata.get("component_kind"),
+                default=ComponentKind.BACKGROUND_TASK,
+            ),
+            display_name=str(metadata.get("display_name", snapshot.name)),
+        )
+
+    @staticmethod
+    def _component_kind_from_metadata(
+        raw_value: object,
+        *,
+        default: ComponentKind,
+    ) -> ComponentKind:
+        if isinstance(raw_value, ComponentKind):
+            return raw_value
+        if isinstance(raw_value, str):
+            try:
+                return ComponentKind(raw_value)
+            except ValueError:
+                return default
+        return default
+
+    @staticmethod
+    def _task_target_kind(snapshot: TaskSnapshot) -> SessionTargetKind:
+        metadata = dict(snapshot.metadata)
+        raw_value = metadata.get("target_kind")
+        if isinstance(raw_value, SessionTargetKind):
+            return raw_value
+        if isinstance(raw_value, str):
+            try:
+                return SessionTargetKind(raw_value)
+            except ValueError:
+                return SessionTargetKind.LOCAL
+        return SessionTargetKind.LOCAL
+
+    @staticmethod
+    def _target_kind_from_metadata(raw_value: object) -> SessionTargetKind:
+        if isinstance(raw_value, SessionTargetKind):
+            return raw_value
+        if isinstance(raw_value, str):
+            try:
+                return SessionTargetKind(raw_value)
+            except ValueError:
+                return SessionTargetKind.LOCAL
+        return SessionTargetKind.LOCAL
+
     def _now(self) -> datetime:
         return self._now_factory()
+
+    @staticmethod
+    def _runtime_payload(state: ComponentHealthState) -> dict[str, object]:
+        payload = dict(state.payload)
+        merged = dict(payload)
+        nested = payload.get("payload")
+        while isinstance(nested, dict):
+            merged.update(nested)
+            nested = nested.get("payload")
+        return merged

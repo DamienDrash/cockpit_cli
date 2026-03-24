@@ -7,6 +7,13 @@ from urllib.request import Request, urlopen
 import time
 import unittest
 
+from cockpit.shared.enums import (
+    NotificationChannelKind,
+    NotificationEventClass,
+    SessionTargetKind,
+    TargetRiskLevel,
+    WatchSubjectKind,
+)
 from cockpit.infrastructure.web.admin_server import LocalWebAdminServer
 
 
@@ -43,6 +50,13 @@ class FakeWebAdminService:
         self.closed_incidents: list[str] = []
         self.retried_components: list[str] = []
         self.reset_components: list[str] = []
+        self.saved_channels: list[dict[str, object]] = []
+        self.saved_rules: list[dict[str, object]] = []
+        self.saved_suppressions: list[dict[str, object]] = []
+        self.saved_datasource_watches: list[dict[str, object]] = []
+        self.saved_docker_watches: list[dict[str, object]] = []
+        self.deleted_watches: list[str] = []
+        self.probed_watches: list[str] = []
 
     def diagnostics(self) -> dict[str, object]:
         return {
@@ -72,6 +86,15 @@ class FakeWebAdminService:
                 "allowed_permissions": ["ui.read", "commands.execute"],
                 "app_version": "0.1.0",
             },
+            "plugin_hosts": [
+                {
+                    "component_id": "plugin-host:notes",
+                    "plugin_id": "plg-notes",
+                    "display_name": "Plugin host Notes",
+                    "alive": True,
+                    "status": "host_running",
+                }
+            ],
             "tunnels": [
                 {
                     "profile_id": "pg-main",
@@ -110,10 +133,88 @@ class FakeWebAdminService:
             "recent_recovery_attempts": [
                 {"id": "rcv-1", "status": "failed"},
             ],
+            "notifications": {
+                "counts": {
+                    "queued": 1,
+                    "suppressed": 1,
+                    "delivered": 2,
+                    "delivering": 0,
+                    "failed": 1,
+                },
+                "recent": [
+                    {
+                        "id": "ntf-1",
+                        "title": "Tunnel unhealthy",
+                        "summary": "ssh tunnel is reconnecting",
+                        "status": "queued",
+                    }
+                ],
+                "recent_failures": [
+                    {
+                        "id": "ndl-1",
+                        "channel_id": "slack-ops",
+                        "attempt_number": 2,
+                        "error_message": "timeout",
+                    }
+                ],
+            },
+            "notification_channels": [
+                {
+                    "id": "internal-default",
+                    "name": "Internal",
+                }
+            ],
+            "notification_rules": [
+                {
+                    "id": "rule-1",
+                    "name": "Default",
+                }
+            ],
+            "suppression_rules": [
+                {
+                    "id": "sup-1",
+                    "name": "Maintenance mute",
+                }
+            ],
+            "watches": {
+                "configs": [
+                    {
+                        "id": "wch-1",
+                        "component_id": "watch:datasource:pg-main",
+                    }
+                ],
+                "states": [
+                    {
+                        "component_id": "watch:datasource:pg-main",
+                        "last_status": "unreachable",
+                    }
+                ],
+                "unhealthy": [
+                    {
+                        "component_id": "watch:datasource:pg-main",
+                        "last_status": "unreachable",
+                    }
+                ],
+            },
+            "tasks": [
+                {
+                    "name": "web-admin-server",
+                    "component_kind": "web_admin",
+                    "alive": True,
+                }
+            ],
+            "web_admin_tasks": [
+                {
+                    "name": "web-admin-server",
+                    "component_kind": "web_admin",
+                    "alive": True,
+                }
+            ],
             "operations": {
                 "docker": [{"name": "web"}],
                 "db": [{"profile_id": "pg-main"}],
                 "curl": [{"url": "https://example.com"}],
+                "notification": [{"summary": "internal notification stored"}],
                 "recent_guard_decisions": [{"outcome": "allow"}],
                 "recent_operations": [{"summary": "ok"}],
             },
@@ -231,6 +332,110 @@ class FakeWebAdminService:
     def remove_plugin(self, plugin_id: str) -> None:
         del plugin_id
 
+    def list_notification_channels(self):
+        return [_NotificationChannelObject()]
+
+    def save_notification_channel(self, payload: dict[str, object]):
+        self.saved_channels.append(dict(payload))
+        return _NotificationChannelObject(
+            id=str(payload.get("channel_id", "nch-1") or "nch-1"),
+            name=str(payload.get("name", "Ops Channel")),
+            kind=NotificationChannelKind(str(payload.get("kind", "internal"))),
+        )
+
+    def delete_notification_channel(self, channel_id: str) -> None:
+        del channel_id
+
+    def list_notification_rules(self):
+        return [_NotificationRuleObject()]
+
+    def save_notification_rule(self, payload: dict[str, object]):
+        self.saved_rules.append(dict(payload))
+        return _NotificationRuleObject(
+            id=str(payload.get("rule_id", "nrl-1") or "nrl-1"),
+            name=str(payload.get("name", "Ops Rule")),
+        )
+
+    def delete_notification_rule(self, rule_id: str) -> None:
+        del rule_id
+
+    def list_suppression_rules(self):
+        return [_SuppressionRuleObject()]
+
+    def save_suppression_rule(self, payload: dict[str, object]):
+        self.saved_suppressions.append(dict(payload))
+        return _SuppressionRuleObject(
+            id=str(payload.get("suppression_id", "sup-1") or "sup-1"),
+            name=str(payload.get("name", "Maintenance mute")),
+            reason=str(payload.get("reason", "Maintenance")),
+        )
+
+    def delete_suppression_rule(self, suppression_id: str) -> None:
+        del suppression_id
+
+    def list_notifications(self, *, status=None):
+        del status
+        return [
+            {
+                "id": "ntf-1",
+                "title": "Tunnel unhealthy",
+                "event_class": "incident_opened",
+                "severity": "high",
+                "status": "queued",
+                "summary": "ssh tunnel is reconnecting",
+            }
+        ]
+
+    def notification_detail(self, notification_id: str):
+        del notification_id
+        return {
+            "notification": {"id": "ntf-1", "title": "Tunnel unhealthy"},
+            "deliveries": [{"id": "ndl-1", "status": "failed"}],
+        }
+
+    def notification_summary(self):
+        return self.diagnostics()["notifications"]
+
+    def list_watch_configs(self):
+        return [_WatchConfigObject()]
+
+    def list_watch_states(self):
+        return [
+            {
+                "component_id": "watch:datasource:pg-main",
+                "watch_id": "wch-1",
+                "last_status": "unreachable",
+                "last_probe_at": "2026-03-23T00:00:00+00:00",
+            }
+        ]
+
+    def save_datasource_watch(self, payload: dict[str, object]):
+        self.saved_datasource_watches.append(dict(payload))
+        return _WatchConfigObject(
+            id=str(payload.get("watch_id", "wch-1") or "wch-1"),
+            name=str(payload.get("name", "Datasource Watch")),
+            subject_ref=str(payload.get("profile_id", "pg-main")),
+        )
+
+    def save_docker_watch(self, payload: dict[str, object]):
+        self.saved_docker_watches.append(dict(payload))
+        return _WatchConfigObject(
+            id=str(payload.get("watch_id", "wch-2") or "wch-2"),
+            name=str(payload.get("name", "Docker Watch")),
+            subject_kind=WatchSubjectKind.DOCKER_CONTAINER,
+            subject_ref=str(payload.get("container_ref", "web")),
+            component_id=f"watch:docker:{payload.get('container_ref', 'web')}",
+            target_kind=SessionTargetKind(str(payload.get("target_kind", "local"))),
+            target_ref=payload.get("target_ref"),
+        )
+
+    def delete_watch(self, watch_id: str) -> None:
+        self.deleted_watches.append(watch_id)
+
+    def probe_watch(self, watch_id: str):
+        self.probed_watches.append(watch_id)
+        return {"watch_id": watch_id, "last_status": "reachable"}
+
     def list_layouts(self):
         return [
             _LayoutObject(
@@ -338,6 +543,7 @@ class FakeWebAdminService:
         return [
             ("work", "work-panel", "Work"),
             ("logs", "logs-panel", "Logs"),
+            ("ops", "ops-panel", "Ops"),
         ]
 
     def close_tunnel(self, profile_id: str) -> None:
@@ -421,6 +627,56 @@ class _VaultLeaseObject:
 @dataclass
 class SimpleResult:
     message: str
+
+
+@dataclass
+class _NotificationChannelObject:
+    id: str = "internal-default"
+    name: str = "Internal"
+    kind: NotificationChannelKind = NotificationChannelKind.INTERNAL
+    enabled: bool = True
+    risk_level: TargetRiskLevel = TargetRiskLevel.DEV
+    target: dict[str, object] = field(default_factory=dict)
+    max_attempts: int = 3
+
+
+@dataclass
+class _NotificationRuleObject:
+    id: str = "rule-1"
+    name: str = "Default"
+    event_classes: tuple[NotificationEventClass, ...] = (
+        NotificationEventClass.INCIDENT_OPENED,
+    )
+    channel_ids: tuple[str, ...] = ("internal-default",)
+    delivery_priority: int = 100
+    dedupe_window_seconds: int = 300
+    enabled: bool = True
+
+
+@dataclass
+class _SuppressionRuleObject:
+    id: str = "sup-1"
+    name: str = "Maintenance mute"
+    reason: str = "Maintenance"
+    starts_at: str | None = "2026-03-23T00:00:00+00:00"
+    ends_at: str | None = "2026-03-23T02:00:00+00:00"
+    event_classes: tuple[NotificationEventClass, ...] = (
+        NotificationEventClass.COMPONENT_DEGRADED,
+    )
+
+
+@dataclass
+class _WatchConfigObject:
+    id: str = "wch-1"
+    name: str = "Datasource Watch"
+    subject_kind: WatchSubjectKind = WatchSubjectKind.DATASOURCE
+    subject_ref: str = "pg-main"
+    enabled: bool = True
+    probe_interval_seconds: int = 30
+    stale_timeout_seconds: int = 90
+    component_id: str = "watch:datasource:pg-main"
+    target_kind: SessionTargetKind = SessionTargetKind.LOCAL
+    target_ref: str | None = None
 
 
 @dataclass
@@ -563,6 +819,16 @@ class LocalWebAdminServerTests(unittest.TestCase):
                 plugin_body = response.read().decode("utf-8")
             self.assertIn("git+https://github.com/", plugin_body)
 
+            with urlopen(f"{base_url}/notifications") as response:
+                notifications_body = response.read().decode("utf-8")
+            self.assertIn("Recent notifications", notifications_body)
+            self.assertIn("Tunnel unhealthy", notifications_body)
+
+            with urlopen(f"{base_url}/watches") as response:
+                watches_body = response.read().decode("utf-8")
+            self.assertIn("Configured watches", watches_body)
+            self.assertIn("Datasource Watch", watches_body)
+
             with urlopen(f"{base_url}/secrets") as response:
                 secrets_body = response.read().decode("utf-8")
             self.assertIn("analytics-pass", secrets_body)
@@ -652,6 +918,37 @@ class LocalWebAdminServerTests(unittest.TestCase):
             self.assertIn("Saved secret reference redis-pass.", secret_body)
             self.assertEqual(service.created_secrets[0]["env_name"], "REDIS_PASSWORD")
 
+            channel_request = Request(
+                f"{base_url}/notifications/channel/save",
+                data=urlencode(
+                    {
+                        "name": "Slack Ops",
+                        "kind": "slack",
+                        "target_json": '{"url":"https://hooks.slack.test"}',
+                    }
+                ).encode("utf-8"),
+                method="POST",
+            )
+            with urlopen(channel_request) as response:
+                channel_body = response.read().decode("utf-8")
+            self.assertIn("Saved notification channel Slack Ops.", channel_body)
+            self.assertEqual(service.saved_channels[0]["kind"], "slack")
+
+            watch_request = Request(
+                f"{base_url}/watches/datasource/save",
+                data=urlencode(
+                    {
+                        "name": "Primary DB Reachability",
+                        "profile_id": "pg-main",
+                    }
+                ).encode("utf-8"),
+                method="POST",
+            )
+            with urlopen(watch_request) as response:
+                watch_body = response.read().decode("utf-8")
+            self.assertIn("Saved datasource watch Primary DB Reachability.", watch_body)
+            self.assertEqual(service.saved_datasource_watches[0]["profile_id"], "pg-main")
+
             rotate_request = Request(
                 f"{base_url}/secrets/rotate",
                 data=urlencode(
@@ -699,6 +996,8 @@ class LocalWebAdminServerTests(unittest.TestCase):
 
             self.assertIn("/diagnostics", service.saved_pages)
             self.assertIn("/plugins", service.saved_pages)
+            self.assertIn("/notifications", service.saved_pages)
+            self.assertIn("/watches", service.saved_pages)
             self.assertIn("/secrets", service.saved_pages)
             self.assertIn("/datasources", service.saved_pages)
             self.assertIn("/incidents", service.saved_pages)

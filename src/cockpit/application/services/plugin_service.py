@@ -243,6 +243,32 @@ class PluginService:
             },
         }
 
+    def host_snapshots(self) -> list[dict[str, object]]:
+        snapshots: list[dict[str, object]] = []
+        for plugin in self._runtime_plugins():
+            if not plugin.enabled:
+                continue
+            if str(plugin.manifest.get("runtime_mode", "hosted")) != "hosted":
+                continue
+            client = self._host_clients.get(plugin.id)
+            alive = client.is_running() if client is not None else False
+            snapshots.append(
+                {
+                    "component_id": f"plugin-host:{plugin.id}",
+                    "plugin_id": plugin.id,
+                    "display_name": f"Plugin host {plugin.name}",
+                    "alive": alive,
+                    "status": plugin.status,
+                    "last_error": client.last_error if client is not None else None,
+                }
+            )
+        return snapshots
+
+    def restart_host(self, plugin_id: str) -> None:
+        plugin = self._require_hosted_plugin(plugin_id, required_permission="ui.read")
+        self._stop_host(plugin.id)
+        self._ensure_host(plugin)
+
     def register_managed_plugins(
         self,
         *,

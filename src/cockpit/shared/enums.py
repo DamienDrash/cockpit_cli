@@ -58,6 +58,10 @@ class ComponentKind(StrEnum):
     DOCKER_RUNTIME = "docker_runtime"
     DATASOURCE = "datasource"
     HTTP_REQUEST = "http_request"
+    PLUGIN_HOST = "plugin_host"
+    WEB_ADMIN = "web_admin"
+    DATASOURCE_WATCH = "datasource_watch"
+    DOCKER_CONTAINER_WATCH = "docker_container_watch"
 
 
 class HealthStatus(StrEnum):
@@ -116,3 +120,47 @@ class OperationFamily(StrEnum):
     DOCKER = "docker"
     DB = "db"
     CURL = "curl"
+    NOTIFICATION = "notification"
+
+
+class NotificationChannelKind(StrEnum):
+    INTERNAL = "internal"
+    WEBHOOK = "webhook"
+    SLACK = "slack"
+    NTFY = "ntfy"
+
+
+class NotificationEventClass(StrEnum):
+    INCIDENT_OPENED = "incident_opened"
+    INCIDENT_STATUS_CHANGED = "incident_status_changed"
+    COMPONENT_QUARANTINED = "component_quarantined"
+    COMPONENT_RECOVERED = "component_recovered"
+    COMPONENT_DEGRADED = "component_degraded"
+    DELIVERY_FAILURE = "delivery_failure"
+
+
+class NotificationStatus(StrEnum):
+    QUEUED = "queued"
+    SUPPRESSED = "suppressed"
+    DELIVERING = "delivering"
+    DELIVERED = "delivered"
+    FAILED = "failed"
+
+
+class NotificationDeliveryStatus(StrEnum):
+    SCHEDULED = "scheduled"
+    RUNNING = "running"
+    SUCCEEDED = "succeeded"
+    FAILED = "failed"
+    SUPPRESSED = "suppressed"
+
+
+class WatchProbeOutcome(StrEnum):
+    SUCCESS = "success"
+    FAILURE = "failure"
+    SKIPPED = "skipped"
+
+
+class WatchSubjectKind(StrEnum):
+    DATASOURCE = "datasource"
+    DOCKER_CONTAINER = "docker_container"

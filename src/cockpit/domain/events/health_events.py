@@ -13,6 +13,7 @@ from cockpit.shared.enums import (
     IncidentSeverity,
     IncidentStatus,
     RecoveryAttemptStatus,
+    WatchProbeOutcome,
 )
 
 
@@ -87,6 +88,14 @@ class TaskHeartbeatMissed(RuntimeEvent):
 
 
 @dataclass(slots=True, kw_only=True)
+class TaskExitedUnexpectedly(RuntimeEvent):
+    task_name: str
+    restartable: bool
+    error_message: str | None = None
+    metadata: dict[str, object] = field(default_factory=dict)
+
+
+@dataclass(slots=True, kw_only=True)
 class TunnelFailureDetected(RuntimeEvent):
     profile_id: str
     target_ref: str
@@ -94,4 +103,15 @@ class TunnelFailureDetected(RuntimeEvent):
     remote_port: int
     reconnect_count: int
     reason: str
+    metadata: dict[str, object] = field(default_factory=dict)
+
+
+@dataclass(slots=True, kw_only=True)
+class ComponentWatchObserved(RuntimeEvent):
+    component_id: str
+    component_kind: ComponentKind
+    outcome: WatchProbeOutcome
+    status: str
+    summary: str
+    target_ref: str | None = None
     metadata: dict[str, object] = field(default_factory=dict)

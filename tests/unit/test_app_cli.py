@@ -1,10 +1,12 @@
 from argparse import Namespace
+from threading import Event
 import unittest
 
 from cockpit.app import (
     build_arg_parser,
     completion_script,
     list_connections_text,
+    run_admin_server_task,
     startup_command_text_from_args,
 )
 
@@ -49,6 +51,40 @@ class CockpitCliTests(unittest.TestCase):
         text = list_connections_text()
 
         self.assertEqual(text, "No connection profiles configured.")
+
+    def test_run_admin_server_task_heartbeats_and_shuts_down(self) -> None:
+        class _FakeServer:
+            def __init__(self) -> None:
+                self._stop = Event()
+                self.shutdown_calls = 0
+
+            def serve_forever(self) -> None:
+                self._stop.wait(1.0)
+
+            def shutdown(self) -> None:
+                self.shutdown_calls += 1
+                self._stop.set()
+
+            def listen_url(self) -> str | None:
+                return "http://127.0.0.1:8765"
+
+        class _FakeContext:
+            def __init__(self) -> None:
+                self.stop_event = Event()
+                self.messages: list[str] = []
+
+            def heartbeat(self, message: str | None = None) -> None:
+                if message is not None:
+                    self.messages.append(message)
+                self.stop_event.set()
+
+        server = _FakeServer()
+        context = _FakeContext()
+
+        run_admin_server_task(context, server=server)
+
+        self.assertEqual(server.shutdown_calls, 1)
+        self.assertEqual(context.messages, ["http://127.0.0.1:8765"])
 
 
 if __name__ == "__main__":

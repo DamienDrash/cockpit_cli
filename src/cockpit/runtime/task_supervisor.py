@@ -45,6 +45,7 @@ class TaskSnapshot:
     heartbeat_timeout_seconds: float
     stale: bool
     age_seconds: float
+    finished_at: datetime | None
     last_error: str | None
     restart_count: int
     metadata: dict[str, object]
@@ -218,6 +219,7 @@ class TaskSupervisor:
             heartbeat_timeout_seconds=task.heartbeat_timeout_seconds,
             stale=stale,
             age_seconds=age_seconds,
+            finished_at=task.finished_at,
             last_error=task.last_error,
             restart_count=task.restart_count,
             metadata=dict(task.metadata),

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-DATABASE_VERSION = 3
+DATABASE_VERSION = 4
 
 CREATE_MIGRATIONS_TABLE = """
 CREATE TABLE IF NOT EXISTS schema_migrations (
@@ -304,5 +304,168 @@ V3_STATEMENTS: tuple[str, ...] = (
     """
     CREATE INDEX IF NOT EXISTS idx_operation_diagnostics_family
     ON operation_diagnostics(operation_family, recorded_at DESC);
+    """,
+)
+
+V4_STATEMENTS: tuple[str, ...] = (
+    """
+    CREATE TABLE IF NOT EXISTS notification_channels (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        kind TEXT NOT NULL,
+        enabled INTEGER NOT NULL,
+        target_json TEXT NOT NULL,
+        secret_refs_json TEXT NOT NULL,
+        timeout_seconds INTEGER NOT NULL,
+        max_attempts INTEGER NOT NULL,
+        base_backoff_seconds INTEGER NOT NULL,
+        max_backoff_seconds INTEGER NOT NULL,
+        risk_level TEXT NOT NULL,
+        payload_json TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+    );
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS notification_rules (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        enabled INTEGER NOT NULL,
+        event_classes_json TEXT NOT NULL,
+        component_kinds_json TEXT NOT NULL,
+        severities_json TEXT NOT NULL,
+        risk_levels_json TEXT NOT NULL,
+        incident_statuses_json TEXT NOT NULL,
+        channel_ids_json TEXT NOT NULL,
+        delivery_priority INTEGER NOT NULL,
+        dedupe_window_seconds INTEGER NOT NULL,
+        payload_json TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+    );
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS notification_suppressions (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        enabled INTEGER NOT NULL,
+        reason TEXT NOT NULL,
+        starts_at TEXT,
+        ends_at TEXT,
+        event_classes_json TEXT NOT NULL,
+        component_kinds_json TEXT NOT NULL,
+        severities_json TEXT NOT NULL,
+        risk_levels_json TEXT NOT NULL,
+        actor TEXT,
+        payload_json TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+    );
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS notifications (
+        id TEXT PRIMARY KEY,
+        event_class TEXT NOT NULL,
+        severity TEXT NOT NULL,
+        risk_level TEXT NOT NULL,
+        title TEXT NOT NULL,
+        summary TEXT NOT NULL,
+        status TEXT NOT NULL,
+        dedupe_key TEXT NOT NULL,
+        incident_id TEXT,
+        component_id TEXT,
+        component_kind TEXT,
+        incident_status TEXT,
+        source_event_id TEXT,
+        suppression_reason TEXT,
+        payload_json TEXT NOT NULL,
+        created_at TEXT NOT NULL
+    );
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS notification_deliveries (
+        id TEXT PRIMARY KEY,
+        notification_id TEXT NOT NULL,
+        channel_id TEXT NOT NULL,
+        attempt_number INTEGER NOT NULL,
+        status TEXT NOT NULL,
+        scheduled_for TEXT,
+        started_at TEXT,
+        finished_at TEXT,
+        error_class TEXT,
+        error_message TEXT,
+        response_payload_json TEXT NOT NULL,
+        payload_json TEXT NOT NULL,
+        FOREIGN KEY(notification_id) REFERENCES notifications(id),
+        FOREIGN KEY(channel_id) REFERENCES notification_channels(id)
+    );
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS component_watch_config (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        component_id TEXT NOT NULL,
+        component_kind TEXT NOT NULL,
+        subject_kind TEXT NOT NULL,
+        subject_ref TEXT NOT NULL,
+        enabled INTEGER NOT NULL,
+        probe_interval_seconds INTEGER NOT NULL,
+        stale_timeout_seconds INTEGER NOT NULL,
+        target_kind TEXT NOT NULL,
+        target_ref TEXT,
+        recovery_policy_override_json TEXT NOT NULL,
+        monitor_config_json TEXT NOT NULL,
+        payload_json TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+    );
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS component_watch_state (
+        component_id TEXT PRIMARY KEY,
+        watch_id TEXT NOT NULL,
+        component_kind TEXT NOT NULL,
+        subject_kind TEXT NOT NULL,
+        subject_ref TEXT NOT NULL,
+        last_probe_at TEXT,
+        last_success_at TEXT,
+        last_failure_at TEXT,
+        last_outcome TEXT NOT NULL,
+        last_status TEXT NOT NULL,
+        payload_json TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+    );
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_notification_channels_kind
+    ON notification_channels(kind);
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_notification_rules_enabled
+    ON notification_rules(enabled);
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_notification_suppressions_window
+    ON notification_suppressions(enabled, starts_at, ends_at);
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_notifications_created_at
+    ON notifications(created_at DESC);
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_notifications_incident_component
+    ON notifications(incident_id, component_id);
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_notification_deliveries_status
+    ON notification_deliveries(status, scheduled_for);
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_component_watch_config_enabled
+    ON component_watch_config(enabled, component_kind);
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_component_watch_state_subject
+    ON component_watch_state(subject_kind, subject_ref);
     """,
 )

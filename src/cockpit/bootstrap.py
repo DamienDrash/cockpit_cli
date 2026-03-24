@@ -9,6 +9,7 @@ from cockpit.application.dispatch.command_dispatcher import CommandDispatcher
 from cockpit.application.dispatch.command_parser import CommandParser
 from cockpit.application.dispatch.event_bus import EventBus
 from cockpit.application.services.datasource_service import DataSourceService
+from cockpit.application.services.component_watch_service import ComponentWatchService
 from cockpit.application.services.guard_policy_service import GuardPolicyService
 from cockpit.application.handlers.curl_handlers import SendHttpRequestHandler
 from cockpit.application.handlers.cron_handlers import SetCronJobEnabledHandler
@@ -19,6 +20,8 @@ from cockpit.application.handlers.docker_handlers import (
     StopDockerContainerHandler,
 )
 from cockpit.application.services.incident_service import IncidentService
+from cockpit.application.services.notification_policy_service import NotificationPolicyService
+from cockpit.application.services.notification_service import NotificationService
 from cockpit.application.handlers.layout_handlers import (
     AdjustActiveLayoutRatioHandler,
     ApplyDefaultLayoutHandler,
@@ -29,6 +32,7 @@ from cockpit.application.services.operations_diagnostics_service import (
     OperationsDiagnosticsService,
 )
 from cockpit.application.services.recovery_policy_service import RecoveryPolicyService
+from cockpit.application.services.suppression_service import SuppressionService
 from cockpit.application.handlers.session_handlers import RestoreSessionHandler
 from cockpit.application.services.self_healing_service import SelfHealingService
 from cockpit.application.handlers.tab_handlers import FocusTabHandler
@@ -61,6 +65,12 @@ from cockpit.domain.events.domain_events import (
     SnapshotSaved,
     WorkspaceOpened,
 )
+from cockpit.domain.events.notification_events import (
+    NotificationDelivered,
+    NotificationDeliveryFailed,
+    NotificationQueued,
+    NotificationSuppressed,
+)
 from cockpit.domain.events.runtime_events import PTYStarted, PTYStartupFailed, TerminalExited
 from cockpit.infrastructure.config.config_loader import ConfigLoader
 from cockpit.infrastructure.cron.cron_adapter import CronAdapter
@@ -82,11 +92,20 @@ from cockpit.infrastructure.persistence.repositories import (
 )
 from cockpit.infrastructure.persistence.ops_repositories import (
     ComponentHealthRepository,
+    ComponentWatchRepository,
     GuardDecisionRepository,
     IncidentRepository,
+    NotificationChannelRepository,
+    NotificationDeliveryRepository,
+    NotificationRepository,
+    NotificationRuleRepository,
+    NotificationSuppressionRepository,
     OperationDiagnosticsRepository,
     RecoveryAttemptRepository,
 )
+from cockpit.infrastructure.notifications.ntfy_adapter import NtfyNotificationAdapter
+from cockpit.infrastructure.notifications.slack_adapter import SlackNotificationAdapter
+from cockpit.infrastructure.notifications.webhook_adapter import WebhookNotificationAdapter
 from cockpit.infrastructure.persistence.sqlite_store import SQLiteStore
 from cockpit.infrastructure.secrets.secret_resolver import SecretResolver
 from cockpit.infrastructure.shell.base import ShellAdapter
@@ -102,12 +121,14 @@ from cockpit.runtime.health_monitor import RuntimeHealthMonitor
 from cockpit.runtime.stream_router import StreamRouter
 from cockpit.runtime.task_supervisor import TaskSupervisor
 from cockpit.shared.config import default_db_path, discover_project_root
+from cockpit.shared.enums import NotificationChannelKind
 from cockpit.ui.panels.curl_panel import CurlPanel
 from cockpit.ui.panels.db_panel import DBPanel
 from cockpit.ui.panels.git_panel import GitPanel
 from cockpit.ui.panels.docker_panel import DockerPanel
 from cockpit.ui.panels.cron_panel import CronPanel
 from cockpit.ui.panels.logs_panel import LogsPanel
+from cockpit.ui.panels.ops_panel import OpsPanel
 from cockpit.ui.panels.registry import PanelRegistry, PanelSpec
 from cockpit.ui.panels.work_panel import WorkPanel
 
@@ -132,6 +153,10 @@ class ApplicationContainer:
     self_healing_service: SelfHealingService
     incident_service: IncidentService
     operations_diagnostics_service: OperationsDiagnosticsService
+    notification_service: NotificationService
+    notification_policy_service: NotificationPolicyService
+    suppression_service: SuppressionService
+    component_watch_service: ComponentWatchService
     guard_policy_service: GuardPolicyService
     health_monitor: RuntimeHealthMonitor
     stream_router: StreamRouter
@@ -144,6 +169,7 @@ class ApplicationContainer:
     remote_filesystem_adapter: RemoteFilesystemAdapter
     clipboard_service: ClipboardService
     tunnel_manager: SSHTunnelManager
+    task_supervisor: TaskSupervisor
     panel_registry: PanelRegistry
     store: SQLiteStore
 
@@ -195,6 +221,12 @@ def build_container(
     recovery_attempt_repository = RecoveryAttemptRepository(store)
     guard_decision_repository = GuardDecisionRepository(store)
     operation_diagnostics_repository = OperationDiagnosticsRepository(store)
+    notification_channel_repository = NotificationChannelRepository(store)
+    notification_rule_repository = NotificationRuleRepository(store)
+    notification_suppression_repository = NotificationSuppressionRepository(store)
+    notification_repository = NotificationRepository(store)
+    notification_delivery_repository = NotificationDeliveryRepository(store)
+    component_watch_repository = ComponentWatchRepository(store)
     stream_router = StreamRouter()
     task_supervisor = TaskSupervisor()
     ssh_command_runner = ssh_command_runner or SSHCommandRunner()
@@ -224,6 +256,14 @@ def build_container(
     )
     recovery_policy_service = RecoveryPolicyService()
     guard_policy_service = GuardPolicyService(guard_decision_repository)
+    notification_policy_service = NotificationPolicyService(
+        channel_repository=notification_channel_repository,
+        rule_repository=notification_rule_repository,
+    )
+    suppression_service = SuppressionService(
+        repository=notification_suppression_repository,
+        event_bus=event_bus,
+    )
     workspace_service = WorkspaceService(
         workspace_repository,
         connection_service=connection_service,
@@ -254,6 +294,13 @@ def build_container(
         if isinstance(plugin_config.get("allowed_permissions", []), list)
         else (),
     )
+    component_watch_service = ComponentWatchService(
+        event_bus=event_bus,
+        repository=component_watch_repository,
+        datasource_service=data_source_service,
+        docker_adapter=docker_adapter,
+        operation_diagnostics_repository=operation_diagnostics_repository,
+    )
     self_healing_service = SelfHealingService(
         event_bus=event_bus,
         recovery_policy_service=recovery_policy_service,
@@ -263,6 +310,8 @@ def build_container(
         pty_manager=pty_manager,
         tunnel_manager=tunnel_manager,
         task_supervisor=task_supervisor,
+        plugin_service=plugin_service,
+        component_watch_service=component_watch_service,
     )
     incident_service = IncidentService(
         incident_repository=incident_repository,
@@ -281,11 +330,28 @@ def build_container(
         guard_decision_repository=guard_decision_repository,
         operation_diagnostics_repository=operation_diagnostics_repository,
     )
+    notification_service = NotificationService(
+        event_bus=event_bus,
+        notification_repository=notification_repository,
+        delivery_repository=notification_delivery_repository,
+        notification_policy_service=notification_policy_service,
+        suppression_service=suppression_service,
+        secret_resolver=secret_resolver,
+        operation_diagnostics_repository=operation_diagnostics_repository,
+        adapters={
+            NotificationChannelKind.WEBHOOK: WebhookNotificationAdapter(),
+            NotificationChannelKind.SLACK: SlackNotificationAdapter(),
+            NotificationChannelKind.NTFY: NtfyNotificationAdapter(),
+        },
+    )
     health_monitor = RuntimeHealthMonitor(
         event_bus=event_bus,
         task_supervisor=task_supervisor,
         tunnel_manager=tunnel_manager,
         self_healing_service=self_healing_service,
+        plugin_service=plugin_service,
+        component_watch_service=component_watch_service,
+        notification_service=notification_service,
     )
     activity_log_service = ActivityLogService(
         history_repository=history_repository,
@@ -372,6 +438,20 @@ def build_container(
             ),
         )
     )
+    panel_registry.register(
+        PanelSpec(
+            panel_type=OpsPanel.PANEL_TYPE,
+            panel_id=OpsPanel.PANEL_ID,
+            display_name="Ops",
+            factory=lambda container: OpsPanel(
+                event_bus=container.event_bus,
+                self_healing_service=container.self_healing_service,
+                incident_service=container.incident_service,
+                notification_service=container.notification_service,
+                component_watch_service=container.component_watch_service,
+            ),
+        )
+    )
     navigation_controller = NavigationController(
         event_bus=event_bus,
         workspace_service=workspace_service,
@@ -388,6 +468,10 @@ def build_container(
         PTYStarted,
         PTYStartupFailed,
         TerminalExited,
+        NotificationQueued,
+        NotificationSuppressed,
+        NotificationDelivered,
+        NotificationDeliveryFailed,
     ):
         event_bus.subscribe(event_type, activity_log_service.record_event)
 
@@ -527,11 +611,16 @@ def build_container(
         incident_service=incident_service,
         self_healing_service=self_healing_service,
         operations_diagnostics_service=operations_diagnostics_service,
+        notification_service=notification_service,
+        notification_policy_service=notification_policy_service,
+        suppression_service=suppression_service,
+        component_watch_service=component_watch_service,
         guard_policy_service=guard_policy_service,
         panel_registry=panel_registry,
         state_repository=web_admin_state_repository,
         command_catalog=tuple(command_catalog_entries),
         tunnel_manager=tunnel_manager,
+        task_supervisor=task_supervisor,
         project_root=project_root,
     )
     health_monitor.start()
@@ -553,6 +642,10 @@ def build_container(
         self_healing_service=self_healing_service,
         incident_service=incident_service,
         operations_diagnostics_service=operations_diagnostics_service,
+        notification_service=notification_service,
+        notification_policy_service=notification_policy_service,
+        suppression_service=suppression_service,
+        component_watch_service=component_watch_service,
         guard_policy_service=guard_policy_service,
         health_monitor=health_monitor,
         stream_router=stream_router,
@@ -565,6 +658,7 @@ def build_container(
         remote_filesystem_adapter=remote_filesystem_adapter,
         clipboard_service=clipboard_service,
         tunnel_manager=tunnel_manager,
+        task_supervisor=task_supervisor,
         panel_registry=panel_registry,
         store=store,
     )

@@ -117,6 +117,7 @@ class OperationsDiagnosticsServiceTests(unittest.TestCase):
             self.assertEqual(len(overview["docker"]), 1)
             self.assertEqual(len(overview["db"]), 1)
             self.assertEqual(len(overview["curl"]), 1)
+            self.assertIn("notification", overview)
             self.assertEqual(overview["db"][0]["recent_failure_count"], 1)
             self.assertEqual(overview["curl"][0]["failure_streak"], 1)
 

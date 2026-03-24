@@ -5,7 +5,11 @@ import unittest
 from cockpit.application.dispatch.event_bus import EventBus
 from cockpit.application.services.recovery_policy_service import RecoveryPolicyService
 from cockpit.application.services.self_healing_service import SelfHealingService
-from cockpit.domain.events.health_events import TaskHeartbeatMissed, TunnelFailureDetected
+from cockpit.domain.events.health_events import (
+    ComponentWatchObserved,
+    TaskHeartbeatMissed,
+    TunnelFailureDetected,
+)
 from cockpit.domain.events.runtime_events import PTYStarted, PTYStartupFailed, TerminalExited
 from cockpit.infrastructure.persistence.ops_repositories import (
     ComponentHealthRepository,
@@ -15,6 +19,7 @@ from cockpit.infrastructure.persistence.ops_repositories import (
 from cockpit.infrastructure.persistence.sqlite_store import SQLiteStore
 from cockpit.runtime.task_supervisor import TaskSupervisor
 from cockpit.shared.enums import ComponentKind, HealthStatus, SessionTargetKind
+from cockpit.shared.enums import WatchProbeOutcome
 
 
 class _FakePTYManager:
@@ -58,6 +63,22 @@ class _FakeTaskSupervisor(TaskSupervisor):
         )
 
 
+class _FakePluginService:
+    def __init__(self) -> None:
+        self.restarted = []
+
+    def restart_host(self, plugin_id: str) -> None:
+        self.restarted.append(plugin_id)
+
+
+class _FakeComponentWatchService:
+    def __init__(self) -> None:
+        self.probed = []
+
+    def probe_watch_for_component(self, component_id: str) -> None:
+        self.probed.append(component_id)
+
+
 class SelfHealingServiceTests(unittest.TestCase):
     def test_pty_failure_schedules_recovery_and_resolves_on_start(self) -> None:
         with TemporaryDirectory() as temp_dir:
@@ -73,6 +94,8 @@ class SelfHealingServiceTests(unittest.TestCase):
                 pty_manager=pty_manager,
                 tunnel_manager=_FakeTunnelManager(),
                 task_supervisor=_FakeTaskSupervisor(),
+                plugin_service=_FakePluginService(),
+                component_watch_service=_FakeComponentWatchService(),
             )
 
             bus.publish(
@@ -114,6 +137,8 @@ class SelfHealingServiceTests(unittest.TestCase):
                 pty_manager=_FakePTYManager(),
                 tunnel_manager=_FakeTunnelManager(),
                 task_supervisor=_FakeTaskSupervisor(),
+                plugin_service=_FakePluginService(),
+                component_watch_service=_FakeComponentWatchService(),
             )
 
             event = TunnelFailureDetected(
@@ -142,6 +167,8 @@ class SelfHealingServiceTests(unittest.TestCase):
                 pty_manager=_FakePTYManager(),
                 tunnel_manager=_FakeTunnelManager(),
                 task_supervisor=task_supervisor,
+                plugin_service=_FakePluginService(),
+                component_watch_service=_FakeComponentWatchService(),
             )
 
             bus.publish(
@@ -155,6 +182,77 @@ class SelfHealingServiceTests(unittest.TestCase):
             )
             service.retry_component("task:watcher")
             self.assertIn("watcher", task_supervisor.restarted)
+
+    def test_plugin_host_failure_can_retry_via_plugin_service(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            store = SQLiteStore(Path(temp_dir) / "cockpit.db")
+            bus = EventBus()
+            plugin_service = _FakePluginService()
+            service = SelfHealingService(
+                event_bus=bus,
+                recovery_policy_service=RecoveryPolicyService(),
+                component_health_repository=ComponentHealthRepository(store),
+                incident_repository=IncidentRepository(store),
+                recovery_attempt_repository=RecoveryAttemptRepository(store),
+                pty_manager=_FakePTYManager(),
+                tunnel_manager=_FakeTunnelManager(),
+                task_supervisor=_FakeTaskSupervisor(),
+                plugin_service=plugin_service,
+                component_watch_service=_FakeComponentWatchService(),
+            )
+
+            bus.publish(
+                ComponentWatchObserved(
+                    component_id="plugin-host:notes",
+                    component_kind=ComponentKind.PLUGIN_HOST,
+                    outcome=WatchProbeOutcome.FAILURE,
+                    status="host_failed",
+                    summary="plugin host crashed repeatedly",
+                    metadata={"plugin_id": "notes", "display_name": "Notes Host"},
+                )
+            )
+
+            service.retry_component("plugin-host:notes")
+            self.assertEqual(plugin_service.restarted, ["notes"])
+            state = service.list_health_states()[0]
+            self.assertEqual(state.status, HealthStatus.HEALTHY)
+
+    def test_web_admin_heartbeat_miss_uses_component_metadata(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            store = SQLiteStore(Path(temp_dir) / "cockpit.db")
+            bus = EventBus()
+            task_supervisor = _FakeTaskSupervisor()
+            service = SelfHealingService(
+                event_bus=bus,
+                recovery_policy_service=RecoveryPolicyService(),
+                component_health_repository=ComponentHealthRepository(store),
+                incident_repository=IncidentRepository(store),
+                recovery_attempt_repository=RecoveryAttemptRepository(store),
+                pty_manager=_FakePTYManager(),
+                tunnel_manager=_FakeTunnelManager(),
+                task_supervisor=task_supervisor,
+                plugin_service=_FakePluginService(),
+                component_watch_service=_FakeComponentWatchService(),
+            )
+
+            bus.publish(
+                TaskHeartbeatMissed(
+                    task_name="web-admin-server",
+                    heartbeat_timeout_seconds=3.0,
+                    age_seconds=5.0,
+                    restartable=True,
+                    metadata={
+                        "component_id": "web-admin:local",
+                        "component_kind": "web_admin",
+                        "display_name": "Web Admin Server",
+                    },
+                )
+            )
+
+            states = service.list_health_states()
+            self.assertEqual(len(states), 1)
+            self.assertEqual(states[0].component_kind, ComponentKind.WEB_ADMIN)
+            self.assertEqual(states[0].component_id, "web-admin:local")
 
 
 if __name__ == "__main__":

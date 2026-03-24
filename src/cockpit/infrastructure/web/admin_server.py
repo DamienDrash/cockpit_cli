@@ -25,6 +25,8 @@ def _page(title: str, body: str, *, flash: str | None = None) -> str:
         "<a href='/secrets'>Secrets</a>"
         "<a href='/plugins'>Plugins</a>"
         "<a href='/layouts'>Layouts</a>"
+        "<a href='/notifications'>Notifications</a>"
+        "<a href='/watches'>Watches</a>"
         "<a href='/incidents'>Incidents</a>"
         "<a href='/diagnostics'>Diagnostics</a>"
         "</nav>"
@@ -102,6 +104,19 @@ class LocalWebAdminServer:
                     return
                 if parsed.path == "/layouts":
                     self._html(_page("Layouts", _layout_body(service), flash=flash))
+                    return
+                if parsed.path == "/notifications":
+                    notification_id = query.get("notification_id", [None])[0]
+                    self._html(
+                        _page(
+                            "Notifications",
+                            _notifications_body(service, notification_id=notification_id),
+                            flash=flash,
+                        )
+                    )
+                    return
+                if parsed.path == "/watches":
+                    self._html(_page("Watches", _watches_body(service), flash=flash))
                     return
                 if parsed.path == "/incidents":
                     incident_id = query.get("incident_id", [None])[0]
@@ -202,6 +217,10 @@ def _redirect_target(path: str) -> str:
         return "/plugins"
     if path.startswith("/layouts"):
         return "/layouts"
+    if path.startswith("/notifications"):
+        return "/notifications"
+    if path.startswith("/watches"):
+        return "/watches"
     if path.startswith("/incidents"):
         return "/incidents"
     if path.startswith("/diagnostics"):
@@ -299,6 +318,40 @@ def _handle_post(service: WebAdminService, path: str, form: dict[str, str]) -> t
         plugin_id = form.get("plugin_id", "")
         service.remove_plugin(plugin_id)
         return "/plugins", f"Removed plugin {plugin_id}."
+    if path == "/notifications/channel/save":
+        channel = service.save_notification_channel(form)
+        return "/notifications", f"Saved notification channel {channel.name}."
+    if path == "/notifications/channel/delete":
+        channel_id = form.get("channel_id", "")
+        service.delete_notification_channel(channel_id)
+        return "/notifications", f"Deleted notification channel {channel_id}."
+    if path == "/notifications/rule/save":
+        rule = service.save_notification_rule(form)
+        return "/notifications", f"Saved notification rule {rule.name}."
+    if path == "/notifications/rule/delete":
+        rule_id = form.get("rule_id", "")
+        service.delete_notification_rule(rule_id)
+        return "/notifications", f"Deleted notification rule {rule_id}."
+    if path == "/notifications/suppression/save":
+        rule = service.save_suppression_rule(form)
+        return "/notifications", f"Saved suppression rule {rule.name}."
+    if path == "/notifications/suppression/delete":
+        suppression_id = form.get("suppression_id", "")
+        service.delete_suppression_rule(suppression_id)
+        return "/notifications", f"Deleted suppression rule {suppression_id}."
+    if path == "/watches/datasource/save":
+        watch = service.save_datasource_watch(form)
+        return "/watches", f"Saved datasource watch {watch.name}."
+    if path == "/watches/docker/save":
+        watch = service.save_docker_watch(form)
+        return "/watches", f"Saved docker watch {watch.name}."
+    if path == "/watches/delete":
+        watch_id = form.get("watch_id", "")
+        service.delete_watch(watch_id)
+        return "/watches", f"Deleted watch {watch_id}."
+    if path == "/watches/probe":
+        payload = service.probe_watch(form.get("watch_id", ""))
+        return "/watches", f"Probed watch {payload.get('watch_id', '')}."
     if path == "/layouts/clone":
         layout = service.clone_layout(
             form.get("source_layout_id", ""),
@@ -446,6 +499,8 @@ def _home_body(service: WebAdminService) -> str:
     plugin_diag = diagnostics["plugins"]
     health_diag = diagnostics["health"]
     active_incidents = diagnostics["active_incidents"]
+    notification_diag = diagnostics["notifications"]
+    watch_diag = diagnostics["watches"]
     return (
         "<div class='grid'>"
         f"<div class='card'><h3>Datasources</h3><p>{escape(str(datasource_diag['total_profiles']))} total / {escape(str(datasource_diag['enabled_profiles']))} enabled</p></div>"
@@ -455,8 +510,10 @@ def _home_body(service: WebAdminService) -> str:
         f"<div class='card'><h3>Panels</h3><p>{escape(', '.join(diagnostics['panel_types']))}</p></div>"
         f"<div class='card'><h3>Health</h3><p>healthy={escape(str(health_diag['healthy']))} recovering={escape(str(health_diag['recovering']))} failed={escape(str(health_diag['failed']))} quarantined={escape(str(health_diag['quarantined']))}</p></div>"
         f"<div class='card'><h3>Incidents</h3><p>{escape(str(len(active_incidents)))} active incident(s)</p></div>"
+        f"<div class='card'><h3>Notifications</h3><p>queued={escape(str(notification_diag.get('counts', {}).get('queued', 0)))} failed={escape(str(notification_diag.get('counts', {}).get('failed', 0)))} suppressed={escape(str(notification_diag.get('counts', {}).get('suppressed', 0)))}</p></div>"
+        f"<div class='card'><h3>Watches</h3><p>{escape(str(len(watch_diag.get('configs', []))))} configured / {escape(str(len(watch_diag.get('unhealthy', []))))} unhealthy</p></div>"
         "</div>"
-        "<p class='muted'>Use the admin pages to manage datasource profiles, managed secret references, plugin installs, layout variants, incidents, and runtime diagnostics.</p>"
+        "<p class='muted'>Use the admin pages to manage datasource profiles, managed secret references, plugin installs, notification policy, health watches, layout variants, incidents, and runtime diagnostics.</p>"
     )
 
 
@@ -745,6 +802,200 @@ def _plugin_body(service: WebAdminService) -> str:
     )
 
 
+def _notifications_body(service: WebAdminService, *, notification_id: str | None) -> str:
+    summary = service.notification_summary()
+    channels = service.list_notification_channels()
+    rules = service.list_notification_rules()
+    suppressions = service.list_suppression_rules()
+    notifications = service.list_notifications()
+    detail = service.notification_detail(notification_id) if notification_id else None
+
+    channel_rows = []
+    for channel in channels:
+        channel_rows.append(
+            "<tr>"
+            f"<td><strong>{escape(channel.name)}</strong><br><span class='muted'>{escape(channel.id)}</span></td>"
+            f"<td>{escape(channel.kind.value)}</td>"
+            f"<td>{escape(str(channel.enabled))}<br><span class='muted'>risk={escape(channel.risk_level.value)} max_attempts={escape(str(channel.max_attempts))}</span></td>"
+            f"<td><pre>{escape(json.dumps(channel.target, indent=2, sort_keys=True))}</pre></td>"
+            "<td>"
+            f"<form class='inline' method='post' action='/notifications/channel/delete'><input type='hidden' name='channel_id' value='{escape(channel.id)}'><button type='submit'>Delete</button></form>"
+            "</td>"
+            "</tr>"
+        )
+
+    rule_rows = []
+    for rule in rules:
+        rule_rows.append(
+            "<tr>"
+            f"<td><strong>{escape(rule.name)}</strong><br><span class='muted'>{escape(rule.id)}</span></td>"
+            f"<td>{escape(', '.join(item.value for item in rule.event_classes) or '(all)')}</td>"
+            f"<td>{escape(', '.join(rule.channel_ids) or '(none)')}</td>"
+            f"<td>priority={escape(str(rule.delivery_priority))}<br><span class='muted'>dedupe={escape(str(rule.dedupe_window_seconds))}s enabled={escape(str(rule.enabled))}</span></td>"
+            "<td>"
+            f"<form class='inline' method='post' action='/notifications/rule/delete'><input type='hidden' name='rule_id' value='{escape(rule.id)}'><button type='submit'>Delete</button></form>"
+            "</td>"
+            "</tr>"
+        )
+
+    suppression_rows = []
+    for rule in suppressions:
+        suppression_rows.append(
+            "<tr>"
+            f"<td><strong>{escape(rule.name)}</strong><br><span class='muted'>{escape(rule.id)}</span></td>"
+            f"<td>{escape(rule.reason)}</td>"
+            f"<td>{escape(str(rule.starts_at or '(immediate)'))}<br><span class='muted'>{escape(str(rule.ends_at or '(open-ended)'))}</span></td>"
+            f"<td>{escape(', '.join(item.value for item in rule.event_classes) or '(all)')}</td>"
+            "<td>"
+            f"<form class='inline' method='post' action='/notifications/suppression/delete'><input type='hidden' name='suppression_id' value='{escape(rule.id)}'><button type='submit'>Delete</button></form>"
+            "</td>"
+            "</tr>"
+        )
+
+    notification_rows = []
+    for item in notifications:
+        if not isinstance(item, dict):
+            continue
+        notification_rows.append(
+            "<tr>"
+            f"<td><strong>{escape(str(item.get('title', '')))}</strong><br><span class='muted'>{escape(str(item.get('id', '')))}</span></td>"
+            f"<td>{escape(str(item.get('event_class', '')))}</td>"
+            f"<td>{escape(str(item.get('severity', '')))}</td>"
+            f"<td>{escape(str(item.get('status', '')))}</td>"
+            f"<td>{escape(str(item.get('summary', '')))}</td>"
+            "<td>"
+            f"<form class='inline' method='get' action='/notifications'><input type='hidden' name='notification_id' value='{escape(str(item.get('id', '')))}'><button type='submit'>View</button></form>"
+            "</td>"
+            "</tr>"
+        )
+
+    detail_block = (
+        "<div class='card'><h3>Notification Detail</h3>"
+        f"<pre>{escape(json.dumps(detail or {}, indent=2, sort_keys=True))}</pre>"
+        "</div>"
+        if detail is not None
+        else "<div class='card'><h3>Notification Detail</h3><p class='muted'>Select a notification to inspect delivery attempts.</p></div>"
+    )
+
+    return (
+        "<div class='grid'>"
+        f"<div class='card'><h3>Summary</h3><pre>{escape(json.dumps(summary.get('counts', {}), indent=2, sort_keys=True))}</pre></div>"
+        f"<div class='card'><h3>Recent delivery failures</h3><pre>{escape(json.dumps(summary.get('recent_failures', []), indent=2, sort_keys=True))}</pre></div>"
+        "</div>"
+        "<div class='card'><h3>Create notification channel</h3>"
+        "<form method='post' action='/notifications/channel/save'>"
+        "<div class='grid'>"
+        "<div><label>Channel id</label><input name='channel_id' placeholder='optional'></div>"
+        "<div><label>Name</label><input name='name' required placeholder='Slack Ops'></div>"
+        "<div><label>Kind</label><select name='kind'><option value='internal'>internal</option><option value='webhook'>webhook</option><option value='slack'>slack</option><option value='ntfy'>ntfy</option></select></div>"
+        "<div><label>Risk</label><select name='risk_level'><option>dev</option><option>stage</option><option>prod</option></select></div>"
+        "<div><label>Timeout seconds</label><input name='timeout_seconds' value='5'></div>"
+        "<div><label>Max attempts</label><input name='max_attempts' value='3'></div>"
+        "<div><label>Base backoff seconds</label><input name='base_backoff_seconds' value='2'></div>"
+        "<div><label>Max backoff seconds</label><input name='max_backoff_seconds' value='30'></div>"
+        "</div>"
+        "<p><label>Target JSON</label><textarea name='target_json' rows='6' placeholder='{\"url\":\"https://hooks.slack.com/...\"}'></textarea></p>"
+        "<p><label>Secret refs JSON</label><textarea name='secret_refs_json' rows='4' placeholder='{\"token\":\"stored:slack-token\"}'></textarea></p>"
+        "<p><button type='submit'>Save channel</button></p></form></div>"
+        "<div class='card'><h3>Create routing rule</h3>"
+        "<form method='post' action='/notifications/rule/save'>"
+        "<div class='grid'>"
+        "<div><label>Rule id</label><input name='rule_id' placeholder='optional'></div>"
+        "<div><label>Name</label><input name='name' required placeholder='Prod incidents to Slack'></div>"
+        "<div><label>Event classes CSV</label><input name='event_classes' placeholder='incident_opened,component_quarantined'></div>"
+        "<div><label>Component kinds CSV</label><input name='component_kinds' placeholder='ssh_tunnel,plugin_host'></div>"
+        "<div><label>Severities CSV</label><input name='severities' placeholder='high,critical'></div>"
+        "<div><label>Risk levels CSV</label><input name='risk_levels' placeholder='stage,prod'></div>"
+        "<div><label>Incident statuses CSV</label><input name='incident_statuses' placeholder='open,quarantined'></div>"
+        "<div><label>Channel ids CSV</label><input name='channel_ids' placeholder='internal-default,nch_123'></div>"
+        "<div><label>Priority</label><input name='delivery_priority' value='100'></div>"
+        "<div><label>Dedupe window seconds</label><input name='dedupe_window_seconds' value='300'></div>"
+        "</div><p><button type='submit'>Save rule</button></p></form></div>"
+        "<div class='card'><h3>Create suppression rule</h3>"
+        "<form method='post' action='/notifications/suppression/save'>"
+        "<div class='grid'>"
+        "<div><label>Suppression id</label><input name='suppression_id' placeholder='optional'></div>"
+        "<div><label>Name</label><input name='name' required placeholder='Maintenance mute'></div>"
+        "<div><label>Reason</label><input name='reason' required placeholder='Planned maintenance window'></div>"
+        "<div><label>Starts at</label><input name='starts_at' placeholder='2026-03-24T20:00:00+00:00'></div>"
+        "<div><label>Ends at</label><input name='ends_at' placeholder='2026-03-24T22:00:00+00:00'></div>"
+        "<div><label>Event classes CSV</label><input name='event_classes' placeholder='component_degraded'></div>"
+        "<div><label>Component kinds CSV</label><input name='component_kinds' placeholder='datasource_watch'></div>"
+        "<div><label>Severities CSV</label><input name='severities' placeholder='warning,high'></div>"
+        "<div><label>Risk levels CSV</label><input name='risk_levels' placeholder='stage,prod'></div>"
+        "<div><label>Actor</label><input name='actor' placeholder='operator'></div>"
+        "</div><p><button type='submit'>Save suppression rule</button></p></form></div>"
+        "<div class='card'><h3>Notification channels</h3><table><thead><tr><th>Channel</th><th>Kind</th><th>Policy</th><th>Target</th><th>Actions</th></tr></thead>"
+        f"<tbody>{''.join(channel_rows) if channel_rows else '<tr><td colspan=\"5\">No notification channels configured.</td></tr>'}</tbody></table></div>"
+        "<div class='card'><h3>Routing rules</h3><table><thead><tr><th>Rule</th><th>Events</th><th>Channels</th><th>Policy</th><th>Actions</th></tr></thead>"
+        f"<tbody>{''.join(rule_rows) if rule_rows else '<tr><td colspan=\"5\">No notification rules configured.</td></tr>'}</tbody></table></div>"
+        "<div class='card'><h3>Suppression rules</h3><table><thead><tr><th>Rule</th><th>Reason</th><th>Window</th><th>Scope</th><th>Actions</th></tr></thead>"
+        f"<tbody>{''.join(suppression_rows) if suppression_rows else '<tr><td colspan=\"5\">No suppression rules configured.</td></tr>'}</tbody></table></div>"
+        "<div class='card'><h3>Recent notifications</h3><table><thead><tr><th>Notification</th><th>Event</th><th>Severity</th><th>Status</th><th>Summary</th><th>Actions</th></tr></thead>"
+        f"<tbody>{''.join(notification_rows) if notification_rows else '<tr><td colspan=\"6\">No notifications recorded.</td></tr>'}</tbody></table></div>"
+        + detail_block
+    )
+
+
+def _watches_body(service: WebAdminService) -> str:
+    profiles = service.list_datasources()
+    watch_configs = service.list_watch_configs()
+    watch_states = {
+        str(item.get("component_id", "")): item
+        for item in service.list_watch_states()
+        if isinstance(item, dict)
+    }
+    datasource_options = "".join(
+        f"<option value='{escape(profile.id)}'>{escape(profile.name)} [{escape(profile.backend)}]</option>"
+        for profile in profiles
+    )
+    rows = []
+    for watch in watch_configs:
+        state = watch_states.get(watch.component_id, {})
+        rows.append(
+            "<tr>"
+            f"<td><strong>{escape(watch.name)}</strong><br><span class='muted'>{escape(watch.id)}</span></td>"
+            f"<td>{escape(watch.subject_kind.value)}<br><span class='muted'>{escape(watch.subject_ref)}</span></td>"
+            f"<td>{escape(str(watch.enabled))}<br><span class='muted'>probe={escape(str(watch.probe_interval_seconds))}s stale={escape(str(watch.stale_timeout_seconds))}s</span></td>"
+            f"<td>{escape(str(state.get('last_status', 'unknown')))}<br><span class='muted'>{escape(str(state.get('last_probe_at', '(never)')))}</span></td>"
+            "<td>"
+            f"<form class='inline' method='post' action='/watches/probe'><input type='hidden' name='watch_id' value='{escape(watch.id)}'><button type='submit'>Probe</button></form> "
+            f"<form class='inline' method='post' action='/watches/delete'><input type='hidden' name='watch_id' value='{escape(watch.id)}'><button type='submit'>Delete</button></form>"
+            "</td>"
+            "</tr>"
+        )
+    return (
+        "<div class='card'><h3>Create datasource watch</h3>"
+        "<form method='post' action='/watches/datasource/save'>"
+        "<div class='grid'>"
+        "<div><label>Watch id</label><input name='watch_id' placeholder='optional'></div>"
+        "<div><label>Name</label><input name='name' placeholder='Primary DB Reachability'></div>"
+        f"<div><label>Datasource</label><select name='profile_id'>{datasource_options}</select></div>"
+        "<div><label>Probe interval seconds</label><input name='probe_interval_seconds' value='30'></div>"
+        "<div><label>Stale timeout seconds</label><input name='stale_timeout_seconds' value='90'></div>"
+        "</div>"
+        "<p><label>Recovery policy override JSON</label><textarea name='recovery_policy_override_json' rows='4'></textarea></p>"
+        "<p><label>Monitor config JSON</label><textarea name='monitor_config_json' rows='4'></textarea></p>"
+        "<p><button type='submit'>Save datasource watch</button></p></form></div>"
+        "<div class='card'><h3>Create docker watch</h3>"
+        "<form method='post' action='/watches/docker/save'>"
+        "<div class='grid'>"
+        "<div><label>Watch id</label><input name='watch_id' placeholder='optional'></div>"
+        "<div><label>Name</label><input name='name' placeholder='Web container health'></div>"
+        "<div><label>Container ref</label><input name='container_ref' placeholder='web'></div>"
+        "<div><label>Target kind</label><select name='target_kind'><option value='local'>local</option><option value='ssh'>ssh</option></select></div>"
+        "<div><label>Target ref</label><input name='target_ref' placeholder='deploy@example.com'></div>"
+        "<div><label>Probe interval seconds</label><input name='probe_interval_seconds' value='30'></div>"
+        "<div><label>Stale timeout seconds</label><input name='stale_timeout_seconds' value='90'></div>"
+        "</div>"
+        "<p><label>Recovery policy override JSON</label><textarea name='recovery_policy_override_json' rows='4'></textarea></p>"
+        "<p><label>Monitor config JSON</label><textarea name='monitor_config_json' rows='4'></textarea></p>"
+        "<p><button type='submit'>Save docker watch</button></p></form></div>"
+        "<div class='card'><h3>Configured watches</h3><table><thead><tr><th>Watch</th><th>Subject</th><th>Config</th><th>State</th><th>Actions</th></tr></thead>"
+        f"<tbody>{''.join(rows) if rows else '<tr><td colspan=\"5\">No watches configured.</td></tr>'}</tbody></table></div>"
+    )
+
+
 def _layout_body(service: WebAdminService) -> str:
     layouts = service.list_layouts()
     panels = service.available_panels()
@@ -833,6 +1084,8 @@ def _diagnostics_body(service: WebAdminService) -> str:
     active_incidents = diagnostics.get("active_incidents", [])
     quarantined = diagnostics.get("quarantined_components", [])
     recent_attempts = diagnostics.get("recent_recovery_attempts", [])
+    notifications = diagnostics.get("notifications", {})
+    watches = diagnostics.get("watches", {})
     return (
         "<div class='card'><h3>Environment</h3>"
         f"<p>Project root: <code>{escape(str(diagnostics['project_root']))}</code></p>"
@@ -865,6 +1118,18 @@ def _diagnostics_body(service: WebAdminService) -> str:
         "<div class='card'><h3>Plugins</h3>"
         f"<pre>{escape(str(diagnostics['plugins']))}</pre>"
         "</div>"
+        "<div class='card'><h3>Plugin Hosts</h3>"
+        f"<pre>{escape(json.dumps(diagnostics.get('plugin_hosts', []), indent=2, sort_keys=True))}</pre>"
+        "</div>"
+        "<div class='card'><h3>Notifications</h3>"
+        f"<pre>{escape(json.dumps(notifications, indent=2, sort_keys=True))}</pre>"
+        "</div>"
+        "<div class='card'><h3>Watch State</h3>"
+        f"<pre>{escape(json.dumps(watches, indent=2, sort_keys=True))}</pre>"
+        "</div>"
+        "<div class='card'><h3>Supervised Tasks</h3>"
+        f"<pre>{escape(json.dumps(diagnostics.get('tasks', []), indent=2, sort_keys=True))}</pre>"
+        "</div>"
         "<div class='card'><h3>Tunnels</h3>"
         f"{_tunnel_table(tunnels)}"
         "</div>"
@@ -876,6 +1141,9 @@ def _diagnostics_body(service: WebAdminService) -> str:
         "</div>"
         "<div class='card'><h3>Curl Diagnostics</h3>"
         f"<pre>{escape(json.dumps(operations.get('curl', []), indent=2, sort_keys=True))}</pre>"
+        "</div>"
+        "<div class='card'><h3>Notification Delivery Operations</h3>"
+        f"<pre>{escape(json.dumps(operations.get('notification', []), indent=2, sort_keys=True))}</pre>"
         "</div>"
         "<div class='card'><h3>Guard Decisions</h3>"
         f"<pre>{escape(json.dumps(operations.get('recent_guard_decisions', []), indent=2, sort_keys=True))}</pre>"

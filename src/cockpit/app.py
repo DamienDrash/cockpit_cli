@@ -7,11 +7,14 @@ from collections.abc import Sequence
 from pathlib import Path
 import shlex
 import sys
+from threading import Thread
+from time import sleep
 import webbrowser
 
 from cockpit.application.services.connection_service import ConnectionService
 from cockpit.infrastructure.config.config_loader import ConfigLoader
 from cockpit.infrastructure.web.admin_server import LocalWebAdminServer
+from cockpit.runtime.task_supervisor import SupervisedTaskContext
 
 
 def build_arg_parser() -> ArgumentParser:
@@ -149,6 +152,39 @@ def completion_script(shell: str) -> str:
     )
 
 
+def run_admin_server_task(
+    context: SupervisedTaskContext,
+    *,
+    server: LocalWebAdminServer,
+) -> None:
+    """Run the local web admin server under heartbeat supervision.
+
+    Notes
+    -----
+    `ThreadingHTTPServer.serve_forever` blocks without exposing a periodic
+    heartbeat surface. This wrapper runs the server in a dedicated daemon
+    thread, emits deterministic heartbeats, and raises when the serving thread
+    dies so the self-healing spine can react.
+    """
+
+    thread = Thread(
+        target=server.serve_forever,
+        name="cockpit-web-admin-http",
+        daemon=True,
+    )
+    thread.start()
+    try:
+        while not context.stop_event.is_set():
+            listen_url = server.listen_url()
+            context.heartbeat(listen_url or "starting")
+            if not thread.is_alive():
+                raise RuntimeError("web admin server thread exited unexpectedly")
+            sleep(0.5)
+    finally:
+        server.shutdown()
+        thread.join(timeout=2.0)
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     """Run the Cockpit application."""
     from cockpit.ui.screens.app_shell import CockpitApp
@@ -184,10 +220,29 @@ def main(argv: Sequence[str] | None = None) -> int:
             port=args.port,
         )
         try:
-            if getattr(args, "open_browser", False):
-                webbrowser.open(f"http://{args.host}:{args.port}", new=0, autoraise=True)
-            server.serve_forever()
+            container.task_supervisor.spawn_supervised(
+                "web-admin-server",
+                lambda context: run_admin_server_task(context, server=server),
+                heartbeat_timeout_seconds=3.0,
+                restartable=True,
+                metadata={
+                    "component_id": "web-admin:local",
+                    "component_kind": "web_admin",
+                    "display_name": "Web Admin Server",
+                },
+            )
+            opened_browser = False
+            while True:
+                listen_url = server.listen_url()
+                if listen_url and getattr(args, "open_browser", False) and not opened_browser:
+                    webbrowser.open(listen_url, new=0, autoraise=True)
+                    opened_browser = True
+                sleep(0.25)
+        except KeyboardInterrupt:
+            return 0
         finally:
+            container.task_supervisor.stop("web-admin-server", timeout=2.0)
+            server.shutdown()
             container.shutdown()
         return 0
     if getattr(args, "subcommand", None) == "completion":

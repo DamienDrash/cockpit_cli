@@ -57,6 +57,14 @@ tabs:
       children:
         - panel_id: logs-panel
           panel_type: logs
+  - id: ops
+    name: Ops
+    root_split:
+      orientation: vertical
+      ratio: 1.0
+      children:
+        - panel_id: ops-panel
+          panel_type: ops
 focus_path:
   - work
   - work-panel

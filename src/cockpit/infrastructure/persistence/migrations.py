@@ -12,6 +12,7 @@ from cockpit.infrastructure.persistence.schema import (
     V1_STATEMENTS,
     V2_STATEMENTS,
     V3_STATEMENTS,
+    V4_STATEMENTS,
 )
 
 
@@ -25,6 +26,7 @@ MIGRATIONS: tuple[Migration, ...] = (
     Migration(version=1, statements=V1_STATEMENTS),
     Migration(version=2, statements=V2_STATEMENTS),
     Migration(version=3, statements=V3_STATEMENTS),
+    Migration(version=4, statements=V4_STATEMENTS),
 )
 
 

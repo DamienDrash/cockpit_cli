@@ -53,6 +53,7 @@ class CockpitApp(App[None]):
         ("ctrl+5", "focus_cron_tab", "Focus Cron"),
         ("ctrl+6", "focus_db_tab", "Focus DB"),
         ("ctrl+7", "focus_curl_tab", "Focus Curl"),
+        ("ctrl+8", "focus_ops_tab", "Focus Ops"),
         ("ctrl+t", "focus_terminal", "Focus Terminal"),
         ("ctrl+]", "focus_next_panel", "Focus Next Panel"),
         ("ctrl+r", "restart_terminal", "Restart Terminal"),
@@ -252,6 +253,17 @@ class CockpitApp(App[None]):
                 source=CommandSource.KEYBINDING,
                 name="tab.focus",
                 args={"argv": ["curl"]},
+                context=self._command_context(),
+            )
+        )
+
+    def action_focus_ops_tab(self) -> None:
+        self._dispatch_command(
+            Command(
+                id=make_id("cmd"),
+                source=CommandSource.KEYBINDING,
+                name="tab.focus",
+                args={"argv": ["ops"]},
                 context=self._command_context(),
             )
         )
