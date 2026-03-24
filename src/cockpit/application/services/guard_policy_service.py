@@ -46,6 +46,12 @@ class GuardPolicyService:
             GuardActionKind.HTTP_DESTRUCTIVE,
         }:
             return self._evaluate_http(context)
+        if context.action_kind in {
+            GuardActionKind.SHELL_READ,
+            GuardActionKind.SHELL_MUTATION,
+            GuardActionKind.SHELL_DESTRUCTIVE,
+        }:
+            return self._evaluate_shell(context)
         return GuardDecision(
             command_id=context.command_id,
             action_kind=context.action_kind,
@@ -70,6 +76,40 @@ class GuardPolicyService:
                 context,
                 outcome=GuardDecisionOutcome.REQUIRE_CONFIRMATION,
                 explanation=f"{description} is mutating and requires explicit confirmation.",
+                confirmation_message=f"Confirm {description}.",
+            )
+        return self._decision(
+            replace(context, confirmed=True),
+            outcome=GuardDecisionOutcome.ALLOW,
+            explanation=f"{description} allowed after guard checks.",
+        )
+
+    def _evaluate_shell(self, context: GuardContext) -> GuardDecision:
+        description = context.description or "shell command"
+        if context.action_kind is GuardActionKind.SHELL_READ:
+            return self._decision(
+                context,
+                outcome=GuardDecisionOutcome.ALLOW,
+                explanation=f"{description} classified as read-only.",
+                audit_required=False,
+            )
+        if context.action_kind is GuardActionKind.SHELL_DESTRUCTIVE and context.target_risk is TargetRiskLevel.PROD:
+            return self._decision(
+                context,
+                outcome=GuardDecisionOutcome.BLOCK,
+                explanation=f"{description} is blocked on production-like targets.",
+            )
+        if context.target_risk in {TargetRiskLevel.STAGE, TargetRiskLevel.PROD} and not context.elevated_mode:
+            return self._decision(
+                context,
+                outcome=GuardDecisionOutcome.REQUIRE_ELEVATED_MODE,
+                explanation=f"{description} requires elevated mode on non-dev targets.",
+            )
+        if not context.confirmed:
+            return self._decision(
+                context,
+                outcome=GuardDecisionOutcome.REQUIRE_CONFIRMATION,
+                explanation=f"{description} mutates system state and requires confirmation.",
                 confirmation_message=f"Confirm {description}.",
             )
         return self._decision(

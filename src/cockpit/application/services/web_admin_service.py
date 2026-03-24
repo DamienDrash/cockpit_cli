@@ -12,6 +12,7 @@ import sys
 
 from cockpit.application.services.component_watch_service import ComponentWatchService
 from cockpit.application.services.datasource_service import DataSourceService
+from cockpit.application.services.approval_service import ApprovalService
 from cockpit.application.services.escalation_policy_service import (
     EscalationPolicyService,
 )
@@ -25,7 +26,10 @@ from cockpit.application.services.oncall_service import OnCallService
 from cockpit.application.services.operations_diagnostics_service import (
     OperationsDiagnosticsService,
 )
+from cockpit.application.services.postincident_service import PostIncidentService
 from cockpit.application.services.plugin_service import PluginService
+from cockpit.application.services.response_run_service import ResponseRunService
+from cockpit.application.services.runbook_catalog_service import RunbookCatalogService
 from cockpit.application.services.secret_service import SecretService
 from cockpit.application.services.self_healing_service import SelfHealingService
 from cockpit.application.services.suppression_service import SuppressionService
@@ -48,6 +52,8 @@ from cockpit.domain.models.oncall import (
     TeamMembership,
 )
 from cockpit.domain.models.policy import GuardContext
+from cockpit.domain.models.response import RunbookDefinition
+from cockpit.domain.models.review import ActionItem, ReviewFinding
 from cockpit.domain.models.secret import ManagedSecretEntry, VaultProfile, VaultSession, VaultLease
 from cockpit.domain.models.watch import ComponentWatchConfig
 from cockpit.infrastructure.db.database_adapter import DatabaseAdapter
@@ -56,11 +62,16 @@ from cockpit.infrastructure.ssh.tunnel_manager import SSHTunnelManager
 from cockpit.runtime.task_supervisor import TaskSupervisor
 from cockpit.shared.enums import (
     ComponentKind,
+    ActionItemStatus,
+    ApprovalDecisionKind,
     EscalationTargetKind,
     GuardActionKind,
     GuardDecisionOutcome,
+    ClosureQuality,
     OwnershipSubjectKind,
+    PostIncidentReviewStatus,
     RotationIntervalKind,
+    ReviewFindingCategory,
     ScheduleCoverageKind,
     IncidentSeverity,
     IncidentStatus,
@@ -98,6 +109,10 @@ class WebAdminService:
         oncall_service: OnCallService,
         escalation_policy_service: EscalationPolicyService,
         escalation_service: EscalationService,
+        runbook_catalog_service: RunbookCatalogService,
+        response_run_service: ResponseRunService,
+        approval_service: ApprovalService,
+        postincident_service: PostIncidentService,
         panel_registry: PanelRegistry,
         state_repository: WebAdminStateRepository,
         command_catalog: tuple[str, ...],
@@ -120,6 +135,10 @@ class WebAdminService:
         self._oncall_service = oncall_service
         self._escalation_policy_service = escalation_policy_service
         self._escalation_service = escalation_service
+        self._runbook_catalog_service = runbook_catalog_service
+        self._response_run_service = response_run_service
+        self._approval_service = approval_service
+        self._postincident_service = postincident_service
         self._panel_registry = panel_registry
         self._state_repository = state_repository
         self._command_catalog = command_catalog
@@ -201,6 +220,13 @@ class WebAdminService:
                     for policy in self._escalation_policy_service.list_policies()
                 ],
             },
+            "response": self._response_run_service.diagnostics(),
+            "runbooks": [
+                runbook.to_dict() for runbook in self._runbook_catalog_service.list_runbooks()
+            ],
+            "reviews": [
+                review.to_dict() for review in self._postincident_service.list_reviews(limit=25)
+            ],
             "watches": {
                 "configs": [config.to_dict() for config in watch_configs],
                 "states": [state.to_dict() for state in watch_states],
@@ -1115,6 +1141,184 @@ class WebAdminService:
 
     def repage_engagement(self, engagement_id: str, *, actor: str = "web-admin"):
         return self._escalation_service.repage_engagement(engagement_id, actor=actor)
+
+    def list_runbooks(self) -> list[RunbookDefinition]:
+        return self._runbook_catalog_service.list_runbooks()
+
+    def runbook_detail(self, runbook_id: str, *, version: str | None = None) -> RunbookDefinition:
+        return self._runbook_catalog_service.get_runbook(runbook_id, version=version)
+
+    def list_response_runs(self, *, active_only: bool = False) -> list[dict[str, object]]:
+        runs = (
+            self._response_run_service.list_active_runs()
+            if active_only
+            else self._response_run_service.list_recent_runs()
+        )
+        return [item.to_dict() for item in runs]
+
+    def response_run_detail(self, run_id: str):
+        return self._response_run_service.get_response_detail(run_id)
+
+    def start_response_run(
+        self,
+        *,
+        incident_id: str,
+        runbook_id: str,
+        actor: str = "web-admin",
+        runbook_version: str | None = None,
+        engagement_id: str | None = None,
+    ):
+        return self._response_run_service.start_run(
+            incident_id=incident_id,
+            runbook_id=runbook_id,
+            actor=actor,
+            runbook_version=runbook_version,
+            engagement_id=engagement_id,
+        )
+
+    def execute_response_run(
+        self,
+        run_id: str,
+        *,
+        actor: str = "web-admin",
+        confirmed: bool = False,
+        elevated_mode: bool = False,
+        notes: str | None = None,
+    ):
+        return self._response_run_service.execute_current_step(
+            run_id,
+            actor=actor,
+            confirmed=confirmed,
+            elevated_mode=elevated_mode,
+            notes=notes,
+        )
+
+    def retry_response_run(
+        self,
+        run_id: str,
+        *,
+        actor: str = "web-admin",
+        confirmed: bool = False,
+        elevated_mode: bool = False,
+        notes: str | None = None,
+    ):
+        return self._response_run_service.retry_current_step(
+            run_id,
+            actor=actor,
+            confirmed=confirmed,
+            elevated_mode=elevated_mode,
+            notes=notes,
+        )
+
+    def abort_response_run(self, run_id: str, *, actor: str = "web-admin", reason: str = "web-admin abort"):
+        return self._response_run_service.abort_run(run_id, actor=actor, reason=reason)
+
+    def compensate_response_run(
+        self,
+        run_id: str,
+        *,
+        actor: str = "web-admin",
+        confirmed: bool = False,
+        elevated_mode: bool = False,
+    ):
+        return self._response_run_service.compensate_latest_step(
+            run_id,
+            actor=actor,
+            confirmed=confirmed,
+            elevated_mode=elevated_mode,
+        )
+
+    def list_pending_approvals(self) -> list[dict[str, object]]:
+        return self._response_run_service.list_pending_approvals()
+
+    def decide_approval(
+        self,
+        request_id: str,
+        *,
+        approver_ref: str = "web-admin",
+        decision: str = "approve",
+        comment: str | None = None,
+    ):
+        return self._response_run_service.decide_approval(
+            request_id,
+            approver_ref=approver_ref,
+            decision=ApprovalDecisionKind(decision),
+            comment=comment,
+        )
+
+    def list_reviews(self):
+        return self._postincident_service.list_reviews()
+
+    def review_detail(self, review_id: str):
+        return self._postincident_service.get_review_detail(review_id)
+
+    def ensure_review(
+        self,
+        *,
+        incident_id: str,
+        response_run_id: str | None = None,
+        owner_ref: str | None = None,
+    ):
+        return self._postincident_service.ensure_review(
+            incident_id=incident_id,
+            response_run_id=response_run_id,
+            owner_ref=owner_ref,
+        )
+
+    def add_review_finding(
+        self,
+        review_id: str,
+        *,
+        category: str,
+        severity: str,
+        title: str,
+        detail: str,
+    ) -> ReviewFinding:
+        return self._postincident_service.add_finding(
+            review_id,
+            category=ReviewFindingCategory(category),
+            severity=IncidentSeverity(severity),
+            title=title,
+            detail=detail,
+        )
+
+    def add_review_action_item(
+        self,
+        review_id: str,
+        *,
+        owner_ref: str | None,
+        title: str,
+        detail: str,
+        due_at: datetime | None = None,
+    ) -> ActionItem:
+        return self._postincident_service.add_action_item(
+            review_id,
+            owner_ref=owner_ref,
+            title=title,
+            detail=detail,
+            due_at=due_at,
+        )
+
+    def set_review_action_item_status(self, action_item_id: str, *, status: str):
+        return self._postincident_service.set_action_item_status(
+            action_item_id,
+            status=ActionItemStatus(status),
+        )
+
+    def complete_review(
+        self,
+        review_id: str,
+        *,
+        summary: str,
+        root_cause: str,
+        closure_quality: str,
+    ):
+        return self._postincident_service.complete_review(
+            review_id,
+            summary=summary,
+            root_cause=root_cause,
+            closure_quality=ClosureQuality(closure_quality),
+        )
 
     @staticmethod
     def _guard_action_for_statement(statement: str) -> GuardActionKind:

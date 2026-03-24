@@ -8,10 +8,16 @@ import time
 import unittest
 
 from cockpit.shared.enums import (
+    ActionItemStatus,
+    ApprovalRequestStatus,
+    ClosureQuality,
     EngagementStatus,
     EscalationTargetKind,
     NotificationChannelKind,
     NotificationEventClass,
+    PostIncidentReviewStatus,
+    ResponseRunStatus,
+    ResponseStepStatus,
     RotationIntervalKind,
     ScheduleCoverageKind,
     SessionTargetKind,
@@ -81,6 +87,17 @@ class FakeWebAdminService:
         self.acknowledged_engagements: list[str] = []
         self.repaged_engagements: list[str] = []
         self.handed_off_engagements: list[dict[str, str]] = []
+        self.started_responses: list[dict[str, str | None]] = []
+        self.executed_responses: list[dict[str, object]] = []
+        self.retried_responses: list[dict[str, object]] = []
+        self.aborted_responses: list[dict[str, object]] = []
+        self.compensated_responses: list[dict[str, object]] = []
+        self.approval_decisions: list[dict[str, str | None]] = []
+        self.ensured_reviews: list[dict[str, str | None]] = []
+        self.added_findings: list[dict[str, str]] = []
+        self.added_action_items: list[dict[str, str | None]] = []
+        self.updated_action_items: list[dict[str, str]] = []
+        self.completed_reviews: list[dict[str, str]] = []
 
     def diagnostics(self) -> dict[str, object]:
         return {
@@ -88,7 +105,7 @@ class FakeWebAdminService:
             "python": "3.11",
             "platform": "Linux",
             "command_count": 4,
-            "panel_types": ["work", "db"],
+            "panel_types": ["work", "db", "response"],
             "datasources": {"total_profiles": 0, "enabled_profiles": 0, "backends": []},
             "secrets": {
                 "total_entries": 1,
@@ -233,6 +250,18 @@ class FakeWebAdminService:
                 },
                 "policies": [_EscalationPolicyObject().to_dict()],
             },
+            "response": {
+                "active_runs": [_ResponseRunObject().to_dict()],
+                "pending_approvals": [
+                    {
+                        "request": _ApprovalRequestObject().to_dict(),
+                        "decisions": [_ApprovalDecisionObject().to_dict()],
+                    }
+                ],
+                "open_reviews": [_ReviewObject().to_dict()],
+            },
+            "runbooks": [_RunbookObject().to_dict()],
+            "reviews": [_ReviewObject().to_dict()],
             "tasks": [
                 {
                     "name": "web-admin-server",
@@ -581,6 +610,7 @@ class FakeWebAdminService:
             ("work", "work-panel", "Work"),
             ("logs", "logs-panel", "Logs"),
             ("ops", "ops-panel", "Ops"),
+            ("response", "response-panel", "Response"),
         ]
 
     def close_tunnel(self, profile_id: str) -> None:
@@ -772,6 +802,223 @@ class FakeWebAdminService:
         del actor
         self.repaged_engagements.append(engagement_id)
         return _EngagementObject(id=engagement_id)
+
+    def list_runbooks(self):
+        return [_RunbookObject()]
+
+    def runbook_detail(self, runbook_id: str, *, version: str | None = None):
+        del version
+        return _RunbookObject(id=runbook_id or "docker-container-unhealthy")
+
+    def list_response_runs(self, *, active_only: bool = False):
+        del active_only
+        return [_ResponseRunObject().to_dict()]
+
+    def response_run_detail(self, run_id: str):
+        return _ResponseDetailObject(response_run=_ResponseRunObject(id=run_id or "rrn-1"))
+
+    def start_response_run(
+        self,
+        *,
+        incident_id: str,
+        runbook_id: str,
+        actor: str = "web-admin",
+        runbook_version: str | None = None,
+        engagement_id: str | None = None,
+    ):
+        self.started_responses.append(
+            {
+                "incident_id": incident_id,
+                "runbook_id": runbook_id,
+                "actor": actor,
+                "runbook_version": runbook_version,
+                "engagement_id": engagement_id,
+            }
+        )
+        return _ResponseRunObject(
+            id="rrn-started",
+            incident_id=incident_id,
+            runbook_id=runbook_id,
+            runbook_version=runbook_version or "1.0.0",
+        )
+
+    def execute_response_run(
+        self,
+        run_id: str,
+        *,
+        actor: str = "web-admin",
+        confirmed: bool = False,
+        elevated_mode: bool = False,
+        notes: str | None = None,
+    ):
+        self.executed_responses.append(
+            {
+                "run_id": run_id,
+                "actor": actor,
+                "confirmed": confirmed,
+                "elevated_mode": elevated_mode,
+                "notes": notes,
+            }
+        )
+        return _ResponseRunObject(id=run_id, summary="Executed current response step.")
+
+    def retry_response_run(
+        self,
+        run_id: str,
+        *,
+        actor: str = "web-admin",
+        confirmed: bool = False,
+        elevated_mode: bool = False,
+        notes: str | None = None,
+    ):
+        self.retried_responses.append(
+            {
+                "run_id": run_id,
+                "actor": actor,
+                "confirmed": confirmed,
+                "elevated_mode": elevated_mode,
+                "notes": notes,
+            }
+        )
+        return _ResponseRunObject(id=run_id, summary="Retrying current response step.")
+
+    def abort_response_run(self, run_id: str, *, actor: str = "web-admin", reason: str = "web-admin abort"):
+        self.aborted_responses.append({"run_id": run_id, "actor": actor, "reason": reason})
+        return _ResponseRunObject(id=run_id, status=ResponseRunStatus.ABORTED, summary="Response run aborted.")
+
+    def compensate_response_run(
+        self,
+        run_id: str,
+        *,
+        actor: str = "web-admin",
+        confirmed: bool = False,
+        elevated_mode: bool = False,
+    ):
+        self.compensated_responses.append(
+            {
+                "run_id": run_id,
+                "actor": actor,
+                "confirmed": confirmed,
+                "elevated_mode": elevated_mode,
+            }
+        )
+        return _ResponseRunObject(id=run_id, summary="Compensation completed.")
+
+    def list_pending_approvals(self):
+        return [
+            {
+                "request": _ApprovalRequestObject().to_dict(),
+                "decisions": [_ApprovalDecisionObject().to_dict()],
+            }
+        ]
+
+    def decide_approval(
+        self,
+        request_id: str,
+        *,
+        approver_ref: str = "web-admin",
+        decision: str = "approve",
+        comment: str | None = None,
+    ):
+        self.approval_decisions.append(
+            {
+                "request_id": request_id,
+                "approver_ref": approver_ref,
+                "decision": decision,
+                "comment": comment,
+            }
+        )
+        return _ResponseRunObject(id="rrn-1", status=ResponseRunStatus.READY, summary=f"Approval request {request_id} handled.")
+
+    def list_reviews(self):
+        return [_ReviewObject()]
+
+    def review_detail(self, review_id: str):
+        return _ReviewDetailObject(review=_ReviewObject(id=review_id or "rvw-1"))
+
+    def ensure_review(
+        self,
+        *,
+        incident_id: str,
+        response_run_id: str | None = None,
+        owner_ref: str | None = None,
+    ):
+        self.ensured_reviews.append(
+            {
+                "incident_id": incident_id,
+                "response_run_id": response_run_id,
+                "owner_ref": owner_ref,
+            }
+        )
+        return _ReviewObject(id="rvw-opened", incident_id=incident_id, response_run_id=response_run_id, owner_ref=owner_ref)
+
+    def add_review_finding(
+        self,
+        review_id: str,
+        *,
+        category: str,
+        severity: str,
+        title: str,
+        detail: str,
+    ):
+        self.added_findings.append(
+            {
+                "review_id": review_id,
+                "category": category,
+                "severity": severity,
+                "title": title,
+                "detail": detail,
+            }
+        )
+        return _ReviewFindingObject(id="rfn-added", review_id=review_id, title=title, detail=detail)
+
+    def add_review_action_item(
+        self,
+        review_id: str,
+        *,
+        owner_ref: str | None,
+        title: str,
+        detail: str,
+        due_at: datetime | None = None,
+    ):
+        self.added_action_items.append(
+            {
+                "review_id": review_id,
+                "owner_ref": owner_ref,
+                "title": title,
+                "detail": detail,
+                "due_at": due_at.isoformat() if due_at is not None else None,
+            }
+        )
+        return _ActionItemObject(id="act-added", review_id=review_id, owner_ref=owner_ref, title=title, detail=detail)
+
+    def set_review_action_item_status(self, action_item_id: str, *, status: str):
+        self.updated_action_items.append({"action_item_id": action_item_id, "status": status})
+        return _ActionItemObject(id=action_item_id, status=ActionItemStatus(status))
+
+    def complete_review(
+        self,
+        review_id: str,
+        *,
+        summary: str,
+        root_cause: str,
+        closure_quality: str,
+    ):
+        self.completed_reviews.append(
+            {
+                "review_id": review_id,
+                "summary": summary,
+                "root_cause": root_cause,
+                "closure_quality": closure_quality,
+            }
+        )
+        return _ReviewObject(
+            id=review_id,
+            status=PostIncidentReviewStatus.COMPLETED,
+            summary=summary,
+            root_cause=root_cause,
+            closure_quality=ClosureQuality(closure_quality),
+        )
 
 
 @dataclass
@@ -1214,6 +1461,245 @@ class _LayoutObject:
         }
 
 
+@dataclass
+class _RunbookObject:
+    id: str = "docker-container-unhealthy"
+    version: str = "1.0.0"
+    title: str = "Recover unhealthy Docker container"
+    description: str | None = "Restart, validate, and compensate if needed."
+
+    @property
+    def risk_class(self):
+        class _RiskClass:
+            value = "guarded"
+
+        return _RiskClass()
+
+    @property
+    def tags(self) -> tuple[str, ...]:
+        return ("docker", "recovery")
+
+    @property
+    def scope(self) -> dict[str, object]:
+        return {"component_kinds": ["docker_runtime"], "risk_levels": ["stage", "prod"]}
+
+    @property
+    def steps(self) -> tuple[object, ...]:
+        return (_ResponseStepRunObject(step_key="restart"), _ResponseStepRunObject(step_key="verify"))
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "id": self.id,
+            "version": self.version,
+            "title": self.title,
+            "description": self.description,
+            "risk_class": self.risk_class.value,
+            "scope": self.scope,
+            "tags": list(self.tags),
+            "steps": [
+                {"key": "restart", "title": "Restart container"},
+                {"key": "verify", "title": "Verify health"},
+            ],
+        }
+
+
+@dataclass
+class _ResponseRunObject:
+    id: str = "rrn-1"
+    incident_id: str = "inc-1"
+    runbook_id: str = "docker-container-unhealthy"
+    runbook_version: str = "1.0.0"
+    status: ResponseRunStatus = ResponseRunStatus.READY
+    current_step_index: int = 0
+    risk_level: TargetRiskLevel = TargetRiskLevel.PROD
+    summary: str | None = "Ready to execute."
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "id": self.id,
+            "incident_id": self.incident_id,
+            "runbook_id": self.runbook_id,
+            "runbook_version": self.runbook_version,
+            "status": self.status.value,
+            "current_step_index": self.current_step_index,
+            "risk_level": self.risk_level.value,
+            "summary": self.summary,
+        }
+
+
+@dataclass
+class _ResponseStepRunObject:
+    id: str = "rsp-1"
+    step_key: str = "restart"
+    status: ResponseStepStatus = ResponseStepStatus.READY
+    attempt_count: int = 0
+    output_summary: str | None = None
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "id": self.id,
+            "step_key": self.step_key,
+            "status": self.status.value,
+            "attempt_count": self.attempt_count,
+            "output_summary": self.output_summary,
+        }
+
+
+@dataclass
+class _ApprovalRequestObject:
+    id: str = "apr-1"
+    response_run_id: str = "rrn-1"
+    step_run_id: str = "rsp-1"
+    status: ApprovalRequestStatus = ApprovalRequestStatus.PENDING
+    required_approver_count: int = 2
+    required_roles: tuple[str, ...] = ("lead",)
+    reason: str = "Production restart requires approval."
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "id": self.id,
+            "response_run_id": self.response_run_id,
+            "step_run_id": self.step_run_id,
+            "status": self.status.value,
+            "required_approver_count": self.required_approver_count,
+            "required_roles": list(self.required_roles),
+            "reason": self.reason,
+        }
+
+
+@dataclass
+class _ApprovalDecisionObject:
+    id: str = "apd-1"
+    approval_request_id: str = "apr-1"
+    approver_ref: str = "opr-1"
+    decision: str = "approve"
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "id": self.id,
+            "approval_request_id": self.approval_request_id,
+            "approver_ref": self.approver_ref,
+            "decision": self.decision,
+        }
+
+
+@dataclass
+class _ResponseArtifactObject:
+    id: str = "art-1"
+    response_run_id: str = "rrn-1"
+    label: str = "docker-inspect"
+
+    def to_dict(self) -> dict[str, object]:
+        return {"id": self.id, "response_run_id": self.response_run_id, "label": self.label}
+
+
+@dataclass
+class _CompensationRunObject:
+    id: str = "cmp-1"
+    response_run_id: str = "rrn-1"
+    status: str = "completed"
+
+    def to_dict(self) -> dict[str, object]:
+        return {"id": self.id, "response_run_id": self.response_run_id, "status": self.status}
+
+
+@dataclass
+class _ReviewObject:
+    id: str = "rvw-1"
+    incident_id: str = "inc-1"
+    response_run_id: str | None = "rrn-1"
+    owner_ref: str | None = "opr-1"
+    status: PostIncidentReviewStatus = PostIncidentReviewStatus.OPEN
+    summary: str | None = None
+    root_cause: str | None = None
+    closure_quality: ClosureQuality = ClosureQuality.COMPLETE
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "id": self.id,
+            "incident_id": self.incident_id,
+            "response_run_id": self.response_run_id,
+            "owner_ref": self.owner_ref,
+            "status": self.status.value,
+            "summary": self.summary,
+            "root_cause": self.root_cause,
+            "closure_quality": self.closure_quality.value,
+        }
+
+
+@dataclass
+class _ReviewFindingObject:
+    id: str = "rfn-1"
+    review_id: str = "rvw-1"
+    title: str = "Improve response automation"
+    detail: str = "Manual restart could be automated."
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "id": self.id,
+            "review_id": self.review_id,
+            "title": self.title,
+            "detail": self.detail,
+        }
+
+
+@dataclass
+class _ActionItemObject:
+    id: str = "act-1"
+    review_id: str = "rvw-1"
+    owner_ref: str | None = "opr-2"
+    status: ActionItemStatus = ActionItemStatus.OPEN
+    title: str = "Add health probes"
+    detail: str = "Implement container health probe automation."
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "id": self.id,
+            "review_id": self.review_id,
+            "owner_ref": self.owner_ref,
+            "status": self.status.value,
+            "title": self.title,
+            "detail": self.detail,
+        }
+
+
+@dataclass
+class _ResponseDetailObject:
+    response_run: _ResponseRunObject = field(default_factory=_ResponseRunObject)
+    incident: _IncidentDetailIncident = field(default_factory=_IncidentDetailIncident)
+    runbook: _RunbookObject = field(default_factory=_RunbookObject)
+    step_runs: tuple[_ResponseStepRunObject, ...] = field(
+        default_factory=lambda: (
+            _ResponseStepRunObject(id="rsp-1", step_key="restart", status=ResponseStepStatus.SUCCEEDED, attempt_count=1, output_summary="Container restarted."),
+            _ResponseStepRunObject(id="rsp-2", step_key="verify", status=ResponseStepStatus.READY, attempt_count=0),
+        )
+    )
+    approvals: tuple[dict[str, object], ...] = field(
+        default_factory=lambda: (
+            {
+                "request": _ApprovalRequestObject().to_dict(),
+                "decisions": [_ApprovalDecisionObject().to_dict()],
+            },
+        )
+    )
+    artifacts: tuple[_ResponseArtifactObject, ...] = field(default_factory=lambda: (_ResponseArtifactObject(),))
+    compensations: tuple[_CompensationRunObject, ...] = field(default_factory=lambda: (_CompensationRunObject(),))
+    timeline: tuple[dict[str, object], ...] = field(
+        default_factory=lambda: (
+            {"event_type": "run_started", "message": "Response run started."},
+            {"event_type": "step_succeeded", "message": "Restart completed."},
+        )
+    )
+    review: _ReviewObject | None = field(default_factory=_ReviewObject)
+
+
+@dataclass
+class _ReviewDetailObject:
+    review: _ReviewObject = field(default_factory=_ReviewObject)
+    findings: tuple[_ReviewFindingObject, ...] = field(default_factory=lambda: (_ReviewFindingObject(),))
+    action_items: tuple[_ActionItemObject, ...] = field(default_factory=lambda: (_ActionItemObject(),))
+
+
 class LocalWebAdminServerTests(unittest.TestCase):
     def test_serves_pages_and_handles_post_actions(self) -> None:
         service = FakeWebAdminService()
@@ -1277,6 +1763,21 @@ class LocalWebAdminServerTests(unittest.TestCase):
                 engagements_body = response.read().decode("utf-8")
             self.assertIn("Engagement Center", engagements_body)
             self.assertIn("eng-1", engagements_body)
+
+            with urlopen(f"{base_url}/runbooks") as response:
+                runbooks_body = response.read().decode("utf-8")
+            self.assertIn("Runbook catalog", runbooks_body)
+            self.assertIn("docker-container-unhealthy", runbooks_body)
+
+            with urlopen(f"{base_url}/responses") as response:
+                responses_body = response.read().decode("utf-8")
+            self.assertIn("Response Center", responses_body)
+            self.assertIn("rrn-1", responses_body)
+
+            with urlopen(f"{base_url}/reviews") as response:
+                reviews_body = response.read().decode("utf-8")
+            self.assertIn("Review Center", reviews_body)
+            self.assertIn("rvw-1", reviews_body)
 
             with urlopen(f"{base_url}/secrets") as response:
                 secrets_body = response.read().decode("utf-8")
@@ -1504,12 +2005,149 @@ class LocalWebAdminServerTests(unittest.TestCase):
             self.assertIn("Handed off engagement eng-1.", handoff_body)
             self.assertEqual(service.handed_off_engagements[0]["target_ref"], "opr-2")
 
+            response_start_request = Request(
+                f"{base_url}/responses/start",
+                data=urlencode(
+                    {
+                        "incident_id": "inc-1",
+                        "runbook_id": "docker-container-unhealthy",
+                        "runbook_version": "1.0.0",
+                        "engagement_id": "eng-1",
+                    }
+                ).encode("utf-8"),
+                method="POST",
+            )
+            with urlopen(response_start_request) as response:
+                response_start_body = response.read().decode("utf-8")
+            self.assertIn("Started response run rrn-started.", response_start_body)
+            self.assertEqual(service.started_responses[0]["runbook_id"], "docker-container-unhealthy")
+
+            response_execute_request = Request(
+                f"{base_url}/responses/execute",
+                data=urlencode(
+                    {
+                        "response_run_id": "rrn-1",
+                        "confirmed": "1",
+                        "elevated_mode": "1",
+                        "notes": "operator confirmed",
+                    }
+                ).encode("utf-8"),
+                method="POST",
+            )
+            with urlopen(response_execute_request) as response:
+                response_execute_body = response.read().decode("utf-8")
+            self.assertIn("Executed current response step.", response_execute_body)
+            self.assertTrue(bool(service.executed_responses[0]["confirmed"]))
+
+            approval_request = Request(
+                f"{base_url}/approvals/decide",
+                data=urlencode(
+                    {
+                        "approval_request_id": "apr-1",
+                        "decision": "approve",
+                        "comment": "looks good",
+                    }
+                ).encode("utf-8"),
+                method="POST",
+            )
+            with urlopen(approval_request) as response:
+                approval_body = response.read().decode("utf-8")
+            self.assertIn("Approved approval request apr-1.", approval_body)
+            self.assertEqual(service.approval_decisions[0]["decision"], "approve")
+
+            ensure_review_request = Request(
+                f"{base_url}/reviews/ensure",
+                data=urlencode(
+                    {
+                        "incident_id": "inc-1",
+                        "response_run_id": "rrn-1",
+                        "owner_ref": "opr-1",
+                    }
+                ).encode("utf-8"),
+                method="POST",
+            )
+            with urlopen(ensure_review_request) as response:
+                ensure_review_body = response.read().decode("utf-8")
+            self.assertIn("Opened review rvw-opened.", ensure_review_body)
+            self.assertEqual(service.ensured_reviews[0]["owner_ref"], "opr-1")
+
+            add_finding_request = Request(
+                f"{base_url}/reviews/finding/add",
+                data=urlencode(
+                    {
+                        "review_id": "rvw-1",
+                        "category": "automation",
+                        "severity": "high",
+                        "title": "Automate restart verification",
+                        "detail": "Verification remained manual.",
+                    }
+                ).encode("utf-8"),
+                method="POST",
+            )
+            with urlopen(add_finding_request) as response:
+                finding_body = response.read().decode("utf-8")
+            self.assertIn("Added finding rfn-added.", finding_body)
+            self.assertEqual(service.added_findings[0]["category"], "automation")
+
+            add_action_item_request = Request(
+                f"{base_url}/reviews/action-item/add",
+                data=urlencode(
+                    {
+                        "review_id": "rvw-1",
+                        "owner_ref": "opr-2",
+                        "title": "Ship probe fix",
+                        "detail": "Add restart probe automation.",
+                        "due_at": "2026-03-25T12:00:00+00:00",
+                    }
+                ).encode("utf-8"),
+                method="POST",
+            )
+            with urlopen(add_action_item_request) as response:
+                action_item_body = response.read().decode("utf-8")
+            self.assertIn("Added action item act-added.", action_item_body)
+            self.assertEqual(service.added_action_items[0]["owner_ref"], "opr-2")
+
+            update_action_item_request = Request(
+                f"{base_url}/reviews/action-item/status",
+                data=urlencode(
+                    {
+                        "action_item_id": "act-1",
+                        "status": "closed",
+                    }
+                ).encode("utf-8"),
+                method="POST",
+            )
+            with urlopen(update_action_item_request) as response:
+                update_action_body = response.read().decode("utf-8")
+            self.assertIn("Updated action item act-1.", update_action_body)
+            self.assertEqual(service.updated_action_items[0]["status"], "closed")
+
+            complete_review_request = Request(
+                f"{base_url}/reviews/complete",
+                data=urlencode(
+                    {
+                        "review_id": "rvw-1",
+                        "summary": "Restored service and validated health.",
+                        "root_cause": "Missing restart automation.",
+                        "closure_quality": "complete",
+                    }
+                ).encode("utf-8"),
+                method="POST",
+            )
+            with urlopen(complete_review_request) as response:
+                complete_review_body = response.read().decode("utf-8")
+            self.assertIn("Completed review rvw-1.", complete_review_body)
+            self.assertEqual(service.completed_reviews[0]["closure_quality"], "complete")
+
             self.assertIn("/diagnostics", service.saved_pages)
             self.assertIn("/plugins", service.saved_pages)
             self.assertIn("/notifications", service.saved_pages)
             self.assertIn("/watches", service.saved_pages)
             self.assertIn("/oncall", service.saved_pages)
             self.assertIn("/engagements", service.saved_pages)
+            self.assertIn("/runbooks", service.saved_pages)
+            self.assertIn("/responses", service.saved_pages)
+            self.assertIn("/reviews", service.saved_pages)
             self.assertIn("/secrets", service.saved_pages)
             self.assertIn("/datasources", service.saved_pages)
             self.assertIn("/incidents", service.saved_pages)

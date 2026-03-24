@@ -62,6 +62,7 @@ class ComponentKind(StrEnum):
     WEB_ADMIN = "web_admin"
     DATASOURCE_WATCH = "datasource_watch"
     DOCKER_CONTAINER_WATCH = "docker_container_watch"
+    RESPONSE_RUN = "response_run"
 
 
 class HealthStatus(StrEnum):
@@ -107,6 +108,9 @@ class GuardActionKind(StrEnum):
     HTTP_READ = "http_read"
     HTTP_MUTATION = "http_mutation"
     HTTP_DESTRUCTIVE = "http_destructive"
+    SHELL_READ = "shell_read"
+    SHELL_MUTATION = "shell_mutation"
+    SHELL_DESTRUCTIVE = "shell_destructive"
 
 
 class GuardDecisionOutcome(StrEnum):
@@ -122,6 +126,8 @@ class OperationFamily(StrEnum):
     CURL = "curl"
     NOTIFICATION = "notification"
     ENGAGEMENT = "engagement"
+    RESPONSE = "response"
+    REVIEW = "review"
 
 
 class NotificationChannelKind(StrEnum):
@@ -143,6 +149,9 @@ class NotificationEventClass(StrEnum):
     ENGAGEMENT_ESCALATED = "engagement_escalated"
     ENGAGEMENT_HANDOFF = "engagement_handoff"
     ENGAGEMENT_EXHAUSTED = "engagement_exhausted"
+    APPROVAL_REQUESTED = "approval_requested"
+    RESPONSE_BLOCKED = "response_blocked"
+    RESPONSE_COMPLETED = "response_completed"
 
 
 class NotificationStatus(StrEnum):
@@ -222,3 +231,91 @@ class EngagementDeliveryPurpose(StrEnum):
     REMINDER = "reminder"
     REPAGE = "repage"
     HANDOFF = "handoff"
+
+
+class RunbookExecutorKind(StrEnum):
+    MANUAL = "manual"
+    SHELL = "shell"
+    HTTP = "http"
+    DOCKER = "docker"
+    DB = "db"
+
+
+class RunbookRiskClass(StrEnum):
+    LOW = "low"
+    GUARDED = "guarded"
+    HIGH = "high"
+
+
+class ResponseRunStatus(StrEnum):
+    CREATED = "created"
+    READY = "ready"
+    RUNNING = "running"
+    WAITING_APPROVAL = "waiting_approval"
+    WAITING_OPERATOR = "waiting_operator"
+    BLOCKED = "blocked"
+    FAILED = "failed"
+    COMPENSATING = "compensating"
+    COMPLETED = "completed"
+    ABORTED = "aborted"
+
+
+class ResponseStepStatus(StrEnum):
+    PENDING = "pending"
+    READY = "ready"
+    RUNNING = "running"
+    WAITING_APPROVAL = "waiting_approval"
+    WAITING_OPERATOR = "waiting_operator"
+    SUCCEEDED = "succeeded"
+    FAILED = "failed"
+    SKIPPED = "skipped"
+    ABORTED = "aborted"
+    COMPENSATED = "compensated"
+
+
+class ApprovalRequestStatus(StrEnum):
+    PENDING = "pending"
+    APPROVED = "approved"
+    REJECTED = "rejected"
+    EXPIRED = "expired"
+    CANCELLED = "cancelled"
+
+
+class ApprovalDecisionKind(StrEnum):
+    APPROVE = "approve"
+    REJECT = "reject"
+
+
+class CompensationStatus(StrEnum):
+    PENDING = "pending"
+    RUNNING = "running"
+    COMPLETED = "completed"
+    FAILED = "failed"
+    SKIPPED = "skipped"
+
+
+class PostIncidentReviewStatus(StrEnum):
+    OPEN = "open"
+    IN_PROGRESS = "in_progress"
+    COMPLETED = "completed"
+    CLOSED = "closed"
+
+
+class ActionItemStatus(StrEnum):
+    OPEN = "open"
+    IN_PROGRESS = "in_progress"
+    BLOCKED = "blocked"
+    CLOSED = "closed"
+
+
+class ReviewFindingCategory(StrEnum):
+    ROOT_CAUSE = "root_cause"
+    CONTRIBUTING_FACTOR = "contributing_factor"
+    OBSERVATION = "observation"
+    LESSON = "lesson"
+
+
+class ClosureQuality(StrEnum):
+    INCOMPLETE = "incomplete"
+    PARTIAL = "partial"
+    COMPLETE = "complete"

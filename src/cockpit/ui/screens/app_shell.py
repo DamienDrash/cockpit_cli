@@ -54,6 +54,7 @@ class CockpitApp(App[None]):
         ("ctrl+6", "focus_db_tab", "Focus DB"),
         ("ctrl+7", "focus_curl_tab", "Focus Curl"),
         ("ctrl+8", "focus_ops_tab", "Focus Ops"),
+        ("ctrl+9", "focus_response_tab", "Focus Response"),
         ("ctrl+t", "focus_terminal", "Focus Terminal"),
         ("ctrl+]", "focus_next_panel", "Focus Next Panel"),
         ("ctrl+r", "restart_terminal", "Restart Terminal"),
@@ -61,6 +62,12 @@ class CockpitApp(App[None]):
         ("ctrl+shift+c", "copy_terminal_selection", "Copy Terminal Selection"),
         ("ctrl+shift+a", "acknowledge_selected_engagement", "Acknowledge Engagement"),
         ("ctrl+shift+p", "repage_selected_engagement", "Re-page Engagement"),
+        ("ctrl+shift+e", "execute_selected_response", "Execute Response Step"),
+        ("ctrl+shift+u", "retry_selected_response", "Retry Response Step"),
+        ("ctrl+shift+x", "abort_selected_response", "Abort Response Run"),
+        ("ctrl+shift+z", "compensate_selected_response", "Compensate Response Run"),
+        ("ctrl+shift+y", "approve_selected_response", "Approve Response Step"),
+        ("ctrl+shift+n", "reject_selected_response", "Reject Response Step"),
         ("f8", "restart_selected_docker", "Restart Container"),
         ("f9", "stop_selected_docker", "Stop Container"),
         ("f10", "remove_selected_docker", "Remove Container"),
@@ -270,6 +277,17 @@ class CockpitApp(App[None]):
             )
         )
 
+    def action_focus_response_tab(self) -> None:
+        self._dispatch_command(
+            Command(
+                id=make_id("cmd"),
+                source=CommandSource.KEYBINDING,
+                name="tab.focus",
+                args={"argv": ["response"]},
+                context=self._command_context(),
+            )
+        )
+
     def action_restart_terminal(self) -> None:
         self._dispatch_command(
             Command(
@@ -380,6 +398,66 @@ class CockpitApp(App[None]):
             )
         )
 
+    def action_execute_selected_response(self) -> None:
+        self._dispatch_command(
+            Command(
+                id=make_id("cmd"),
+                source=CommandSource.KEYBINDING,
+                name="response.execute",
+                context=self._command_context(),
+            )
+        )
+
+    def action_retry_selected_response(self) -> None:
+        self._dispatch_command(
+            Command(
+                id=make_id("cmd"),
+                source=CommandSource.KEYBINDING,
+                name="response.retry",
+                context=self._command_context(),
+            )
+        )
+
+    def action_abort_selected_response(self) -> None:
+        self._dispatch_command(
+            Command(
+                id=make_id("cmd"),
+                source=CommandSource.KEYBINDING,
+                name="response.abort",
+                context=self._command_context(),
+            )
+        )
+
+    def action_compensate_selected_response(self) -> None:
+        self._dispatch_command(
+            Command(
+                id=make_id("cmd"),
+                source=CommandSource.KEYBINDING,
+                name="response.compensate",
+                context=self._command_context(),
+            )
+        )
+
+    def action_approve_selected_response(self) -> None:
+        self._dispatch_command(
+            Command(
+                id=make_id("cmd"),
+                source=CommandSource.KEYBINDING,
+                name="approval.approve",
+                context=self._command_context(),
+            )
+        )
+
+    def action_reject_selected_response(self) -> None:
+        self._dispatch_command(
+            Command(
+                id=make_id("cmd"),
+                source=CommandSource.KEYBINDING,
+                name="approval.reject",
+                context=self._command_context(),
+            )
+        )
+
     def action_toggle_palette(self) -> None:
         palette = self.query_one(CommandPalette)
         if palette.is_open:
@@ -426,6 +504,13 @@ class CockpitApp(App[None]):
             "engagement.ack",
             "engagement.repage",
             "engagement.handoff",
+            "response.start",
+            "response.execute",
+            "response.retry",
+            "response.abort",
+            "response.compensate",
+            "approval.approve",
+            "approval.reject",
         }:
             self._persist_current_snapshot()
 
@@ -715,6 +800,30 @@ class CockpitApp(App[None]):
                 "Re-page Selected Engagement",
                 "engagement repage",
             ),
+            "response.execute": (
+                "Execute Selected Response Step",
+                "response execute",
+            ),
+            "response.retry": (
+                "Retry Selected Response Step",
+                "response retry",
+            ),
+            "response.abort": (
+                "Abort Selected Response Run",
+                "response abort",
+            ),
+            "response.compensate": (
+                "Compensate Selected Response Run",
+                "response compensate",
+            ),
+            "approval.approve": (
+                "Approve Selected Response Step",
+                "approval approve",
+            ),
+            "approval.reject": (
+                "Reject Selected Response Step",
+                "approval reject",
+            ),
         }
         items: list[PaletteItem] = []
         for command_name in self.container.command_catalog:
@@ -745,6 +854,31 @@ class CockpitApp(App[None]):
                         description=command_name,
                     )
                 )
+                continue
+            if command_name == "response.start":
+                selected_incident_id = context.get("selected_incident_id")
+                if not isinstance(selected_incident_id, str) or not selected_incident_id:
+                    continue
+                incident_detail = self.container.incident_service.get_incident_detail(
+                    selected_incident_id
+                )
+                incident = getattr(incident_detail, "incident", None)
+                if incident is None:
+                    continue
+                for runbook in self.container.runbook_catalog_service.match_for_incident(
+                    incident,
+                    risk_level=self._risk_level_from_context(context),
+                )[:3]:
+                    items.append(
+                        PaletteItem(
+                            label=f"Start {runbook.title}",
+                            command_text=(
+                                f"response start {shlex.quote(selected_incident_id)} "
+                                f"{shlex.quote(runbook.id)}"
+                            ),
+                            description=f"{command_name}:{runbook.version}",
+                        )
+                    )
                 continue
             if command_name in {"docker.stop", "docker.remove"}:
                 selected_container_id = context.get("selected_container_id")
@@ -802,6 +936,49 @@ class CockpitApp(App[None]):
                         )
                     )
                     continue
+                continue
+            if command_name in {
+                "response.execute",
+                "response.retry",
+                "response.abort",
+                "response.compensate",
+            }:
+                selected_run_id = context.get("selected_response_run_id")
+                if not isinstance(selected_run_id, str) or not selected_run_id:
+                    continue
+                verb = {
+                    "response.execute": "Execute",
+                    "response.retry": "Retry",
+                    "response.abort": "Abort",
+                    "response.compensate": "Compensate",
+                }[command_name]
+                subcommand = {
+                    "response.execute": "execute",
+                    "response.retry": "retry",
+                    "response.abort": "abort",
+                    "response.compensate": "compensate",
+                }[command_name]
+                items.append(
+                    PaletteItem(
+                        label=f"{verb} Selected Response Run",
+                        command_text=f"response {subcommand} {shlex.quote(selected_run_id)}",
+                        description=command_name,
+                    )
+                )
+                continue
+            if command_name in {"approval.approve", "approval.reject"}:
+                selected_request_id = context.get("selected_approval_request_id")
+                if not isinstance(selected_request_id, str) or not selected_request_id:
+                    continue
+                verb = "Approve" if command_name == "approval.approve" else "Reject"
+                subcommand = "approve" if command_name == "approval.approve" else "reject"
+                items.append(
+                    PaletteItem(
+                        label=f"{verb} Selected Approval",
+                        command_text=f"approval {subcommand} {shlex.quote(selected_request_id)}",
+                        description=command_name,
+                    )
+                )
                 continue
             label_command = labels.get(command_name)
             if label_command is None:
@@ -874,6 +1051,18 @@ class CockpitApp(App[None]):
             target_ref=data.get("target_ref") if isinstance(data.get("target_ref"), str) else None,
             workspace_name=str(data.get("workspace_name", "Workspace")),
             workspace_root=str(data.get("workspace_root", "")),
+        )
+
+    def _risk_level_from_context(self, context: dict[str, object]):
+        return classify_target_risk(
+            target_kind=self._target_kind_from_data(context.get("target_kind")),
+            target_ref=(
+                context.get("target_ref")
+                if isinstance(context.get("target_ref"), str)
+                else None
+            ),
+            workspace_name=str(context.get("workspace_name", "Workspace")),
+            workspace_root=str(context.get("workspace_root", "")),
         )
 
     @staticmethod

@@ -65,6 +65,14 @@ tabs:
       children:
         - panel_id: ops-panel
           panel_type: ops
+  - id: response
+    name: Response
+    root_split:
+      orientation: vertical
+      ratio: 1.0
+      children:
+        - panel_id: response-panel
+          panel_type: response
 focus_path:
   - work
   - work-panel

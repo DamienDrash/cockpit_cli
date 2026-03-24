@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-DATABASE_VERSION = 5
+DATABASE_VERSION = 6
 
 CREATE_MIGRATIONS_TABLE = """
 CREATE TABLE IF NOT EXISTS schema_migrations (
@@ -714,5 +714,232 @@ V5_STATEMENTS: tuple[str, ...] = (
     """
     CREATE INDEX IF NOT EXISTS idx_engagement_delivery_links_engagement
     ON engagement_delivery_links(engagement_id, created_at DESC);
+    """,
+)
+
+V6_STATEMENTS: tuple[str, ...] = (
+    """
+    CREATE TABLE IF NOT EXISTS runbook_catalog (
+        catalog_key TEXT PRIMARY KEY,
+        runbook_id TEXT NOT NULL,
+        runbook_version TEXT NOT NULL,
+        title TEXT NOT NULL,
+        description TEXT,
+        risk_class TEXT NOT NULL,
+        source_path TEXT NOT NULL,
+        checksum TEXT NOT NULL,
+        tags_json TEXT NOT NULL,
+        scope_json TEXT NOT NULL,
+        payload_json TEXT NOT NULL,
+        loaded_at TEXT NOT NULL
+    );
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS response_runs (
+        id TEXT PRIMARY KEY,
+        incident_id TEXT NOT NULL,
+        engagement_id TEXT,
+        runbook_id TEXT NOT NULL,
+        runbook_version TEXT NOT NULL,
+        status TEXT NOT NULL,
+        current_step_index INTEGER NOT NULL,
+        risk_level TEXT NOT NULL,
+        elevated_mode INTEGER NOT NULL,
+        started_by TEXT,
+        started_at TEXT,
+        updated_at TEXT NOT NULL,
+        completed_at TEXT,
+        summary TEXT,
+        last_error TEXT,
+        payload_json TEXT NOT NULL,
+        FOREIGN KEY(incident_id) REFERENCES incidents(id),
+        FOREIGN KEY(engagement_id) REFERENCES incident_engagements(id)
+    );
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS response_step_runs (
+        id TEXT PRIMARY KEY,
+        response_run_id TEXT NOT NULL,
+        step_key TEXT NOT NULL,
+        step_index INTEGER NOT NULL,
+        executor_kind TEXT NOT NULL,
+        status TEXT NOT NULL,
+        attempt_count INTEGER NOT NULL,
+        guard_decision_id INTEGER,
+        approval_request_id TEXT,
+        started_at TEXT,
+        finished_at TEXT,
+        output_summary TEXT,
+        output_payload_json TEXT NOT NULL,
+        last_error TEXT,
+        FOREIGN KEY(response_run_id) REFERENCES response_runs(id)
+    );
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS approval_requests (
+        id TEXT PRIMARY KEY,
+        response_run_id TEXT NOT NULL,
+        step_run_id TEXT NOT NULL,
+        status TEXT NOT NULL,
+        requested_by TEXT,
+        required_approver_count INTEGER NOT NULL,
+        required_roles_json TEXT NOT NULL,
+        allow_self_approval INTEGER NOT NULL,
+        reason TEXT,
+        expires_at TEXT,
+        created_at TEXT NOT NULL,
+        resolved_at TEXT,
+        payload_json TEXT NOT NULL,
+        FOREIGN KEY(response_run_id) REFERENCES response_runs(id),
+        FOREIGN KEY(step_run_id) REFERENCES response_step_runs(id)
+    );
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS approval_decisions (
+        id TEXT PRIMARY KEY,
+        approval_request_id TEXT NOT NULL,
+        approver_ref TEXT NOT NULL,
+        decision TEXT NOT NULL,
+        comment TEXT,
+        created_at TEXT NOT NULL,
+        payload_json TEXT NOT NULL,
+        FOREIGN KEY(approval_request_id) REFERENCES approval_requests(id)
+    );
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS response_artifacts (
+        id TEXT PRIMARY KEY,
+        response_run_id TEXT NOT NULL,
+        step_run_id TEXT,
+        artifact_kind TEXT NOT NULL,
+        label TEXT NOT NULL,
+        storage_ref TEXT,
+        summary TEXT,
+        payload_json TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        FOREIGN KEY(response_run_id) REFERENCES response_runs(id),
+        FOREIGN KEY(step_run_id) REFERENCES response_step_runs(id)
+    );
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS compensation_runs (
+        id TEXT PRIMARY KEY,
+        response_run_id TEXT NOT NULL,
+        step_run_id TEXT NOT NULL,
+        status TEXT NOT NULL,
+        started_at TEXT,
+        finished_at TEXT,
+        summary TEXT,
+        last_error TEXT,
+        payload_json TEXT NOT NULL,
+        FOREIGN KEY(response_run_id) REFERENCES response_runs(id),
+        FOREIGN KEY(step_run_id) REFERENCES response_step_runs(id)
+    );
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS postincident_reviews (
+        id TEXT PRIMARY KEY,
+        incident_id TEXT NOT NULL,
+        response_run_id TEXT,
+        status TEXT NOT NULL,
+        owner_ref TEXT,
+        opened_at TEXT NOT NULL,
+        completed_at TEXT,
+        summary TEXT,
+        root_cause TEXT,
+        closure_quality TEXT NOT NULL,
+        payload_json TEXT NOT NULL,
+        FOREIGN KEY(incident_id) REFERENCES incidents(id),
+        FOREIGN KEY(response_run_id) REFERENCES response_runs(id)
+    );
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS review_findings (
+        id TEXT PRIMARY KEY,
+        review_id TEXT NOT NULL,
+        category TEXT NOT NULL,
+        severity TEXT NOT NULL,
+        title TEXT NOT NULL,
+        detail TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        payload_json TEXT NOT NULL,
+        FOREIGN KEY(review_id) REFERENCES postincident_reviews(id)
+    );
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS action_items (
+        id TEXT PRIMARY KEY,
+        review_id TEXT NOT NULL,
+        owner_ref TEXT,
+        status TEXT NOT NULL,
+        title TEXT NOT NULL,
+        detail TEXT NOT NULL,
+        due_at TEXT,
+        created_at TEXT NOT NULL,
+        closed_at TEXT,
+        payload_json TEXT NOT NULL,
+        FOREIGN KEY(review_id) REFERENCES postincident_reviews(id)
+    );
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS response_timeline (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        response_run_id TEXT NOT NULL,
+        incident_id TEXT NOT NULL,
+        event_type TEXT NOT NULL,
+        message TEXT NOT NULL,
+        recorded_at TEXT NOT NULL,
+        payload_json TEXT NOT NULL,
+        FOREIGN KEY(response_run_id) REFERENCES response_runs(id),
+        FOREIGN KEY(incident_id) REFERENCES incidents(id)
+    );
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_runbook_catalog_lookup
+    ON runbook_catalog(runbook_id, runbook_version, loaded_at DESC);
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_response_runs_incident
+    ON response_runs(incident_id, status, updated_at DESC);
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_response_step_runs_run
+    ON response_step_runs(response_run_id, step_index);
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_approval_requests_status
+    ON approval_requests(status, expires_at);
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_approval_requests_run
+    ON approval_requests(response_run_id, status, created_at DESC);
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_approval_decisions_request
+    ON approval_decisions(approval_request_id, created_at ASC);
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_response_artifacts_run
+    ON response_artifacts(response_run_id, created_at DESC);
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_compensation_runs_step
+    ON compensation_runs(step_run_id, started_at DESC);
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_postincident_reviews_incident
+    ON postincident_reviews(incident_id, status, opened_at DESC);
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_review_findings_review
+    ON review_findings(review_id, created_at ASC);
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_action_items_review
+    ON action_items(review_id, status, due_at);
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_response_timeline_run
+    ON response_timeline(response_run_id, recorded_at ASC);
     """,
 )

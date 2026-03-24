@@ -1,0 +1,47 @@
+id: sqlite-repair-sample
+version: "1.0.0"
+title: SQLite Repair Sample
+description: Example guarded database repair with explicit compensation.
+risk_class: high
+tags:
+  - database
+  - repair
+scope:
+  component_kinds:
+    - datasource
+steps:
+  - key: assess
+    title: Review the failing query pattern
+    executor_kind: manual
+    operation_kind: assess
+    step_config:
+      instructions: Confirm that the issue is understood before changing database state.
+  - key: apply_fix
+    title: Apply database repair statement
+    executor_kind: db
+    operation_kind: mutation
+    requires_confirmation: true
+    requires_elevated_mode: true
+    approval_required: true
+    required_approver_count: 2
+    approval_expires_after_seconds: 1800
+    step_config:
+      profile_id: local-sqlite
+      statement: "UPDATE sample_table SET repaired = 1 WHERE id = 1;"
+    compensation:
+      title: Roll back the database repair
+      executor_kind: db
+      operation_kind: mutation
+      requires_confirmation: true
+      requires_elevated_mode: true
+      approval_required: true
+      required_approver_count: 2
+      step_config:
+        profile_id: local-sqlite
+        statement: "UPDATE sample_table SET repaired = 0 WHERE id = 1;"
+  - key: validate
+    title: Validate recovery outcome
+    executor_kind: manual
+    operation_kind: validate
+    step_config:
+      instructions: Confirm that the symptom is gone and capture evidence in the response artifact list.

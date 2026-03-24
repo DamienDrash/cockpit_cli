@@ -26,3 +26,10 @@ commands:
   - engagement.ack
   - engagement.repage
   - engagement.handoff
+  - response.start
+  - response.execute
+  - response.retry
+  - response.abort
+  - response.compensate
+  - approval.approve
+  - approval.reject

@@ -29,6 +29,10 @@ def themes_dir(start: Path | None = None) -> Path:
     return config_dir(start) / "themes"
 
 
+def runbooks_dir(start: Path | None = None) -> Path:
+    return config_dir(start) / "runbooks"
+
+
 def state_dir(start: Path | None = None) -> Path:
     return discover_project_root(start) / ".cockpit"
 

@@ -9,6 +9,7 @@ from cockpit.application.dispatch.command_dispatcher import CommandDispatcher
 from cockpit.application.dispatch.command_parser import CommandParser
 from cockpit.application.dispatch.event_bus import EventBus
 from cockpit.application.services.datasource_service import DataSourceService
+from cockpit.application.services.approval_service import ApprovalService
 from cockpit.application.services.component_watch_service import ComponentWatchService
 from cockpit.application.services.escalation_policy_service import EscalationPolicyService
 from cockpit.application.services.escalation_service import EscalationService
@@ -26,6 +27,14 @@ from cockpit.application.handlers.escalation_handlers import (
     HandoffEngagementHandler,
     RepageEngagementHandler,
 )
+from cockpit.application.handlers.response_handlers import (
+    AbortResponseRunHandler,
+    CompensateResponseRunHandler,
+    DecideApprovalHandler,
+    ExecuteResponseStepHandler,
+    RetryResponseStepHandler,
+    StartResponseRunHandler,
+)
 from cockpit.application.services.incident_service import IncidentService
 from cockpit.application.services.notification_policy_service import NotificationPolicyService
 from cockpit.application.services.notification_service import NotificationService
@@ -40,7 +49,11 @@ from cockpit.application.services.operations_diagnostics_service import (
 )
 from cockpit.application.services.oncall_resolution_service import OnCallResolutionService
 from cockpit.application.services.oncall_service import OnCallService
+from cockpit.application.services.postincident_service import PostIncidentService
 from cockpit.application.services.recovery_policy_service import RecoveryPolicyService
+from cockpit.application.services.response_executor_service import ResponseExecutorService
+from cockpit.application.services.response_run_service import ResponseRunService
+from cockpit.application.services.runbook_catalog_service import RunbookCatalogService
 from cockpit.application.services.suppression_service import SuppressionService
 from cockpit.application.handlers.session_handlers import RestoreSessionHandler
 from cockpit.application.services.self_healing_service import SelfHealingService
@@ -101,6 +114,10 @@ from cockpit.infrastructure.persistence.repositories import (
 )
 from cockpit.infrastructure.persistence.ops_repositories import (
     ComponentHealthRepository,
+    ApprovalDecisionRepository,
+    ApprovalRequestRepository,
+    ActionItemRepository,
+    CompensationRunRepository,
     ComponentWatchRepository,
     EngagementDeliveryLinkRepository,
     EngagementTimelineRepository,
@@ -119,8 +136,15 @@ from cockpit.infrastructure.persistence.ops_repositories import (
     OperatorPersonRepository,
     OperatorTeamRepository,
     OwnershipBindingRepository,
+    PostIncidentReviewRepository,
     RecoveryAttemptRepository,
+    ResponseArtifactRepository,
+    ResponseRunRepository,
+    ResponseStepRunRepository,
+    ResponseTimelineRepository,
     RotationRuleRepository,
+    ReviewFindingRepository,
+    RunbookCatalogRepository,
     ScheduleOverrideRepository,
     TeamMembershipRepository,
 )
@@ -140,10 +164,11 @@ from cockpit.plugins.loader import PluginBootstrapContext, PluginLoader
 from cockpit.runtime.pty_manager import PTYManager
 from cockpit.runtime.health_monitor import RuntimeHealthMonitor
 from cockpit.runtime.escalation_monitor import EscalationMonitor
+from cockpit.runtime.response_monitor import ResponseMonitor
 from cockpit.runtime.stream_router import StreamRouter
 from cockpit.runtime.task_supervisor import TaskSupervisor
 from cockpit.shared.config import default_db_path, discover_project_root
-from cockpit.shared.enums import NotificationChannelKind
+from cockpit.shared.enums import ApprovalDecisionKind, NotificationChannelKind
 from cockpit.ui.panels.curl_panel import CurlPanel
 from cockpit.ui.panels.db_panel import DBPanel
 from cockpit.ui.panels.git_panel import GitPanel
@@ -151,6 +176,7 @@ from cockpit.ui.panels.docker_panel import DockerPanel
 from cockpit.ui.panels.cron_panel import CronPanel
 from cockpit.ui.panels.logs_panel import LogsPanel
 from cockpit.ui.panels.ops_panel import OpsPanel
+from cockpit.ui.panels.response_panel import ResponsePanel
 from cockpit.ui.panels.registry import PanelRegistry, PanelSpec
 from cockpit.ui.panels.work_panel import WorkPanel
 
@@ -184,8 +210,13 @@ class ApplicationContainer:
     oncall_resolution_service: OnCallResolutionService
     escalation_policy_service: EscalationPolicyService
     escalation_service: EscalationService
+    runbook_catalog_service: RunbookCatalogService
+    approval_service: ApprovalService
+    response_run_service: ResponseRunService
+    postincident_service: PostIncidentService
     health_monitor: RuntimeHealthMonitor
     escalation_monitor: EscalationMonitor
+    response_monitor: ResponseMonitor
     stream_router: StreamRouter
     pty_manager: PTYManager
     cron_adapter: CronAdapter
@@ -203,6 +234,7 @@ class ApplicationContainer:
     def shutdown(self) -> None:
         self.health_monitor.stop()
         self.escalation_monitor.stop()
+        self.response_monitor.stop()
         self.pty_manager.shutdown()
         self.plugin_service.shutdown()
         self.tunnel_manager.shutdown()
@@ -267,6 +299,17 @@ def build_container(
     incident_engagement_repository = IncidentEngagementRepository(store)
     engagement_timeline_repository = EngagementTimelineRepository(store)
     engagement_delivery_link_repository = EngagementDeliveryLinkRepository(store)
+    runbook_catalog_repository = RunbookCatalogRepository(store)
+    response_run_repository = ResponseRunRepository(store)
+    response_step_run_repository = ResponseStepRunRepository(store)
+    approval_request_repository = ApprovalRequestRepository(store)
+    approval_decision_repository = ApprovalDecisionRepository(store)
+    response_artifact_repository = ResponseArtifactRepository(store)
+    compensation_run_repository = CompensationRunRepository(store)
+    response_timeline_repository = ResponseTimelineRepository(store)
+    postincident_review_repository = PostIncidentReviewRepository(store)
+    review_finding_repository = ReviewFindingRepository(store)
+    action_item_repository = ActionItemRepository(store)
     stream_router = StreamRouter()
     task_supervisor = TaskSupervisor()
     ssh_command_runner = ssh_command_runner or SSHCommandRunner()
@@ -382,6 +425,10 @@ def build_container(
         rotation_repository=rotation_repository,
         override_repository=override_repository,
     )
+    runbook_catalog_service = RunbookCatalogService(
+        runbook_catalog_repository,
+        project_root=project_root,
+    )
     operations_diagnostics_service = OperationsDiagnosticsService(
         docker_adapter=docker_adapter,
         database_adapter=database_adapter,
@@ -407,6 +454,26 @@ def build_container(
             NotificationChannelKind.NTFY: NtfyNotificationAdapter(),
         },
     )
+    approval_service = ApprovalService(
+        event_bus=event_bus,
+        request_repository=approval_request_repository,
+        decision_repository=approval_decision_repository,
+        notification_service=notification_service,
+    )
+    response_executor_service = ResponseExecutorService(
+        guard_policy_service=guard_policy_service,
+        operations_diagnostics_service=operations_diagnostics_service,
+        http_adapter=http_adapter,
+        docker_adapter=docker_adapter,
+        database_adapter=database_adapter,
+        datasource_service=data_source_service,
+    )
+    postincident_service = PostIncidentService(
+        event_bus=event_bus,
+        review_repository=postincident_review_repository,
+        finding_repository=review_finding_repository,
+        action_item_repository=action_item_repository,
+    )
     escalation_service = EscalationService(
         event_bus=event_bus,
         incident_repository=incident_repository,
@@ -417,6 +484,21 @@ def build_container(
         escalation_policy_service=escalation_policy_service,
         notification_service=notification_service,
         operations_diagnostics_service=operations_diagnostics_service,
+    )
+    response_run_service = ResponseRunService(
+        event_bus=event_bus,
+        incident_repository=incident_repository,
+        component_health_repository=component_health_repository,
+        response_run_repository=response_run_repository,
+        step_run_repository=response_step_run_repository,
+        approval_request_repository=approval_request_repository,
+        artifact_repository=response_artifact_repository,
+        compensation_repository=compensation_run_repository,
+        timeline_repository=response_timeline_repository,
+        runbook_catalog_service=runbook_catalog_service,
+        response_executor_service=response_executor_service,
+        approval_service=approval_service,
+        postincident_service=postincident_service,
     )
     health_monitor = RuntimeHealthMonitor(
         event_bus=event_bus,
@@ -431,10 +513,15 @@ def build_container(
         escalation_service=escalation_service,
         task_supervisor=task_supervisor,
     )
+    response_monitor = ResponseMonitor(
+        response_run_service=response_run_service,
+        task_supervisor=task_supervisor,
+    )
     activity_log_service = ActivityLogService(
         history_repository=history_repository,
         audit_repository=audit_repository,
     )
+    runbook_catalog_service.reload()
     panel_registry = PanelRegistry()
     panel_registry.register(
         PanelSpec(
@@ -528,6 +615,18 @@ def build_container(
                 notification_service=container.notification_service,
                 component_watch_service=container.component_watch_service,
                 escalation_service=container.escalation_service,
+            ),
+        )
+    )
+    panel_registry.register(
+        PanelSpec(
+            panel_type=ResponsePanel.PANEL_TYPE,
+            panel_id=ResponsePanel.PANEL_ID,
+            display_name="Response",
+            factory=lambda container: ResponsePanel(
+                event_bus=container.event_bus,
+                response_run_service=container.response_run_service,
+                postincident_service=container.postincident_service,
             ),
         )
     )
@@ -677,6 +776,40 @@ def build_container(
         "engagement.handoff",
         HandoffEngagementHandler(escalation_service),
     )
+    command_dispatcher.register(
+        "response.start",
+        StartResponseRunHandler(response_run_service),
+    )
+    command_dispatcher.register(
+        "response.execute",
+        ExecuteResponseStepHandler(response_run_service),
+    )
+    command_dispatcher.register(
+        "response.retry",
+        RetryResponseStepHandler(response_run_service),
+    )
+    command_dispatcher.register(
+        "response.abort",
+        AbortResponseRunHandler(response_run_service),
+    )
+    command_dispatcher.register(
+        "response.compensate",
+        CompensateResponseRunHandler(response_run_service),
+    )
+    command_dispatcher.register(
+        "approval.approve",
+        DecideApprovalHandler(
+            response_run_service,
+            decision=ApprovalDecisionKind.APPROVE,
+        ),
+    )
+    command_dispatcher.register(
+        "approval.reject",
+        DecideApprovalHandler(
+            response_run_service,
+            decision=ApprovalDecisionKind.REJECT,
+        ),
+    )
 
     plugin_loader = PluginLoader(allowed_module_prefixes=("cockpit.plugins.",))
     plugin_payload = dict(plugin_config)
@@ -710,6 +843,10 @@ def build_container(
         oncall_service=oncall_service,
         escalation_policy_service=escalation_policy_service,
         escalation_service=escalation_service,
+        runbook_catalog_service=runbook_catalog_service,
+        response_run_service=response_run_service,
+        approval_service=approval_service,
+        postincident_service=postincident_service,
         panel_registry=panel_registry,
         state_repository=web_admin_state_repository,
         command_catalog=tuple(command_catalog_entries),
@@ -719,6 +856,7 @@ def build_container(
     )
     health_monitor.start()
     escalation_monitor.start()
+    response_monitor.start()
 
     return ApplicationContainer(
         project_root=project_root,
@@ -746,8 +884,13 @@ def build_container(
         oncall_resolution_service=oncall_resolution_service,
         escalation_policy_service=escalation_policy_service,
         escalation_service=escalation_service,
+        runbook_catalog_service=runbook_catalog_service,
+        approval_service=approval_service,
+        response_run_service=response_run_service,
+        postincident_service=postincident_service,
         health_monitor=health_monitor,
         escalation_monitor=escalation_monitor,
+        response_monitor=response_monitor,
         stream_router=stream_router,
         pty_manager=pty_manager,
         cron_adapter=cron_adapter,

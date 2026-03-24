@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 import json
 from html import escape
 from http import HTTPStatus
@@ -29,6 +30,9 @@ def _page(title: str, body: str, *, flash: str | None = None) -> str:
         "<a href='/watches'>Watches</a>"
         "<a href='/oncall'>On-Call</a>"
         "<a href='/engagements'>Engagements</a>"
+        "<a href='/runbooks'>Runbooks</a>"
+        "<a href='/responses'>Responses</a>"
+        "<a href='/reviews'>Reviews</a>"
         "<a href='/incidents'>Incidents</a>"
         "<a href='/diagnostics'>Diagnostics</a>"
         "</nav>"
@@ -129,6 +133,36 @@ class LocalWebAdminServer:
                         _page(
                             "Engagements",
                             _engagements_body(service, engagement_id=engagement_id),
+                            flash=flash,
+                        )
+                    )
+                    return
+                if parsed.path == "/runbooks":
+                    runbook_id = query.get("runbook_id", [None])[0]
+                    self._html(
+                        _page(
+                            "Runbooks",
+                            _runbooks_body(service, runbook_id=runbook_id),
+                            flash=flash,
+                        )
+                    )
+                    return
+                if parsed.path == "/responses":
+                    response_run_id = query.get("response_run_id", [None])[0]
+                    self._html(
+                        _page(
+                            "Responses",
+                            _responses_body(service, response_run_id=response_run_id),
+                            flash=flash,
+                        )
+                    )
+                    return
+                if parsed.path == "/reviews":
+                    review_id = query.get("review_id", [None])[0]
+                    self._html(
+                        _page(
+                            "Reviews",
+                            _reviews_body(service, review_id=review_id),
                             flash=flash,
                         )
                     )
@@ -240,6 +274,14 @@ def _redirect_target(path: str) -> str:
         return "/oncall"
     if path.startswith("/engagements"):
         return "/engagements"
+    if path.startswith("/runbooks"):
+        return "/runbooks"
+    if path.startswith("/responses"):
+        return "/responses"
+    if path.startswith("/approvals"):
+        return "/responses"
+    if path.startswith("/reviews"):
+        return "/reviews"
     if path.startswith("/incidents"):
         return "/incidents"
     if path.startswith("/diagnostics"):
@@ -512,6 +554,97 @@ def _handle_post(service: WebAdminService, path: str, form: dict[str, str]) -> t
             target_ref=form.get("target_ref", ""),
         )
         return "/engagements", f"Handed off engagement {engagement.id}."
+    if path == "/responses/start":
+        response_run = service.start_response_run(
+            incident_id=form.get("incident_id", ""),
+            runbook_id=form.get("runbook_id", ""),
+            actor=form.get("actor", "web-admin"),
+            runbook_version=form.get("runbook_version") or None,
+            engagement_id=form.get("engagement_id") or None,
+        )
+        return "/responses", f"Started response run {response_run.id}."
+    if path == "/responses/execute":
+        response_run = service.execute_response_run(
+            form.get("response_run_id", ""),
+            actor=form.get("actor", "web-admin"),
+            confirmed=form.get("confirmed", "0") == "1",
+            elevated_mode=form.get("elevated_mode", "0") == "1",
+            notes=form.get("notes") or None,
+        )
+        return "/responses", response_run.summary or f"Executed response run {response_run.id}."
+    if path == "/responses/retry":
+        response_run = service.retry_response_run(
+            form.get("response_run_id", ""),
+            actor=form.get("actor", "web-admin"),
+            confirmed=form.get("confirmed", "0") == "1",
+            elevated_mode=form.get("elevated_mode", "0") == "1",
+            notes=form.get("notes") or None,
+        )
+        return "/responses", response_run.summary or f"Retried response run {response_run.id}."
+    if path == "/responses/abort":
+        response_run = service.abort_response_run(
+            form.get("response_run_id", ""),
+            actor=form.get("actor", "web-admin"),
+            reason=form.get("reason", "web-admin abort"),
+        )
+        return "/responses", response_run.summary or f"Aborted response run {response_run.id}."
+    if path == "/responses/compensate":
+        response_run = service.compensate_response_run(
+            form.get("response_run_id", ""),
+            actor=form.get("actor", "web-admin"),
+            confirmed=form.get("confirmed", "0") == "1",
+            elevated_mode=form.get("elevated_mode", "0") == "1",
+        )
+        return "/responses", response_run.summary or f"Compensated response run {response_run.id}."
+    if path == "/approvals/decide":
+        request_id = form.get("approval_request_id", "")
+        decision = form.get("decision", "approve")
+        service.decide_approval(
+            request_id,
+            approver_ref=form.get("approver_ref", "web-admin"),
+            decision=decision,
+            comment=form.get("comment") or None,
+        )
+        return "/responses", f"{decision.title()}d approval request {request_id}."
+    if path == "/reviews/ensure":
+        review = service.ensure_review(
+            incident_id=form.get("incident_id", ""),
+            response_run_id=form.get("response_run_id") or None,
+            owner_ref=form.get("owner_ref") or None,
+        )
+        return "/reviews", f"Opened review {review.id}."
+    if path == "/reviews/finding/add":
+        finding = service.add_review_finding(
+            form.get("review_id", ""),
+            category=form.get("category", "process"),
+            severity=form.get("severity", "medium"),
+            title=form.get("title", ""),
+            detail=form.get("detail", ""),
+        )
+        return "/reviews", f"Added finding {finding.id}."
+    if path == "/reviews/action-item/add":
+        action_item = service.add_review_action_item(
+            form.get("review_id", ""),
+            owner_ref=form.get("owner_ref") or None,
+            title=form.get("title", ""),
+            detail=form.get("detail", ""),
+            due_at=_optional_datetime(form.get("due_at")),
+        )
+        return "/reviews", f"Added action item {action_item.id}."
+    if path == "/reviews/action-item/status":
+        action_item = service.set_review_action_item_status(
+            form.get("action_item_id", ""),
+            status=form.get("status", "open"),
+        )
+        return "/reviews", f"Updated action item {action_item.id}."
+    if path == "/reviews/complete":
+        review = service.complete_review(
+            form.get("review_id", ""),
+            summary=form.get("summary", ""),
+            root_cause=form.get("root_cause", ""),
+            closure_quality=form.get("closure_quality", "complete"),
+        )
+        return "/reviews", f"Completed review {review.id}."
     if path == "/diagnostics/close-tunnel":
         profile_id = form.get("profile_id", "")
         service.close_tunnel(profile_id)
@@ -598,6 +731,8 @@ def _home_body(service: WebAdminService) -> str:
     watch_diag = diagnostics["watches"]
     oncall_diag = diagnostics.get("oncall", {})
     engagement_diag = oncall_diag.get("engagements", {})
+    response_diag = diagnostics.get("response", {})
+    reviews_diag = diagnostics.get("reviews", [])
     return (
         "<div class='grid'>"
         f"<div class='card'><h3>Datasources</h3><p>{escape(str(datasource_diag['total_profiles']))} total / {escape(str(datasource_diag['enabled_profiles']))} enabled</p></div>"
@@ -611,8 +746,10 @@ def _home_body(service: WebAdminService) -> str:
         f"<div class='card'><h3>Watches</h3><p>{escape(str(len(watch_diag.get('configs', []))))} configured / {escape(str(len(watch_diag.get('unhealthy', []))))} unhealthy</p></div>"
         f"<div class='card'><h3>On-Call</h3><p>{escape(str(len(oncall_diag.get('people', []))))} people / {escape(str(len(oncall_diag.get('teams', []))))} teams / {escape(str(len(oncall_diag.get('schedules', []))))} schedules</p></div>"
         f"<div class='card'><h3>Engagements</h3><p>{escape(str(engagement_diag.get('counts', {}).get('active', len(engagement_diag.get('active', []))))) if isinstance(engagement_diag.get('counts', {}), dict) else escape(str(len(engagement_diag.get('active', []))))} active / {escape(str(len(engagement_diag.get('blocked', []))))} blocked</p></div>"
+        f"<div class='card'><h3>Response Runs</h3><p>{escape(str(len(response_diag.get('active_runs', []))))} active / {escape(str(len(response_diag.get('pending_approvals', []))))} approvals waiting</p></div>"
+        f"<div class='card'><h3>Reviews</h3><p>{escape(str(len(reviews_diag)))} review record(s)</p></div>"
         "</div>"
-        "<p class='muted'>Use the admin pages to manage datasource profiles, managed secret references, plugin installs, notification policy, health watches, layout variants, incidents, and runtime diagnostics.</p>"
+        "<p class='muted'>Use the admin pages to manage datasource profiles, managed secret references, plugin installs, notification policy, health watches, layouts, incidents, response runs, and structured post-incident reviews.</p>"
     )
 
 
@@ -1469,6 +1606,9 @@ def _diagnostics_body(service: WebAdminService) -> str:
     notifications = diagnostics.get("notifications", {})
     watches = diagnostics.get("watches", {})
     oncall = diagnostics.get("oncall", {})
+    response = diagnostics.get("response", {})
+    reviews = diagnostics.get("reviews", [])
+    runbooks = diagnostics.get("runbooks", [])
     return (
         "<div class='card'><h3>Environment</h3>"
         f"<p>Project root: <code>{escape(str(diagnostics['project_root']))}</code></p>"
@@ -1512,6 +1652,15 @@ def _diagnostics_body(service: WebAdminService) -> str:
         "</div>"
         "<div class='card'><h3>On-Call</h3>"
         f"<pre>{escape(json.dumps(oncall, indent=2, sort_keys=True))}</pre>"
+        "</div>"
+        "<div class='card'><h3>Runbooks</h3>"
+        f"<pre>{escape(json.dumps(runbooks, indent=2, sort_keys=True))}</pre>"
+        "</div>"
+        "<div class='card'><h3>Response Diagnostics</h3>"
+        f"<pre>{escape(json.dumps(response, indent=2, sort_keys=True))}</pre>"
+        "</div>"
+        "<div class='card'><h3>Post-Incident Reviews</h3>"
+        f"<pre>{escape(json.dumps(reviews, indent=2, sort_keys=True))}</pre>"
         "</div>"
         "<div class='card'><h3>Supervised Tasks</h3>"
         f"<pre>{escape(json.dumps(diagnostics.get('tasks', []), indent=2, sort_keys=True))}</pre>"
@@ -1637,6 +1786,373 @@ def _engagement_detail_block(detail: object) -> str:
     )
 
 
+def _runbooks_body(service: WebAdminService, *, runbook_id: str | None) -> str:
+    runbooks = service.list_runbooks()
+    incidents = service.list_incidents(
+        status="open",
+    )
+    detail = service.runbook_detail(runbook_id) if runbook_id else None
+    incident_options = "".join(
+        (
+            f"<option value='{escape(incident.id)}'>"
+            f"{escape(incident.id)} :: {escape(incident.summary)}"
+            "</option>"
+        )
+        for incident in incidents
+    )
+    rows = []
+    for runbook in runbooks:
+        rows.append(
+            "<tr>"
+            f"<td><strong>{escape(runbook.title)}</strong><br><span class='muted'>{escape(runbook.id)}:{escape(runbook.version)}</span></td>"
+            f"<td>{escape(runbook.risk_class.value)}</td>"
+            f"<td>{escape(str(len(runbook.steps)))}<br><span class='muted'>{escape(', '.join(runbook.tags) or '(none)')}</span></td>"
+            f"<td>{escape(json.dumps(runbook.scope, sort_keys=True))}</td>"
+            f"<td><form class='inline' method='get' action='/runbooks'><input type='hidden' name='runbook_id' value='{escape(runbook.id)}'><button type='submit'>View</button></form></td>"
+            "</tr>"
+        )
+    return (
+        "<div class='grid'>"
+        f"<div class='card'><h3>Catalog</h3><p>{escape(str(len(runbooks)))} runbook definition(s)</p></div>"
+        f"<div class='card'><h3>Active incidents</h3><p>{escape(str(len(incidents)))} incident(s) available for response start</p></div>"
+        "</div>"
+        "<div class='card'><h3>Start response run</h3>"
+        "<form method='post' action='/responses/start'>"
+        "<div class='grid'>"
+        f"<div><label>Incident</label><select name='incident_id'>{incident_options}</select></div>"
+        "<div><label>Runbook id</label><input name='runbook_id' placeholder='docker-container-unhealthy'></div>"
+        "<div><label>Runbook version</label><input name='runbook_version' placeholder='latest optional'></div>"
+        "<div><label>Engagement id</label><input name='engagement_id' placeholder='eng-1 optional'></div>"
+        "</div>"
+        "<p><button type='submit'>Start response</button></p>"
+        "</form></div>"
+        "<div class='card'><h3>Runbook catalog</h3>"
+        "<table><thead><tr><th>Runbook</th><th>Risk</th><th>Steps</th><th>Scope</th><th>Actions</th></tr></thead>"
+        f"<tbody>{''.join(rows) if rows else '<tr><td colspan=\"5\">No runbooks loaded.</td></tr>'}</tbody></table>"
+        "</div>"
+        + (
+            _runbook_detail_block(detail)
+            if detail is not None
+            else "<div class='card'><h3>Runbook Detail</h3><p class='muted'>Select a runbook to inspect its declarative steps and compensation contracts.</p></div>"
+        )
+    )
+
+
+def _runbook_detail_block(detail: object) -> str:
+    if detail is None:
+        return "<div class='card'><h3>Runbook Detail</h3><p class='muted'>Runbook not found.</p></div>"
+    payload = detail.to_dict() if hasattr(detail, "to_dict") else {}
+    return (
+        "<div class='card'><h3>Runbook Detail</h3>"
+        f"<p><strong>{escape(getattr(detail, 'title', 'Runbook'))}</strong><br><span class='muted'>{escape(getattr(detail, 'id', ''))}:{escape(getattr(detail, 'version', ''))}</span></p>"
+        f"<p>Risk class: <code>{escape(getattr(getattr(detail, 'risk_class', None), 'value', 'unknown'))}</code> steps=<code>{escape(str(len(getattr(detail, 'steps', ()))))}</code></p>"
+        "<pre>"
+        f"{escape(json.dumps(payload, indent=2, sort_keys=True))}"
+        "</pre>"
+        "</div>"
+    )
+
+
+def _responses_body(service: WebAdminService, *, response_run_id: str | None) -> str:
+    runs = service.list_response_runs()
+    active_runs = service.list_response_runs(active_only=True)
+    pending_approvals = service.list_pending_approvals()
+    detail = service.response_run_detail(response_run_id) if response_run_id else None
+    return (
+        "<div class='grid'>"
+        f"<div class='card'><h3>Active response runs</h3><p>{escape(str(len(active_runs)))} active run(s)</p></div>"
+        f"<div class='card'><h3>Pending approvals</h3><p>{escape(str(len(pending_approvals)))} approval request(s)</p></div>"
+        "</div>"
+        "<div class='card'><h3>Response Center</h3>"
+        "<p class='muted'>Structured incident response runs, approval gates, compensation, and generated artifacts.</p>"
+        f"{_response_table(runs, include_actions=True)}"
+        "</div>"
+        "<div class='card'><h3>Pending approvals</h3>"
+        f"{_approval_table(pending_approvals)}"
+        "</div>"
+        + (
+            _response_detail_block(detail)
+            if detail is not None
+            else "<div class='card'><h3>Response Detail</h3><p class='muted'>Select a response run to inspect steps, artifacts, timeline, and review linkage.</p></div>"
+        )
+    )
+
+
+def _response_table(runs: object, *, include_actions: bool) -> str:
+    if not isinstance(runs, list) or not runs:
+        return "<p class='muted'>No response runs recorded.</p>"
+    rows = []
+    for item in runs:
+        if not isinstance(item, dict):
+            continue
+        run_id = str(item.get("id", ""))
+        actions = (
+            f"<form class='inline' method='get' action='/responses'><input type='hidden' name='response_run_id' value='{escape(run_id)}'><button type='submit'>View</button></form> "
+            f"<form class='inline' method='post' action='/responses/execute'><input type='hidden' name='response_run_id' value='{escape(run_id)}'><button type='submit'>Execute</button></form> "
+            f"<form class='inline' method='post' action='/responses/retry'><input type='hidden' name='response_run_id' value='{escape(run_id)}'><button type='submit'>Retry</button></form> "
+            f"<form class='inline' method='post' action='/responses/abort'><input type='hidden' name='response_run_id' value='{escape(run_id)}'><button type='submit'>Abort</button></form>"
+            if include_actions
+            else escape(str(item.get("updated_at", "")))
+        )
+        rows.append(
+            "<tr>"
+            f"<td><strong>{escape(run_id)}</strong><br><span class='muted'>incident={escape(str(item.get('incident_id', '')))}</span></td>"
+            f"<td>{escape(str(item.get('runbook_id', '')))}<br><span class='muted'>{escape(str(item.get('runbook_version', '')))}</span></td>"
+            f"<td>{escape(str(item.get('status', '')))}</td>"
+            f"<td>{escape(str(item.get('current_step_index', '0')))}<br><span class='muted'>risk={escape(str(item.get('risk_level', '')))}</span></td>"
+            f"<td>{escape(str(item.get('summary') or '(none)'))}</td>"
+            f"<td>{actions}</td>"
+            "</tr>"
+        )
+    return (
+        "<table><thead><tr><th>Run</th><th>Runbook</th><th>Status</th><th>Step</th><th>Summary</th><th>Actions</th></tr></thead>"
+        f"<tbody>{''.join(rows)}</tbody></table>"
+    )
+
+
+def _approval_table(approvals: object) -> str:
+    if not isinstance(approvals, list) or not approvals:
+        return "<p class='muted'>No pending approvals.</p>"
+    rows = []
+    for item in approvals:
+        if not isinstance(item, dict):
+            continue
+        request = item.get("request", {})
+        decisions = item.get("decisions", [])
+        if not isinstance(request, dict):
+            continue
+        request_id = str(request.get("id", ""))
+        rows.append(
+            "<tr>"
+            f"<td><strong>{escape(request_id)}</strong><br><span class='muted'>run={escape(str(request.get('response_run_id', '')))}</span></td>"
+            f"<td>{escape(str(request.get('status', '')))}</td>"
+            f"<td>{escape(str(request.get('required_approver_count', 1)))}<br><span class='muted'>{escape(', '.join(request.get('required_roles', []) or [] ) or '(any)')}</span></td>"
+            f"<td>{escape(str(request.get('reason') or '(none)'))}</td>"
+            f"<td>{escape(str(len(decisions) if isinstance(decisions, list) else 0))}</td>"
+            "<td>"
+            f"<form class='inline' method='post' action='/approvals/decide'><input type='hidden' name='approval_request_id' value='{escape(request_id)}'><input type='hidden' name='decision' value='approve'><button type='submit'>Approve</button></form> "
+            f"<form class='inline' method='post' action='/approvals/decide'><input type='hidden' name='approval_request_id' value='{escape(request_id)}'><input type='hidden' name='decision' value='reject'><button type='submit'>Reject</button></form>"
+            "</td>"
+            "</tr>"
+        )
+    return (
+        "<table><thead><tr><th>Approval</th><th>Status</th><th>Threshold</th><th>Reason</th><th>Decisions</th><th>Actions</th></tr></thead>"
+        f"<tbody>{''.join(rows)}</tbody></table>"
+    )
+
+
+def _response_detail_block(detail: object) -> str:
+    response_run = getattr(detail, "response_run", None)
+    if response_run is None:
+        return "<div class='card'><h3>Response Detail</h3><p class='muted'>Response run not found.</p></div>"
+    incident = getattr(detail, "incident", None)
+    runbook = getattr(detail, "runbook", None)
+    step_runs = getattr(detail, "step_runs", ())
+    approvals = getattr(detail, "approvals", ())
+    artifacts = getattr(detail, "artifacts", ())
+    compensations = getattr(detail, "compensations", ())
+    timeline = getattr(detail, "timeline", ())
+    review = getattr(detail, "review", None)
+    review_id = escape(review.id) if review is not None else ""
+    review_block = (
+        f"<p><strong>{escape(review.id)}</strong> status=<code>{escape(review.status.value)}</code> closure=<code>{escape(review.closure_quality.value)}</code></p>"
+        if review is not None
+        else (
+            "<form method='post' action='/reviews/ensure'>"
+            f"<input type='hidden' name='incident_id' value='{escape(response_run.incident_id)}'>"
+            f"<input type='hidden' name='response_run_id' value='{escape(response_run.id)}'>"
+            "<input type='hidden' name='owner_ref' value='web-admin'>"
+            "<p><button type='submit'>Open review</button></p>"
+            "</form>"
+        )
+    )
+    parts = [
+        "<div class='card'><h3>Response Detail</h3>",
+        (
+            f"<p><strong>{escape(response_run.id)}</strong><br>"
+            f"<span class='muted'>incident={escape(response_run.incident_id)} "
+            f"runbook={escape(response_run.runbook_id)}:{escape(response_run.runbook_version)}</span></p>"
+        ),
+        (
+            f"<p>Status: <code>{escape(response_run.status.value)}</code> "
+            f"current step=<code>{escape(str(response_run.current_step_index))}</code> "
+            f"risk=<code>{escape(response_run.risk_level.value)}</code></p>"
+        ),
+        (
+            f"<p>Incident: <code>{escape(getattr(incident, 'id', ''))}</code> "
+            f"{escape(getattr(incident, 'summary', '(unknown)'))}</p>"
+        ),
+        f"<p>Runbook title: <code>{escape(getattr(runbook, 'title', '(unknown)'))}</code></p>",
+        "<div class='grid'>",
+        "<div class='card'><h3>Actions</h3>",
+        (
+            f"<form method='post' action='/responses/execute'>"
+            f"<input type='hidden' name='response_run_id' value='{escape(response_run.id)}'>"
+            "<p><label>Notes</label><textarea name='notes' rows='3'></textarea></p>"
+            "<p><label><input type='checkbox' name='confirmed' value='1'> Confirm</label></p>"
+            "<p><label><input type='checkbox' name='elevated_mode' value='1'> Elevated mode</label></p>"
+            "<p><button type='submit'>Execute current step</button></p></form>"
+        ),
+        (
+            f"<form method='post' action='/responses/retry'>"
+            f"<input type='hidden' name='response_run_id' value='{escape(response_run.id)}'>"
+            "<p><button type='submit'>Retry current step</button></p></form>"
+        ),
+        (
+            f"<form method='post' action='/responses/compensate'>"
+            f"<input type='hidden' name='response_run_id' value='{escape(response_run.id)}'>"
+            "<p><label><input type='checkbox' name='confirmed' value='1'> Confirm compensation</label></p>"
+            "<p><button type='submit'>Run compensation</button></p></form>"
+        ),
+        (
+            f"<form method='post' action='/responses/abort'>"
+            f"<input type='hidden' name='response_run_id' value='{escape(response_run.id)}'>"
+            "<p><label>Reason</label><input name='reason' value='web-admin abort'></p>"
+            "<p><button type='submit'>Abort response</button></p></form>"
+        ),
+        "</div>",
+        "<div class='card'><h3>Linked review</h3>",
+        review_block,
+        (
+            f"<p><a href='/reviews?review_id={review_id}'>Open review detail</a></p>"
+            if review is not None
+            else ""
+        ),
+        "</div>",
+        "</div>",
+        "<h3>Step Runs</h3>",
+        escape(json.dumps([item.to_dict() for item in step_runs], indent=2, sort_keys=True)),
+        "<h3>Approvals</h3>",
+        _approval_table(list(approvals)),
+        "<h3>Artifacts</h3>",
+        escape(json.dumps([item.to_dict() for item in artifacts], indent=2, sort_keys=True)),
+        "<h3>Compensations</h3>",
+        escape(json.dumps([item.to_dict() for item in compensations], indent=2, sort_keys=True)),
+        "<h3>Timeline</h3>",
+        escape(json.dumps(list(timeline), indent=2, sort_keys=True)),
+        "</div>",
+    ]
+    return "".join(
+        f"<pre>{part}</pre>" if part.startswith("{") else part
+        for part in parts
+    ).replace("<h3>Step Runs</h3>", "<h3>Step Runs</h3><pre>").replace(
+        "<h3>Approvals</h3>", "</pre><h3>Approvals</h3>"
+    ).replace(
+        "<h3>Artifacts</h3>", "<h3>Artifacts</h3><pre>"
+    ).replace(
+        "<h3>Compensations</h3>", "</pre><h3>Compensations</h3><pre>"
+    ).replace(
+        "<h3>Timeline</h3>", "</pre><h3>Timeline</h3><pre>"
+    ).replace("</div><pre>", "</pre></div>")
+
+
+def _reviews_body(service: WebAdminService, *, review_id: str | None) -> str:
+    reviews = service.list_reviews()
+    detail = service.review_detail(review_id) if review_id else None
+    return (
+        "<div class='card'><h3>Review Center</h3>"
+        "<p class='muted'>Structured post-incident reviews with findings, action items, and closure quality.</p>"
+        f"{_review_table(reviews)}"
+        "</div>"
+        + (
+            _review_detail_block(detail)
+            if detail is not None
+            else "<div class='card'><h3>Review Detail</h3><p class='muted'>Select a review to inspect findings and action items.</p></div>"
+        )
+    )
+
+
+def _review_table(reviews: object) -> str:
+    if not isinstance(reviews, list) or not reviews:
+        return "<p class='muted'>No post-incident reviews recorded.</p>"
+    rows = []
+    for review in reviews:
+        if not hasattr(review, "id"):
+            continue
+        rows.append(
+            "<tr>"
+            f"<td><strong>{escape(review.id)}</strong><br><span class='muted'>incident={escape(review.incident_id)}</span></td>"
+            f"<td>{escape(review.status.value)}</td>"
+            f"<td>{escape(str(review.owner_ref or '(unassigned)'))}</td>"
+            f"<td>{escape(review.summary or '(open)')}</td>"
+            f"<td><form class='inline' method='get' action='/reviews'><input type='hidden' name='review_id' value='{escape(review.id)}'><button type='submit'>View</button></form></td>"
+            "</tr>"
+        )
+    return (
+        "<table><thead><tr><th>Review</th><th>Status</th><th>Owner</th><th>Summary</th><th>Actions</th></tr></thead>"
+        f"<tbody>{''.join(rows)}</tbody></table>"
+    )
+
+
+def _review_detail_block(detail: object) -> str:
+    review = getattr(detail, "review", None)
+    if review is None:
+        return "<div class='card'><h3>Review Detail</h3><p class='muted'>Review not found.</p></div>"
+    findings = getattr(detail, "findings", ())
+    action_items = getattr(detail, "action_items", ())
+    return (
+        "<div class='card'><h3>Review Detail</h3>"
+        f"<p><strong>{escape(review.id)}</strong><br><span class='muted'>incident={escape(review.incident_id)} response={escape(str(review.response_run_id or '(none)'))}</span></p>"
+        f"<p>Status: <code>{escape(review.status.value)}</code> owner=<code>{escape(str(review.owner_ref or '(none)'))}</code> closure=<code>{escape(review.closure_quality.value)}</code></p>"
+        f"<p>Summary: {escape(review.summary or '(open)')}</p>"
+        "<div class='grid'>"
+        "<div class='card'><h3>Add finding</h3>"
+        "<form method='post' action='/reviews/finding/add'>"
+        f"<input type='hidden' name='review_id' value='{escape(review.id)}'>"
+        "<div class='grid'>"
+        "<div><label>Category</label><select name='category'><option value='process'>process</option><option value='tooling'>tooling</option><option value='automation'>automation</option><option value='communication'>communication</option></select></div>"
+        "<div><label>Severity</label><select name='severity'><option value='low'>low</option><option value='medium'>medium</option><option value='high'>high</option><option value='critical'>critical</option></select></div>"
+        "</div><p><label>Title</label><input name='title'></p><p><label>Detail</label><textarea name='detail' rows='4'></textarea></p><p><button type='submit'>Add finding</button></p></form>"
+        "</div>"
+        "<div class='card'><h3>Add action item</h3>"
+        "<form method='post' action='/reviews/action-item/add'>"
+        f"<input type='hidden' name='review_id' value='{escape(review.id)}'>"
+        "<p><label>Owner ref</label><input name='owner_ref' placeholder='opr-1'></p>"
+        "<p><label>Title</label><input name='title'></p>"
+        "<p><label>Detail</label><textarea name='detail' rows='4'></textarea></p>"
+        "<p><label>Due at (ISO)</label><input name='due_at' placeholder='2026-03-25T12:00:00+00:00'></p>"
+        "<p><button type='submit'>Add action item</button></p></form>"
+        "</div>"
+        "</div>"
+        "<h3>Findings</h3>"
+        f"<pre>{escape(json.dumps([item.to_dict() for item in findings], indent=2, sort_keys=True))}</pre>"
+        "<h3>Action Items</h3>"
+        f"{_action_item_table(action_items)}"
+        "<div class='card'><h3>Complete Review</h3>"
+        "<form method='post' action='/reviews/complete'>"
+        f"<input type='hidden' name='review_id' value='{escape(review.id)}'>"
+        "<p><label>Summary</label><textarea name='summary' rows='4'></textarea></p>"
+        "<p><label>Root cause</label><textarea name='root_cause' rows='4'></textarea></p>"
+        "<p><label>Closure quality</label><select name='closure_quality'><option value='incomplete'>incomplete</option><option value='partial'>partial</option><option value='complete'>complete</option></select></p>"
+        "<p><button type='submit'>Complete review</button></p></form>"
+        "</div>"
+        "</div>"
+    )
+
+
+def _action_item_table(action_items: object) -> str:
+    if not isinstance(action_items, tuple | list) or not action_items:
+        return "<p class='muted'>No action items recorded.</p>"
+    rows = []
+    for item in action_items:
+        rows.append(
+            "<tr>"
+            f"<td><strong>{escape(item.id)}</strong><br><span class='muted'>{escape(item.title)}</span></td>"
+            f"<td>{escape(item.status.value)}</td>"
+            f"<td>{escape(str(item.owner_ref or '(unassigned)'))}</td>"
+            f"<td>{escape(item.detail)}</td>"
+            "<td>"
+            f"<form class='inline' method='post' action='/reviews/action-item/status'><input type='hidden' name='action_item_id' value='{escape(item.id)}'><input type='hidden' name='status' value='in_progress'><button type='submit'>In progress</button></form> "
+            f"<form class='inline' method='post' action='/reviews/action-item/status'><input type='hidden' name='action_item_id' value='{escape(item.id)}'><input type='hidden' name='status' value='closed'><button type='submit'>Close</button></form>"
+            "</td>"
+            "</tr>"
+        )
+    return (
+        "<table><thead><tr><th>Item</th><th>Status</th><th>Owner</th><th>Detail</th><th>Actions</th></tr></thead>"
+        f"<tbody>{''.join(rows)}</tbody></table>"
+    )
+
+
 def _incident_body(service: WebAdminService, *, incident_id: str | None) -> str:
     incidents = service.list_incidents()
     detail = service.incident_detail(incident_id) if incident_id else None
@@ -1733,6 +2249,15 @@ def _layout_preview(node: object) -> str:
         f"<div class='layout-preview {direction_class}'>{rendered_children}</div>"
         "</div>"
     )
+
+
+def _optional_datetime(raw_value: object) -> datetime | None:
+    if raw_value is None:
+        return None
+    text = str(raw_value).strip()
+    if not text:
+        return None
+    return datetime.fromisoformat(text)
 
 
 def _tunnel_table(tunnels: object) -> str:

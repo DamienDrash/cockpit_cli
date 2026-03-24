@@ -1,0 +1,48 @@
+id: docker-container-unhealthy
+version: "1.0.0"
+title: Docker Container Recovery
+description: Investigate and restart an unhealthy container with guarded operator flow.
+risk_class: guarded
+tags:
+  - docker
+  - recovery
+scope:
+  component_kinds:
+    - docker_runtime
+steps:
+  - key: inspect
+    title: Inspect incident context
+    executor_kind: manual
+    operation_kind: inspect
+    step_config:
+      instructions: Review the container status, recent logs, and confirm the target container id.
+    artifacts:
+      - kind: note
+        label: Operator inspection note
+        required: false
+  - key: restart
+    title: Restart the affected container
+    executor_kind: docker
+    operation_kind: restart
+    requires_confirmation: true
+    approval_required: true
+    required_approver_count: 1
+    approval_expires_after_seconds: 1800
+    max_retries: 1
+    step_config:
+      operation: restart
+      container_id: "{incident.component_id}"
+    compensation:
+      title: Stop the restarted container if rollback is required
+      executor_kind: docker
+      operation_kind: stop
+      requires_confirmation: true
+      step_config:
+        operation: stop
+        container_id: "{incident.component_id}"
+  - key: verify
+    title: Verify container health
+    executor_kind: manual
+    operation_kind: verify
+    step_config:
+      instructions: Confirm that the container is healthy and logs no longer show the incident symptom.
