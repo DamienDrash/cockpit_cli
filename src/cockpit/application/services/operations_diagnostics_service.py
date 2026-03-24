@@ -263,6 +263,13 @@ class OperationsDiagnosticsService:
             "docker": self.docker_diagnostics(),
             "db": self.datasource_diagnostics(),
             "curl": self.curl_diagnostics(),
+            "engagement": [
+                record.to_dict()
+                for record in self._operation_diagnostics_repository.list_recent(
+                    family=OperationFamily.ENGAGEMENT,
+                    limit=25,
+                )
+            ],
             "notification": [
                 record.to_dict()
                 for record in self._operation_diagnostics_repository.list_recent(

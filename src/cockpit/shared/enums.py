@@ -121,6 +121,7 @@ class OperationFamily(StrEnum):
     DB = "db"
     CURL = "curl"
     NOTIFICATION = "notification"
+    ENGAGEMENT = "engagement"
 
 
 class NotificationChannelKind(StrEnum):
@@ -137,6 +138,11 @@ class NotificationEventClass(StrEnum):
     COMPONENT_RECOVERED = "component_recovered"
     COMPONENT_DEGRADED = "component_degraded"
     DELIVERY_FAILURE = "delivery_failure"
+    ENGAGEMENT_PAGED = "engagement_paged"
+    ENGAGEMENT_REMINDER = "engagement_reminder"
+    ENGAGEMENT_ESCALATED = "engagement_escalated"
+    ENGAGEMENT_HANDOFF = "engagement_handoff"
+    ENGAGEMENT_EXHAUSTED = "engagement_exhausted"
 
 
 class NotificationStatus(StrEnum):
@@ -164,3 +170,55 @@ class WatchProbeOutcome(StrEnum):
 class WatchSubjectKind(StrEnum):
     DATASOURCE = "datasource"
     DOCKER_CONTAINER = "docker_container"
+
+
+class TeamMembershipRole(StrEnum):
+    MEMBER = "member"
+    LEAD = "lead"
+
+
+class OwnershipSubjectKind(StrEnum):
+    COMPONENT = "component"
+    DATASOURCE = "datasource"
+    DOCKER_CONTAINER = "docker_container"
+    HTTP_TARGET = "http_target"
+    WATCH = "watch"
+
+
+class ScheduleCoverageKind(StrEnum):
+    ALWAYS = "always"
+    WEEKLY_WINDOW = "weekly_window"
+
+
+class RotationIntervalKind(StrEnum):
+    HOURS = "hours"
+    DAYS = "days"
+    WEEKS = "weeks"
+
+
+class ResolutionOutcome(StrEnum):
+    RESOLVED = "resolved"
+    UNASSIGNED = "unassigned"
+    BLOCKED = "blocked"
+
+
+class EscalationTargetKind(StrEnum):
+    PERSON = "person"
+    TEAM = "team"
+    CHANNEL = "channel"
+
+
+class EngagementStatus(StrEnum):
+    ACTIVE = "active"
+    ACKNOWLEDGED = "acknowledged"
+    BLOCKED = "blocked"
+    EXHAUSTED = "exhausted"
+    RESOLVED = "resolved"
+    CLOSED = "closed"
+
+
+class EngagementDeliveryPurpose(StrEnum):
+    PAGE = "page"
+    REMINDER = "reminder"
+    REPAGE = "repage"
+    HANDOFF = "handoff"

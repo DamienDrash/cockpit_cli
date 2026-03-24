@@ -8,10 +8,15 @@ import time
 import unittest
 
 from cockpit.shared.enums import (
+    EngagementStatus,
+    EscalationTargetKind,
     NotificationChannelKind,
     NotificationEventClass,
+    RotationIntervalKind,
+    ScheduleCoverageKind,
     SessionTargetKind,
     TargetRiskLevel,
+    TeamMembershipRole,
     WatchSubjectKind,
 )
 from cockpit.infrastructure.web.admin_server import LocalWebAdminServer
@@ -57,6 +62,25 @@ class FakeWebAdminService:
         self.saved_docker_watches: list[dict[str, object]] = []
         self.deleted_watches: list[str] = []
         self.probed_watches: list[str] = []
+        self.saved_people: list[dict[str, object]] = []
+        self.deleted_people: list[str] = []
+        self.saved_teams: list[dict[str, object]] = []
+        self.deleted_teams: list[str] = []
+        self.saved_memberships: list[dict[str, object]] = []
+        self.deleted_memberships: list[str] = []
+        self.saved_bindings: list[dict[str, object]] = []
+        self.deleted_bindings: list[str] = []
+        self.saved_schedules: list[dict[str, object]] = []
+        self.deleted_schedules: list[str] = []
+        self.saved_rotations: list[dict[str, object]] = []
+        self.deleted_rotations: list[str] = []
+        self.saved_overrides: list[dict[str, object]] = []
+        self.deleted_overrides: list[str] = []
+        self.saved_policies: list[dict[str, object]] = []
+        self.deleted_policies: list[str] = []
+        self.acknowledged_engagements: list[str] = []
+        self.repaged_engagements: list[str] = []
+        self.handed_off_engagements: list[dict[str, str]] = []
 
     def diagnostics(self) -> dict[str, object]:
         return {
@@ -195,6 +219,19 @@ class FakeWebAdminService:
                         "last_status": "unreachable",
                     }
                 ],
+            },
+            "oncall": {
+                "people": [_OperatorPersonObject().to_dict()],
+                "teams": [_OperatorTeamObject().to_dict()],
+                "bindings": [_OwnershipBindingObject().to_dict()],
+                "schedules": [_ScheduleObject().to_dict()],
+                "engagements": {
+                    "counts": {"active": 1, "blocked": 0},
+                    "active": [_EngagementObject().to_dict()],
+                    "blocked": [],
+                    "recent_exhausted": [],
+                },
+                "policies": [_EscalationPolicyObject().to_dict()],
             },
             "tasks": [
                 {
@@ -577,6 +614,165 @@ class FakeWebAdminService:
         self.retried_components.append(component_id)
         return True
 
+    def list_operator_people(self):
+        return [_OperatorPersonObject()]
+
+    def save_operator_person(self, payload: dict[str, object]):
+        self.saved_people.append(dict(payload))
+        return _OperatorPersonObject(
+            id=str(payload.get("person_id", "opr-1") or "opr-1"),
+            display_name=str(payload.get("display_name", "Alice Example")),
+            handle=str(payload.get("handle", "alice")),
+        )
+
+    def delete_operator_person(self, person_id: str) -> None:
+        self.deleted_people.append(person_id)
+
+    def list_operator_teams(self):
+        return [_OperatorTeamObject()]
+
+    def save_operator_team(self, payload: dict[str, object]):
+        self.saved_teams.append(dict(payload))
+        return _OperatorTeamObject(
+            id=str(payload.get("team_id", "team-1") or "team-1"),
+            name=str(payload.get("name", "Platform Ops")),
+            default_escalation_policy_id=payload.get("default_escalation_policy_id") or None,
+        )
+
+    def delete_operator_team(self, team_id: str) -> None:
+        self.deleted_teams.append(team_id)
+
+    def list_team_memberships(self):
+        return [_MembershipObject()]
+
+    def save_team_membership(self, payload: dict[str, object]):
+        self.saved_memberships.append(dict(payload))
+        return _MembershipObject(
+            id=str(payload.get("membership_id", "mem-1") or "mem-1"),
+            team_id=str(payload.get("team_id", "team-1")),
+            person_id=str(payload.get("person_id", "opr-1")),
+            role=TeamMembershipRole(str(payload.get("role", TeamMembershipRole.MEMBER.value))),
+        )
+
+    def delete_team_membership(self, membership_id: str) -> None:
+        self.deleted_memberships.append(membership_id)
+
+    def list_ownership_bindings(self):
+        return [_OwnershipBindingObject()]
+
+    def save_ownership_binding(self, payload: dict[str, object]):
+        self.saved_bindings.append(dict(payload))
+        return _OwnershipBindingObject(
+            id=str(payload.get("binding_id", "own-1") or "own-1"),
+            name=str(payload.get("name", "Prod docker ownership")),
+            team_id=str(payload.get("team_id", "team-1")),
+        )
+
+    def delete_ownership_binding(self, binding_id: str) -> None:
+        self.deleted_bindings.append(binding_id)
+
+    def list_oncall_schedules(self):
+        return [_ScheduleObject()]
+
+    def save_oncall_schedule(self, payload: dict[str, object]):
+        self.saved_schedules.append(dict(payload))
+        return _ScheduleObject(
+            id=str(payload.get("schedule_id", "sch-1") or "sch-1"),
+            team_id=str(payload.get("team_id", "team-1")),
+            name=str(payload.get("name", "Primary Hours")),
+            coverage_kind=ScheduleCoverageKind(
+                str(payload.get("coverage_kind", ScheduleCoverageKind.ALWAYS.value))
+            ),
+        )
+
+    def delete_oncall_schedule(self, schedule_id: str) -> None:
+        self.deleted_schedules.append(schedule_id)
+
+    def list_rotations(self, schedule_id: str):
+        del schedule_id
+        return [_RotationObject()]
+
+    def save_rotation(self, payload: dict[str, object]):
+        self.saved_rotations.append(dict(payload))
+        return _RotationObject(
+            id=str(payload.get("rotation_id", "rot-1") or "rot-1"),
+            schedule_id=str(payload.get("schedule_id", "sch-1")),
+            name=str(payload.get("name", "Primary Rotation")),
+        )
+
+    def delete_rotation(self, rotation_id: str) -> None:
+        self.deleted_rotations.append(rotation_id)
+
+    def list_overrides(self, schedule_id: str):
+        del schedule_id
+        return [_OverrideObject()]
+
+    def save_override(self, payload: dict[str, object]):
+        self.saved_overrides.append(dict(payload))
+        return _OverrideObject(
+            id=str(payload.get("override_id", "ovr-1") or "ovr-1"),
+            schedule_id=str(payload.get("schedule_id", "sch-1")),
+            replacement_person_id=str(payload.get("replacement_person_id", "opr-1")),
+        )
+
+    def delete_override(self, override_id: str) -> None:
+        self.deleted_overrides.append(override_id)
+
+    def list_escalation_policies(self):
+        return [_EscalationPolicyObject()]
+
+    def escalation_policy_detail(self, policy_id: str):
+        del policy_id
+        return _EscalationPolicyDetailObject()
+
+    def save_escalation_policy(self, payload: dict[str, object]):
+        self.saved_policies.append(dict(payload))
+        return _EscalationPolicyDetailObject(
+            policy=_EscalationPolicyObject(
+                id=str(payload.get("policy_id", "epc-1") or "epc-1"),
+                name=str(payload.get("name", "Default escalation")),
+            )
+        )
+
+    def delete_escalation_policy(self, policy_id: str) -> None:
+        self.deleted_policies.append(policy_id)
+
+    def list_engagements(self, *, active_only: bool = False):
+        del active_only
+        return [_EngagementObject().to_dict()]
+
+    def engagement_detail(self, engagement_id: str):
+        del engagement_id
+        return _EngagementDetailObject()
+
+    def acknowledge_engagement(self, engagement_id: str, *, actor: str = "web-admin"):
+        del actor
+        self.acknowledged_engagements.append(engagement_id)
+        return _EngagementObject(id=engagement_id, status=EngagementStatus.ACKNOWLEDGED)
+
+    def handoff_engagement(
+        self,
+        engagement_id: str,
+        *,
+        actor: str = "web-admin",
+        target_kind: str = "person",
+        target_ref: str,
+    ):
+        self.handed_off_engagements.append(
+            {
+                "engagement_id": engagement_id,
+                "actor": actor,
+                "target_kind": target_kind,
+                "target_ref": target_ref,
+            }
+        )
+        return _EngagementObject(id=engagement_id)
+
+    def repage_engagement(self, engagement_id: str, *, actor: str = "web-admin"):
+        del actor
+        self.repaged_engagements.append(engagement_id)
+        return _EngagementObject(id=engagement_id)
+
 
 @dataclass
 class _SecretObject:
@@ -680,6 +876,237 @@ class _WatchConfigObject:
 
 
 @dataclass
+class _OperatorContactTargetObject:
+    channel_id: str = "slack-alice"
+    label: str = "Slack"
+    enabled: bool = True
+    priority: int = 100
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "channel_id": self.channel_id,
+            "label": self.label,
+            "enabled": self.enabled,
+            "priority": self.priority,
+        }
+
+
+@dataclass
+class _OperatorPersonObject:
+    id: str = "opr-1"
+    display_name: str = "Alice Example"
+    handle: str = "alice"
+    enabled: bool = True
+    timezone: str = "Europe/Berlin"
+    contact_targets: list[_OperatorContactTargetObject] = field(
+        default_factory=lambda: [_OperatorContactTargetObject()]
+    )
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "id": self.id,
+            "display_name": self.display_name,
+            "handle": self.handle,
+            "enabled": self.enabled,
+            "timezone": self.timezone,
+            "contact_targets": [item.to_dict() for item in self.contact_targets],
+        }
+
+
+@dataclass
+class _OperatorTeamObject:
+    id: str = "team-1"
+    name: str = "Platform Ops"
+    enabled: bool = True
+    description: str | None = "Primary operators"
+    default_escalation_policy_id: str | None = "epc-1"
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "id": self.id,
+            "name": self.name,
+            "enabled": self.enabled,
+            "description": self.description,
+            "default_escalation_policy_id": self.default_escalation_policy_id,
+        }
+
+
+@dataclass
+class _MembershipObject:
+    id: str = "mem-1"
+    team_id: str = "team-1"
+    person_id: str = "opr-1"
+    role: TeamMembershipRole = TeamMembershipRole.MEMBER
+    enabled: bool = True
+
+
+@dataclass
+class _OwnershipBindingObject:
+    id: str = "own-1"
+    name: str = "Docker Web"
+    team_id: str = "team-1"
+    enabled: bool = True
+    component_kind: str = "docker_runtime"
+    component_id: str = "docker:web"
+    subject_kind: str | None = None
+    subject_ref: str | None = None
+    risk_level: str | None = "prod"
+    escalation_policy_id: str | None = "epc-1"
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "id": self.id,
+            "name": self.name,
+            "team_id": self.team_id,
+            "enabled": self.enabled,
+            "component_kind": self.component_kind,
+            "component_id": self.component_id,
+            "subject_kind": self.subject_kind,
+            "subject_ref": self.subject_ref,
+            "risk_level": self.risk_level,
+            "escalation_policy_id": self.escalation_policy_id,
+        }
+
+
+@dataclass
+class _ScheduleObject:
+    id: str = "sch-1"
+    team_id: str = "team-1"
+    name: str = "Primary Hours"
+    timezone: str = "Europe/Berlin"
+    enabled: bool = True
+    coverage_kind: ScheduleCoverageKind = ScheduleCoverageKind.ALWAYS
+    schedule_config: dict[str, object] = field(default_factory=dict)
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "id": self.id,
+            "team_id": self.team_id,
+            "name": self.name,
+            "timezone": self.timezone,
+            "enabled": self.enabled,
+            "coverage_kind": self.coverage_kind.value,
+            "schedule_config": self.schedule_config,
+        }
+
+
+@dataclass
+class _RotationObject:
+    id: str = "rot-1"
+    schedule_id: str = "sch-1"
+    name: str = "Primary Rotation"
+    participant_ids: tuple[str, ...] = ("opr-1",)
+    enabled: bool = True
+    anchor_at: str = "2026-03-24T09:00:00+01:00"
+    interval_kind: RotationIntervalKind = RotationIntervalKind.DAYS
+    interval_count: int = 7
+    handoff_time: str | None = "09:00"
+
+
+@dataclass
+class _OverrideObject:
+    id: str = "ovr-1"
+    schedule_id: str = "sch-1"
+    replacement_person_id: str = "opr-1"
+    replaced_person_id: str | None = None
+    starts_at: str = "2026-03-24T18:00:00+01:00"
+    ends_at: str = "2026-03-25T08:00:00+01:00"
+    reason: str = "Vacation cover"
+    priority: int = 100
+    actor: str | None = "operator"
+
+
+@dataclass
+class _EscalationPolicyObject:
+    id: str = "epc-1"
+    name: str = "Default escalation"
+    enabled: bool = True
+    default_ack_timeout_seconds: int = 900
+    default_repeat_page_seconds: int = 300
+    max_repeat_pages: int = 2
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "id": self.id,
+            "name": self.name,
+            "enabled": self.enabled,
+            "default_ack_timeout_seconds": self.default_ack_timeout_seconds,
+            "default_repeat_page_seconds": self.default_repeat_page_seconds,
+            "max_repeat_pages": self.max_repeat_pages,
+        }
+
+
+@dataclass
+class _EscalationStepObject:
+    id: str = "est-1"
+    step_index: int = 0
+    target_kind: EscalationTargetKind = EscalationTargetKind.TEAM
+    target_ref: str = "team-1"
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "id": self.id,
+            "step_index": self.step_index,
+            "target_kind": self.target_kind.value,
+            "target_ref": self.target_ref,
+        }
+
+
+@dataclass
+class _EscalationPolicyDetailObject:
+    policy: _EscalationPolicyObject = field(default_factory=_EscalationPolicyObject)
+    steps: list[_EscalationStepObject] = field(default_factory=lambda: [_EscalationStepObject()])
+
+
+@dataclass
+class _EngagementObject:
+    id: str = "eng-1"
+    incident_id: str = "inc-1"
+    incident_component_id: str = "ssh-tunnel:pg-main"
+    team_id: str | None = "team-1"
+    policy_id: str | None = "epc-1"
+    status: EngagementStatus = EngagementStatus.ACTIVE
+    current_step_index: int = 0
+    current_target_kind: EscalationTargetKind = EscalationTargetKind.TEAM
+    current_target_ref: str = "team-1"
+    ack_deadline_at: str = "2026-03-24T10:15:00+00:00"
+    next_action_at: str = "2026-03-24T10:05:00+00:00"
+    updated_at: str = "2026-03-24T10:00:00+00:00"
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "id": self.id,
+            "incident_id": self.incident_id,
+            "incident_component_id": self.incident_component_id,
+            "team_id": self.team_id,
+            "policy_id": self.policy_id,
+            "status": self.status.value,
+            "current_step_index": self.current_step_index,
+            "current_target_kind": self.current_target_kind.value,
+            "current_target_ref": self.current_target_ref,
+            "ack_deadline_at": self.ack_deadline_at,
+            "next_action_at": self.next_action_at,
+            "updated_at": self.updated_at,
+        }
+
+
+@dataclass
+class _EngagementTimelineObject:
+    event_type: str = "paged"
+
+    def to_dict(self) -> dict[str, object]:
+        return {"event_type": self.event_type}
+
+
+@dataclass
+class _EngagementDeliveryLinkObject:
+    notification_id: str = "ntf-1"
+
+    def to_dict(self) -> dict[str, object]:
+        return {"notification_id": self.notification_id}
+
+
+@dataclass
 class _IncidentObject:
     id: str = "inc-1"
     component_id: str = "ssh-tunnel:pg-main"
@@ -748,6 +1175,18 @@ class _IncidentDetailObject:
             self.recovery_attempts = [_RecoveryAttemptItem()]
         if self.current_health is None:
             self.current_health = {"status": "recovering"}
+
+
+@dataclass
+class _EngagementDetailObject:
+    engagement: _EngagementObject = field(default_factory=_EngagementObject)
+    incident: _IncidentDetailIncident = field(default_factory=_IncidentDetailIncident)
+    timeline: list[_EngagementTimelineObject] = field(
+        default_factory=lambda: [_EngagementTimelineObject()]
+    )
+    delivery_links: list[_EngagementDeliveryLinkObject] = field(
+        default_factory=lambda: [_EngagementDeliveryLinkObject()]
+    )
 
 
 @dataclass
@@ -828,6 +1267,16 @@ class LocalWebAdminServerTests(unittest.TestCase):
                 watches_body = response.read().decode("utf-8")
             self.assertIn("Configured watches", watches_body)
             self.assertIn("Datasource Watch", watches_body)
+
+            with urlopen(f"{base_url}/oncall") as response:
+                oncall_body = response.read().decode("utf-8")
+            self.assertIn("Create operator", oncall_body)
+            self.assertIn("Platform Ops", oncall_body)
+
+            with urlopen(f"{base_url}/engagements") as response:
+                engagements_body = response.read().decode("utf-8")
+            self.assertIn("Engagement Center", engagements_body)
+            self.assertIn("eng-1", engagements_body)
 
             with urlopen(f"{base_url}/secrets") as response:
                 secrets_body = response.read().decode("utf-8")
@@ -994,10 +1443,73 @@ class LocalWebAdminServerTests(unittest.TestCase):
             self.assertIn("Acknowledged incident inc-1.", acknowledge_body)
             self.assertEqual(service.acknowledged_incidents, ["inc-1"])
 
+            person_request = Request(
+                f"{base_url}/oncall/people/save",
+                data=urlencode(
+                    {
+                        "display_name": "Alice Example",
+                        "handle": "alice",
+                        "timezone": "Europe/Berlin",
+                        "contact_targets_json": '[{"channel_id":"slack-alice","label":"Slack","enabled":true,"priority":100}]',
+                    }
+                ).encode("utf-8"),
+                method="POST",
+            )
+            with urlopen(person_request) as response:
+                person_body = response.read().decode("utf-8")
+            self.assertIn("Saved operator Alice Example.", person_body)
+            self.assertEqual(service.saved_people[0]["handle"], "alice")
+
+            policy_request = Request(
+                f"{base_url}/oncall/policies/save",
+                data=urlencode(
+                    {
+                        "name": "Primary Escalation",
+                        "default_ack_timeout_seconds": "900",
+                        "default_repeat_page_seconds": "300",
+                        "max_repeat_pages": "2",
+                        "steps_json": '[{"step_index":0,"target_kind":"team","target_ref":"team-1"}]',
+                    }
+                ).encode("utf-8"),
+                method="POST",
+            )
+            with urlopen(policy_request) as response:
+                policy_body = response.read().decode("utf-8")
+            self.assertIn("Saved escalation policy Primary Escalation.", policy_body)
+            self.assertEqual(service.saved_policies[0]["name"], "Primary Escalation")
+
+            engagement_ack_request = Request(
+                f"{base_url}/engagements/ack",
+                data=urlencode({"engagement_id": "eng-1"}).encode("utf-8"),
+                method="POST",
+            )
+            with urlopen(engagement_ack_request) as response:
+                engagement_ack_body = response.read().decode("utf-8")
+            self.assertIn("Acknowledged engagement eng-1.", engagement_ack_body)
+            self.assertEqual(service.acknowledged_engagements, ["eng-1"])
+
+            handoff_request = Request(
+                f"{base_url}/engagements/handoff",
+                data=urlencode(
+                    {
+                        "engagement_id": "eng-1",
+                        "target_kind": "person",
+                        "target_ref": "opr-2",
+                    }
+                ).encode("utf-8"),
+                method="POST",
+            )
+            with urlopen(handoff_request) as response:
+                handoff_body = response.read().decode("utf-8")
+            self.assertIn("Handed off engagement eng-1.", handoff_body)
+            self.assertEqual(service.handed_off_engagements[0]["target_ref"], "opr-2")
+
             self.assertIn("/diagnostics", service.saved_pages)
             self.assertIn("/plugins", service.saved_pages)
             self.assertIn("/notifications", service.saved_pages)
             self.assertIn("/watches", service.saved_pages)
+            self.assertIn("/oncall", service.saved_pages)
+            self.assertIn("/engagements", service.saved_pages)
             self.assertIn("/secrets", service.saved_pages)
             self.assertIn("/datasources", service.saved_pages)
             self.assertIn("/incidents", service.saved_pages)

@@ -12,11 +12,16 @@ import sys
 
 from cockpit.application.services.component_watch_service import ComponentWatchService
 from cockpit.application.services.datasource_service import DataSourceService
+from cockpit.application.services.escalation_policy_service import (
+    EscalationPolicyService,
+)
+from cockpit.application.services.escalation_service import EscalationService
 from cockpit.application.services.guard_policy_service import GuardPolicyService
 from cockpit.application.services.incident_service import IncidentService
 from cockpit.application.services.layout_service import LayoutService
 from cockpit.application.services.notification_policy_service import NotificationPolicyService
 from cockpit.application.services.notification_service import NotificationService
+from cockpit.application.services.oncall_service import OnCallService
 from cockpit.application.services.operations_diagnostics_service import (
     OperationsDiagnosticsService,
 )
@@ -25,11 +30,22 @@ from cockpit.application.services.secret_service import SecretService
 from cockpit.application.services.self_healing_service import SelfHealingService
 from cockpit.application.services.suppression_service import SuppressionService
 from cockpit.domain.models.datasource import DataSourceOperationResult, DataSourceProfile
+from cockpit.domain.models.escalation import EscalationPolicy, EscalationStep
 from cockpit.domain.models.layout import Layout
 from cockpit.domain.models.notifications import (
     NotificationChannel,
     NotificationRule,
     NotificationSuppressionRule,
+)
+from cockpit.domain.models.oncall import (
+    OnCallSchedule,
+    OperatorContactTarget,
+    OperatorPerson,
+    OperatorTeam,
+    OwnershipBinding,
+    RotationRule,
+    ScheduleOverride,
+    TeamMembership,
 )
 from cockpit.domain.models.policy import GuardContext
 from cockpit.domain.models.secret import ManagedSecretEntry, VaultProfile, VaultSession, VaultLease
@@ -40,10 +56,15 @@ from cockpit.infrastructure.ssh.tunnel_manager import SSHTunnelManager
 from cockpit.runtime.task_supervisor import TaskSupervisor
 from cockpit.shared.enums import (
     ComponentKind,
+    EscalationTargetKind,
     GuardActionKind,
     GuardDecisionOutcome,
+    OwnershipSubjectKind,
+    RotationIntervalKind,
+    ScheduleCoverageKind,
     IncidentSeverity,
     IncidentStatus,
+    TeamMembershipRole,
     NotificationChannelKind,
     NotificationEventClass,
     NotificationStatus,
@@ -52,7 +73,7 @@ from cockpit.shared.enums import (
     TargetRiskLevel,
     WatchSubjectKind,
 )
-from cockpit.shared.utils import utc_now
+from cockpit.shared.utils import make_id, utc_now
 from cockpit.ui.panels.registry import PanelRegistry
 
 
@@ -74,6 +95,9 @@ class WebAdminService:
         suppression_service: SuppressionService,
         component_watch_service: ComponentWatchService,
         guard_policy_service: GuardPolicyService,
+        oncall_service: OnCallService,
+        escalation_policy_service: EscalationPolicyService,
+        escalation_service: EscalationService,
         panel_registry: PanelRegistry,
         state_repository: WebAdminStateRepository,
         command_catalog: tuple[str, ...],
@@ -93,6 +117,9 @@ class WebAdminService:
         self._suppression_service = suppression_service
         self._component_watch_service = component_watch_service
         self._guard_policy_service = guard_policy_service
+        self._oncall_service = oncall_service
+        self._escalation_policy_service = escalation_policy_service
+        self._escalation_service = escalation_service
         self._panel_registry = panel_registry
         self._state_repository = state_repository
         self._command_catalog = command_catalog
@@ -158,6 +185,22 @@ class WebAdminService:
                 rule.to_dict()
                 for rule in self._suppression_service.list_rules()
             ],
+            "oncall": {
+                "people": [person.to_dict() for person in self._oncall_service.list_people()],
+                "teams": [team.to_dict() for team in self._oncall_service.list_teams()],
+                "bindings": [
+                    binding.to_dict()
+                    for binding in self._oncall_service.list_ownership_bindings()
+                ],
+                "schedules": [
+                    schedule.to_dict() for schedule in self._oncall_service.list_schedules()
+                ],
+                "engagements": self._escalation_service.diagnostics(),
+                "policies": [
+                    policy.to_dict()
+                    for policy in self._escalation_policy_service.list_policies()
+                ],
+            },
             "watches": {
                 "configs": [config.to_dict() for config in watch_configs],
                 "states": [state.to_dict() for state in watch_states],
@@ -781,6 +824,298 @@ class WebAdminService:
     def retry_component_recovery(self, component_id: str) -> bool:
         return self._incident_service.retry_component(component_id)
 
+    def list_operator_people(self) -> list[OperatorPerson]:
+        return self._oncall_service.list_people()
+
+    def save_operator_person(self, payload: dict[str, object]) -> OperatorPerson:
+        person_id = self._optional_str(payload.get("person_id"))
+        existing = self._oncall_service.get_person(person_id) if person_id else None
+        person = OperatorPerson(
+            id=person_id or self._oncall_service.new_person(
+                display_name=str(payload.get("display_name", "Operator")),
+                handle=str(payload.get("handle", "operator")),
+            ).id,
+            display_name=str(payload.get("display_name", "")),
+            handle=str(payload.get("handle", "")),
+            enabled=str(payload.get("enabled", "1")) != "0",
+            timezone=str(payload.get("timezone", "UTC")),
+            contact_targets=self._contact_targets(payload.get("contact_targets_json")),
+            metadata=self._json_mapping(payload.get("metadata_json")),
+            created_at=existing.created_at if existing is not None else utc_now(),
+            updated_at=utc_now(),
+        )
+        return self._oncall_service.save_person(person)
+
+    def delete_operator_person(self, person_id: str) -> None:
+        self._oncall_service.delete_person(person_id)
+
+    def list_operator_teams(self) -> list[OperatorTeam]:
+        return self._oncall_service.list_teams()
+
+    def save_operator_team(self, payload: dict[str, object]) -> OperatorTeam:
+        team_id = self._optional_str(payload.get("team_id"))
+        existing = self._oncall_service.get_team(team_id) if team_id else None
+        team = OperatorTeam(
+            id=team_id or self._oncall_service.new_team(
+                name=str(payload.get("name", "Team")),
+                description=self._optional_str(payload.get("description")),
+            ).id,
+            name=str(payload.get("name", "")),
+            enabled=str(payload.get("enabled", "1")) != "0",
+            description=self._optional_str(payload.get("description")),
+            default_escalation_policy_id=self._optional_str(
+                payload.get("default_escalation_policy_id")
+            ),
+            created_at=existing.created_at if existing is not None else utc_now(),
+            updated_at=utc_now(),
+        )
+        return self._oncall_service.save_team(team)
+
+    def delete_operator_team(self, team_id: str) -> None:
+        self._oncall_service.delete_team(team_id)
+
+    def list_team_memberships(self) -> list[TeamMembership]:
+        return self._oncall_service.list_memberships()
+
+    def save_team_membership(self, payload: dict[str, object]) -> TeamMembership:
+        membership_id = self._optional_str(payload.get("membership_id"))
+        now = utc_now()
+        membership = TeamMembership(
+            id=membership_id or f"mem:{payload.get('team_id', '')}:{payload.get('person_id', '')}",
+            team_id=str(payload.get("team_id", "")),
+            person_id=str(payload.get("person_id", "")),
+            role=TeamMembershipRole(str(payload.get("role", TeamMembershipRole.MEMBER.value))),
+            enabled=str(payload.get("enabled", "1")) != "0",
+            created_at=now,
+            updated_at=now,
+        )
+        return self._oncall_service.save_membership(membership)
+
+    def delete_team_membership(self, membership_id: str) -> None:
+        self._oncall_service.delete_membership(membership_id)
+
+    def list_ownership_bindings(self) -> list[OwnershipBinding]:
+        return self._oncall_service.list_ownership_bindings()
+
+    def save_ownership_binding(self, payload: dict[str, object]) -> OwnershipBinding:
+        binding_id = self._optional_str(payload.get("binding_id"))
+        existing = next(
+            (item for item in self._oncall_service.list_ownership_bindings() if item.id == binding_id),
+            None,
+        )
+        now = utc_now()
+        binding = OwnershipBinding(
+            id=binding_id or make_id("own"),
+            name=str(payload.get("name", "Ownership Binding")),
+            team_id=str(payload.get("team_id", "")),
+            enabled=str(payload.get("enabled", "1")) != "0",
+            component_kind=self._optional_enum(payload.get("component_kind"), ComponentKind),
+            component_id=self._optional_str(payload.get("component_id")),
+            subject_kind=self._optional_enum(payload.get("subject_kind"), OwnershipSubjectKind),
+            subject_ref=self._optional_str(payload.get("subject_ref")),
+            risk_level=self._optional_enum(payload.get("risk_level"), TargetRiskLevel),
+            escalation_policy_id=self._optional_str(payload.get("escalation_policy_id")),
+            created_at=existing.created_at if existing is not None else now,
+            updated_at=now,
+        )
+        return self._oncall_service.save_ownership_binding(binding)
+
+    def delete_ownership_binding(self, binding_id: str) -> None:
+        self._oncall_service.delete_ownership_binding(binding_id)
+
+    def list_oncall_schedules(self) -> list[OnCallSchedule]:
+        return self._oncall_service.list_schedules()
+
+    def save_oncall_schedule(self, payload: dict[str, object]) -> OnCallSchedule:
+        schedule_id = self._optional_str(payload.get("schedule_id"))
+        existing = next(
+            (item for item in self._oncall_service.list_schedules() if item.id == schedule_id),
+            None,
+        )
+        now = utc_now()
+        schedule = OnCallSchedule(
+            id=schedule_id or f"sch:{payload.get('team_id', '')}:{payload.get('name', '')}",
+            team_id=str(payload.get("team_id", "")),
+            name=str(payload.get("name", "")),
+            timezone=str(payload.get("timezone", "UTC")),
+            enabled=str(payload.get("enabled", "1")) != "0",
+            coverage_kind=ScheduleCoverageKind(str(payload.get("coverage_kind", "always"))),
+            schedule_config=self._json_mapping(payload.get("schedule_config_json")),
+            created_at=existing.created_at if existing is not None else now,
+            updated_at=now,
+        )
+        return self._oncall_service.save_schedule(schedule)
+
+    def delete_oncall_schedule(self, schedule_id: str) -> None:
+        self._oncall_service.delete_schedule(schedule_id)
+
+    def list_rotations(self, schedule_id: str) -> list[RotationRule]:
+        return self._oncall_service.list_rotations(schedule_id)
+
+    def save_rotation(self, payload: dict[str, object]) -> RotationRule:
+        rotation_id = self._optional_str(payload.get("rotation_id"))
+        schedule_id = str(payload.get("schedule_id", ""))
+        existing = next(
+            (item for item in self._oncall_service.list_rotations(schedule_id) if item.id == rotation_id),
+            None,
+        )
+        now = utc_now()
+        rotation = RotationRule(
+            id=rotation_id or f"rot:{schedule_id}:{payload.get('name', '')}",
+            schedule_id=schedule_id,
+            name=str(payload.get("name", "")),
+            participant_ids=tuple(self._csv_list(payload.get("participant_ids"))),
+            enabled=str(payload.get("enabled", "1")) != "0",
+            anchor_at=self._optional_datetime(payload.get("anchor_at")),
+            interval_kind=RotationIntervalKind(str(payload.get("interval_kind", "days"))),
+            interval_count=int(payload.get("interval_count", 1) or 1),
+            handoff_time=self._optional_str(payload.get("handoff_time")),
+            created_at=existing.created_at if existing is not None else now,
+            updated_at=now,
+        )
+        return self._oncall_service.save_rotation(rotation)
+
+    def delete_rotation(self, rotation_id: str) -> None:
+        self._oncall_service.delete_rotation(rotation_id)
+
+    def list_overrides(self, schedule_id: str) -> list[ScheduleOverride]:
+        return self._oncall_service.list_overrides(schedule_id)
+
+    def save_override(self, payload: dict[str, object]) -> ScheduleOverride:
+        override_id = self._optional_str(payload.get("override_id"))
+        schedule_id = str(payload.get("schedule_id", ""))
+        existing = next(
+            (item for item in self._oncall_service.list_overrides(schedule_id) if item.id == override_id),
+            None,
+        )
+        now = utc_now()
+        override = ScheduleOverride(
+            id=override_id or f"ovr:{schedule_id}:{payload.get('replacement_person_id', '')}:{now.timestamp()}",
+            schedule_id=schedule_id,
+            replacement_person_id=str(payload.get("replacement_person_id", "")),
+            replaced_person_id=self._optional_str(payload.get("replaced_person_id")),
+            starts_at=self._required_datetime(payload.get("starts_at")),
+            ends_at=self._required_datetime(payload.get("ends_at")),
+            reason=str(payload.get("reason", "")),
+            priority=int(payload.get("priority", 100) or 100),
+            enabled=str(payload.get("enabled", "1")) != "0",
+            actor=self._optional_str(payload.get("actor")),
+            created_at=existing.created_at if existing is not None else now,
+            updated_at=now,
+        )
+        return self._oncall_service.save_override(override)
+
+    def delete_override(self, override_id: str) -> None:
+        self._oncall_service.delete_override(override_id)
+
+    def list_escalation_policies(self) -> list[EscalationPolicy]:
+        return self._escalation_policy_service.list_policies()
+
+    def escalation_policy_detail(self, policy_id: str):
+        return self._escalation_policy_service.get_policy_detail(policy_id)
+
+    def save_escalation_policy(self, payload: dict[str, object]):
+        policy_id = self._optional_str(payload.get("policy_id"))
+        existing_detail = (
+            self._escalation_policy_service.get_policy_detail(policy_id)
+            if policy_id
+            else None
+        )
+        now = utc_now()
+        policy = EscalationPolicy(
+            id=policy_id or self._escalation_policy_service.new_policy(
+                name=str(payload.get("name", "Escalation Policy"))
+            ).id,
+            name=str(payload.get("name", "")),
+            enabled=str(payload.get("enabled", "1")) != "0",
+            default_ack_timeout_seconds=int(
+                payload.get("default_ack_timeout_seconds", 900) or 900
+            ),
+            default_repeat_page_seconds=int(
+                payload.get("default_repeat_page_seconds", 300) or 300
+            ),
+            max_repeat_pages=int(payload.get("max_repeat_pages", 2) or 0),
+            terminal_behavior=str(payload.get("terminal_behavior", "exhaust")),
+            created_at=(
+                existing_detail.policy.created_at if existing_detail is not None else now
+            ),
+            updated_at=now,
+        )
+        steps_payload = self._json_list(payload.get("steps_json"))
+        steps = []
+        for index, item in enumerate(steps_payload):
+            if not isinstance(item, dict):
+                raise ValueError("Escalation steps JSON must contain objects.")
+            step_id = self._optional_str(item.get("id"))
+            steps.append(
+                EscalationStep(
+                    id=step_id or self._escalation_policy_service.new_step(
+                        step_index=index,
+                        target_kind=EscalationTargetKind(str(item.get("target_kind", "team"))),
+                        target_ref=str(item.get("target_ref", "")),
+                    ).id,
+                    policy_id=policy.id,
+                    step_index=int(item.get("step_index", index) or index),
+                    target_kind=EscalationTargetKind(str(item.get("target_kind", "team"))),
+                    target_ref=str(item.get("target_ref", "")),
+                    ack_timeout_seconds=(
+                        int(item["ack_timeout_seconds"])
+                        if str(item.get("ack_timeout_seconds", "")).strip()
+                        else None
+                    ),
+                    repeat_page_seconds=(
+                        int(item["repeat_page_seconds"])
+                        if str(item.get("repeat_page_seconds", "")).strip()
+                        else None
+                    ),
+                    max_repeat_pages=(
+                        int(item["max_repeat_pages"])
+                        if str(item.get("max_repeat_pages", "")).strip()
+                        else None
+                    ),
+                    reminder_enabled=str(item.get("reminder_enabled", "1")) != "0",
+                    stop_on_ack=str(item.get("stop_on_ack", "1")) != "0",
+                    created_at=now,
+                    updated_at=now,
+                )
+            )
+        return self._escalation_policy_service.save_policy(policy, steps=tuple(steps))
+
+    def delete_escalation_policy(self, policy_id: str) -> None:
+        self._escalation_policy_service.delete_policy(policy_id)
+
+    def list_engagements(self, *, active_only: bool = False) -> list[dict[str, object]]:
+        items = (
+            self._escalation_service.list_active_engagements()
+            if active_only
+            else self._escalation_service.list_recent_engagements()
+        )
+        return [item.to_dict() for item in items]
+
+    def engagement_detail(self, engagement_id: str):
+        return self._escalation_service.get_engagement_detail(engagement_id)
+
+    def acknowledge_engagement(self, engagement_id: str, *, actor: str = "web-admin"):
+        return self._escalation_service.acknowledge_engagement(engagement_id, actor=actor)
+
+    def handoff_engagement(
+        self,
+        engagement_id: str,
+        *,
+        actor: str = "web-admin",
+        target_kind: str = "person",
+        target_ref: str,
+    ):
+        return self._escalation_service.handoff_engagement(
+            engagement_id,
+            actor=actor,
+            target_kind=EscalationTargetKind(target_kind),
+            target_ref=target_ref,
+        )
+
+    def repage_engagement(self, engagement_id: str, *, actor: str = "web-admin"):
+        return self._escalation_service.repage_engagement(engagement_id, actor=actor)
+
     @staticmethod
     def _guard_action_for_statement(statement: str) -> GuardActionKind:
         if DatabaseAdapter.is_destructive_query(statement):
@@ -833,11 +1168,54 @@ class WebAdminService:
         return datetime.fromisoformat(text)
 
     @staticmethod
+    def _required_datetime(raw_value: object) -> datetime:
+        text = WebAdminService._optional_str(raw_value)
+        if text is None:
+            raise ValueError("Expected ISO datetime value.")
+        return datetime.fromisoformat(text)
+
+    @staticmethod
     def _enum_csv_list(raw_value: object, enum_type: type) -> tuple:
         values = []
         for item in WebAdminService._csv_list(raw_value):
             values.append(enum_type(item))
         return tuple(values)
+
+    @staticmethod
+    def _optional_enum(raw_value: object, enum_type: type):
+        text = WebAdminService._optional_str(raw_value)
+        if text is None:
+            return None
+        return enum_type(text)
+
+    @staticmethod
+    def _json_list(raw_value: object) -> list[object]:
+        if raw_value is None:
+            return []
+        text = str(raw_value).strip()
+        if not text:
+            return []
+        payload = json.loads(text)
+        if not isinstance(payload, list):
+            raise ValueError("Expected a JSON array payload.")
+        return payload
+
+    @staticmethod
+    def _contact_targets(raw_value: object) -> tuple[OperatorContactTarget, ...]:
+        payload = WebAdminService._json_list(raw_value)
+        targets = []
+        for item in payload:
+            if not isinstance(item, dict):
+                raise ValueError("Contact targets must be JSON objects.")
+            targets.append(
+                OperatorContactTarget(
+                    channel_id=str(item.get("channel_id", "")),
+                    label=str(item.get("label", "")),
+                    enabled=str(item.get("enabled", "1")) != "0",
+                    priority=int(item.get("priority", 100) or 100),
+                )
+            )
+        return tuple(targets)
 
     @staticmethod
     def _target_kind_from_value(raw_value: object) -> SessionTargetKind:

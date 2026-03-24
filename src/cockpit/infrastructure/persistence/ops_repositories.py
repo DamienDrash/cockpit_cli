@@ -6,6 +6,13 @@ from datetime import datetime, timedelta
 import json
 
 from cockpit.domain.models.diagnostics import OperationDiagnosticRecord
+from cockpit.domain.models.escalation import (
+    EngagementDeliveryLink,
+    EngagementTimelineEntry,
+    EscalationPolicy,
+    EscalationStep,
+    IncidentEngagement,
+)
 from cockpit.domain.models.health import (
     ComponentHealthState,
     IncidentRecord,
@@ -19,11 +26,24 @@ from cockpit.domain.models.notifications import (
     NotificationRule,
     NotificationSuppressionRule,
 )
+from cockpit.domain.models.oncall import (
+    OnCallSchedule,
+    OperatorContactTarget,
+    OperatorPerson,
+    OperatorTeam,
+    OwnershipBinding,
+    RotationRule,
+    ScheduleOverride,
+    TeamMembership,
+)
 from cockpit.domain.models.policy import GuardDecision
 from cockpit.domain.models.watch import ComponentWatchConfig, ComponentWatchState
 from cockpit.infrastructure.persistence.sqlite_store import SQLiteStore
 from cockpit.shared.enums import (
     ComponentKind,
+    EngagementDeliveryPurpose,
+    EngagementStatus,
+    EscalationTargetKind,
     GuardActionKind,
     GuardDecisionOutcome,
     HealthStatus,
@@ -34,9 +54,14 @@ from cockpit.shared.enums import (
     NotificationEventClass,
     NotificationStatus,
     OperationFamily,
+    OwnershipSubjectKind,
     RecoveryAttemptStatus,
+    ResolutionOutcome,
+    RotationIntervalKind,
+    ScheduleCoverageKind,
     SessionTargetKind,
     TargetRiskLevel,
+    TeamMembershipRole,
     WatchProbeOutcome,
     WatchSubjectKind,
 )
@@ -1344,6 +1369,906 @@ class ComponentWatchRepository:
         return [_component_watch_state_from_row(row) for row in rows]
 
 
+class OperatorPersonRepository:
+    """Persist operator people and contact metadata."""
+
+    def __init__(self, store: SQLiteStore) -> None:
+        self._store = store
+
+    def save(self, person: OperatorPerson) -> None:
+        payload = person.to_dict()
+        created_at = person.created_at or utc_now()
+        updated_at = person.updated_at or created_at
+        self._store.execute(
+            """
+            INSERT INTO operator_people (
+                id,
+                display_name,
+                handle,
+                enabled,
+                timezone,
+                contact_targets_json,
+                metadata_json,
+                payload_json,
+                created_at,
+                updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET
+                display_name = excluded.display_name,
+                handle = excluded.handle,
+                enabled = excluded.enabled,
+                timezone = excluded.timezone,
+                contact_targets_json = excluded.contact_targets_json,
+                metadata_json = excluded.metadata_json,
+                payload_json = excluded.payload_json,
+                created_at = excluded.created_at,
+                updated_at = excluded.updated_at
+            """,
+            (
+                person.id,
+                person.display_name,
+                person.handle,
+                int(person.enabled),
+                person.timezone,
+                json.dumps([target.to_dict() for target in person.contact_targets], sort_keys=True),
+                json.dumps(person.metadata, sort_keys=True),
+                json.dumps(payload, sort_keys=True),
+                created_at.isoformat(),
+                updated_at.isoformat(),
+            ),
+        )
+
+    def get(self, person_id: str) -> OperatorPerson | None:
+        row = self._store.fetchone("SELECT * FROM operator_people WHERE id = ?", (person_id,))
+        return _operator_person_from_row(row) if row is not None else None
+
+    def list_all(self, *, enabled_only: bool = False) -> list[OperatorPerson]:
+        sql = "SELECT * FROM operator_people"
+        if enabled_only:
+            sql += " WHERE enabled = 1"
+        sql += " ORDER BY display_name ASC, id ASC"
+        rows = self._store.fetchall(sql)
+        return [_operator_person_from_row(row) for row in rows]
+
+    def delete(self, person_id: str) -> None:
+        self._store.execute("DELETE FROM operator_people WHERE id = ?", (person_id,))
+
+
+class OperatorTeamRepository:
+    """Persist operator teams."""
+
+    def __init__(self, store: SQLiteStore) -> None:
+        self._store = store
+
+    def save(self, team: OperatorTeam) -> None:
+        payload = team.to_dict()
+        created_at = team.created_at or utc_now()
+        updated_at = team.updated_at or created_at
+        self._store.execute(
+            """
+            INSERT INTO operator_teams (
+                id,
+                name,
+                enabled,
+                description,
+                default_escalation_policy_id,
+                payload_json,
+                created_at,
+                updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET
+                name = excluded.name,
+                enabled = excluded.enabled,
+                description = excluded.description,
+                default_escalation_policy_id = excluded.default_escalation_policy_id,
+                payload_json = excluded.payload_json,
+                created_at = excluded.created_at,
+                updated_at = excluded.updated_at
+            """,
+            (
+                team.id,
+                team.name,
+                int(team.enabled),
+                team.description,
+                team.default_escalation_policy_id,
+                json.dumps(payload, sort_keys=True),
+                created_at.isoformat(),
+                updated_at.isoformat(),
+            ),
+        )
+
+    def get(self, team_id: str) -> OperatorTeam | None:
+        row = self._store.fetchone("SELECT * FROM operator_teams WHERE id = ?", (team_id,))
+        return _operator_team_from_row(row) if row is not None else None
+
+    def list_all(self, *, enabled_only: bool = False) -> list[OperatorTeam]:
+        sql = "SELECT * FROM operator_teams"
+        if enabled_only:
+            sql += " WHERE enabled = 1"
+        sql += " ORDER BY name ASC, id ASC"
+        rows = self._store.fetchall(sql)
+        return [_operator_team_from_row(row) for row in rows]
+
+    def delete(self, team_id: str) -> None:
+        self._store.execute("DELETE FROM operator_teams WHERE id = ?", (team_id,))
+
+
+class TeamMembershipRepository:
+    """Persist team memberships."""
+
+    def __init__(self, store: SQLiteStore) -> None:
+        self._store = store
+
+    def save(self, membership: TeamMembership) -> None:
+        payload = membership.to_dict()
+        created_at = membership.created_at or utc_now()
+        updated_at = membership.updated_at or created_at
+        self._store.execute(
+            """
+            INSERT INTO team_memberships (
+                id,
+                team_id,
+                person_id,
+                role,
+                enabled,
+                payload_json,
+                created_at,
+                updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET
+                team_id = excluded.team_id,
+                person_id = excluded.person_id,
+                role = excluded.role,
+                enabled = excluded.enabled,
+                payload_json = excluded.payload_json,
+                created_at = excluded.created_at,
+                updated_at = excluded.updated_at
+            """,
+            (
+                membership.id,
+                membership.team_id,
+                membership.person_id,
+                membership.role.value,
+                int(membership.enabled),
+                json.dumps(payload, sort_keys=True),
+                created_at.isoformat(),
+                updated_at.isoformat(),
+            ),
+        )
+
+    def list_all(self, *, enabled_only: bool = False) -> list[TeamMembership]:
+        sql = "SELECT * FROM team_memberships"
+        if enabled_only:
+            sql += " WHERE enabled = 1"
+        sql += " ORDER BY team_id ASC, person_id ASC"
+        rows = self._store.fetchall(sql)
+        return [_team_membership_from_row(row) for row in rows]
+
+    def list_for_team(self, team_id: str, *, enabled_only: bool = False) -> list[TeamMembership]:
+        sql = "SELECT * FROM team_memberships WHERE team_id = ?"
+        params: list[object] = [team_id]
+        if enabled_only:
+            sql += " AND enabled = 1"
+        sql += " ORDER BY person_id ASC, id ASC"
+        rows = self._store.fetchall(sql, tuple(params))
+        return [_team_membership_from_row(row) for row in rows]
+
+    def delete(self, membership_id: str) -> None:
+        self._store.execute("DELETE FROM team_memberships WHERE id = ?", (membership_id,))
+
+
+class OwnershipBindingRepository:
+    """Persist ownership bindings from runtime subjects to teams."""
+
+    def __init__(self, store: SQLiteStore) -> None:
+        self._store = store
+
+    def save(self, binding: OwnershipBinding) -> None:
+        payload = binding.to_dict()
+        created_at = binding.created_at or utc_now()
+        updated_at = binding.updated_at or created_at
+        self._store.execute(
+            """
+            INSERT INTO ownership_bindings (
+                id,
+                name,
+                team_id,
+                enabled,
+                component_kind,
+                component_id,
+                subject_kind,
+                subject_ref,
+                risk_level,
+                escalation_policy_id,
+                payload_json,
+                created_at,
+                updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET
+                name = excluded.name,
+                team_id = excluded.team_id,
+                enabled = excluded.enabled,
+                component_kind = excluded.component_kind,
+                component_id = excluded.component_id,
+                subject_kind = excluded.subject_kind,
+                subject_ref = excluded.subject_ref,
+                risk_level = excluded.risk_level,
+                escalation_policy_id = excluded.escalation_policy_id,
+                payload_json = excluded.payload_json,
+                created_at = excluded.created_at,
+                updated_at = excluded.updated_at
+            """,
+            (
+                binding.id,
+                binding.name,
+                binding.team_id,
+                int(binding.enabled),
+                binding.component_kind.value if binding.component_kind is not None else None,
+                binding.component_id,
+                binding.subject_kind.value if binding.subject_kind is not None else None,
+                binding.subject_ref,
+                binding.risk_level.value if binding.risk_level is not None else None,
+                binding.escalation_policy_id,
+                json.dumps(payload, sort_keys=True),
+                created_at.isoformat(),
+                updated_at.isoformat(),
+            ),
+        )
+
+    def get(self, binding_id: str) -> OwnershipBinding | None:
+        row = self._store.fetchone("SELECT * FROM ownership_bindings WHERE id = ?", (binding_id,))
+        return _ownership_binding_from_row(row) if row is not None else None
+
+    def list_all(self, *, enabled_only: bool = False) -> list[OwnershipBinding]:
+        sql = "SELECT * FROM ownership_bindings"
+        if enabled_only:
+            sql += " WHERE enabled = 1"
+        sql += " ORDER BY updated_at DESC, id DESC"
+        rows = self._store.fetchall(sql)
+        return [_ownership_binding_from_row(row) for row in rows]
+
+    def delete(self, binding_id: str) -> None:
+        self._store.execute("DELETE FROM ownership_bindings WHERE id = ?", (binding_id,))
+
+
+class OnCallScheduleRepository:
+    """Persist schedule envelopes for teams."""
+
+    def __init__(self, store: SQLiteStore) -> None:
+        self._store = store
+
+    def save(self, schedule: OnCallSchedule) -> None:
+        payload = schedule.to_dict()
+        created_at = schedule.created_at or utc_now()
+        updated_at = schedule.updated_at or created_at
+        self._store.execute(
+            """
+            INSERT INTO oncall_schedules (
+                id,
+                team_id,
+                name,
+                timezone,
+                enabled,
+                coverage_kind,
+                schedule_config_json,
+                payload_json,
+                created_at,
+                updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET
+                team_id = excluded.team_id,
+                name = excluded.name,
+                timezone = excluded.timezone,
+                enabled = excluded.enabled,
+                coverage_kind = excluded.coverage_kind,
+                schedule_config_json = excluded.schedule_config_json,
+                payload_json = excluded.payload_json,
+                created_at = excluded.created_at,
+                updated_at = excluded.updated_at
+            """,
+            (
+                schedule.id,
+                schedule.team_id,
+                schedule.name,
+                schedule.timezone,
+                int(schedule.enabled),
+                schedule.coverage_kind.value,
+                json.dumps(schedule.schedule_config, sort_keys=True),
+                json.dumps(payload, sort_keys=True),
+                created_at.isoformat(),
+                updated_at.isoformat(),
+            ),
+        )
+
+    def get(self, schedule_id: str) -> OnCallSchedule | None:
+        row = self._store.fetchone("SELECT * FROM oncall_schedules WHERE id = ?", (schedule_id,))
+        return _oncall_schedule_from_row(row) if row is not None else None
+
+    def list_all(self, *, enabled_only: bool = False) -> list[OnCallSchedule]:
+        sql = "SELECT * FROM oncall_schedules"
+        if enabled_only:
+            sql += " WHERE enabled = 1"
+        sql += " ORDER BY team_id ASC, name ASC"
+        rows = self._store.fetchall(sql)
+        return [_oncall_schedule_from_row(row) for row in rows]
+
+    def list_for_team(self, team_id: str, *, enabled_only: bool = False) -> list[OnCallSchedule]:
+        sql = "SELECT * FROM oncall_schedules WHERE team_id = ?"
+        params: list[object] = [team_id]
+        if enabled_only:
+            sql += " AND enabled = 1"
+        sql += " ORDER BY name ASC, id ASC"
+        rows = self._store.fetchall(sql, tuple(params))
+        return [_oncall_schedule_from_row(row) for row in rows]
+
+    def delete(self, schedule_id: str) -> None:
+        self._store.execute("DELETE FROM oncall_schedules WHERE id = ?", (schedule_id,))
+
+
+class RotationRuleRepository:
+    """Persist rotation rules for schedules."""
+
+    def __init__(self, store: SQLiteStore) -> None:
+        self._store = store
+
+    def save(self, rotation: RotationRule) -> None:
+        payload = rotation.to_dict()
+        created_at = rotation.created_at or utc_now()
+        updated_at = rotation.updated_at or created_at
+        self._store.execute(
+            """
+            INSERT INTO schedule_rotations (
+                id,
+                schedule_id,
+                name,
+                participant_ids_json,
+                enabled,
+                anchor_at,
+                interval_kind,
+                interval_count,
+                handoff_time,
+                payload_json,
+                created_at,
+                updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET
+                schedule_id = excluded.schedule_id,
+                name = excluded.name,
+                participant_ids_json = excluded.participant_ids_json,
+                enabled = excluded.enabled,
+                anchor_at = excluded.anchor_at,
+                interval_kind = excluded.interval_kind,
+                interval_count = excluded.interval_count,
+                handoff_time = excluded.handoff_time,
+                payload_json = excluded.payload_json,
+                created_at = excluded.created_at,
+                updated_at = excluded.updated_at
+            """,
+            (
+                rotation.id,
+                rotation.schedule_id,
+                rotation.name,
+                json.dumps(list(rotation.participant_ids), sort_keys=True),
+                int(rotation.enabled),
+                rotation.anchor_at.isoformat() if rotation.anchor_at else None,
+                rotation.interval_kind.value,
+                int(rotation.interval_count),
+                rotation.handoff_time,
+                json.dumps(payload, sort_keys=True),
+                created_at.isoformat(),
+                updated_at.isoformat(),
+            ),
+        )
+
+    def get(self, rotation_id: str) -> RotationRule | None:
+        row = self._store.fetchone("SELECT * FROM schedule_rotations WHERE id = ?", (rotation_id,))
+        return _rotation_rule_from_row(row) if row is not None else None
+
+    def list_for_schedule(self, schedule_id: str, *, enabled_only: bool = False) -> list[RotationRule]:
+        sql = "SELECT * FROM schedule_rotations WHERE schedule_id = ?"
+        params: list[object] = [schedule_id]
+        if enabled_only:
+            sql += " AND enabled = 1"
+        sql += " ORDER BY name ASC, id ASC"
+        rows = self._store.fetchall(sql, tuple(params))
+        return [_rotation_rule_from_row(row) for row in rows]
+
+    def delete(self, rotation_id: str) -> None:
+        self._store.execute("DELETE FROM schedule_rotations WHERE id = ?", (rotation_id,))
+
+
+class ScheduleOverrideRepository:
+    """Persist temporary on-call overrides."""
+
+    def __init__(self, store: SQLiteStore) -> None:
+        self._store = store
+
+    def save(self, override: ScheduleOverride) -> None:
+        payload = override.to_dict()
+        created_at = override.created_at or utc_now()
+        updated_at = override.updated_at or created_at
+        self._store.execute(
+            """
+            INSERT INTO schedule_overrides (
+                id,
+                schedule_id,
+                replacement_person_id,
+                replaced_person_id,
+                starts_at,
+                ends_at,
+                reason,
+                priority,
+                enabled,
+                actor,
+                payload_json,
+                created_at,
+                updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET
+                schedule_id = excluded.schedule_id,
+                replacement_person_id = excluded.replacement_person_id,
+                replaced_person_id = excluded.replaced_person_id,
+                starts_at = excluded.starts_at,
+                ends_at = excluded.ends_at,
+                reason = excluded.reason,
+                priority = excluded.priority,
+                enabled = excluded.enabled,
+                actor = excluded.actor,
+                payload_json = excluded.payload_json,
+                created_at = excluded.created_at,
+                updated_at = excluded.updated_at
+            """,
+            (
+                override.id,
+                override.schedule_id,
+                override.replacement_person_id,
+                override.replaced_person_id,
+                override.starts_at.isoformat(),
+                override.ends_at.isoformat(),
+                override.reason,
+                int(override.priority),
+                int(override.enabled),
+                override.actor,
+                json.dumps(payload, sort_keys=True),
+                created_at.isoformat(),
+                updated_at.isoformat(),
+            ),
+        )
+
+    def get(self, override_id: str) -> ScheduleOverride | None:
+        row = self._store.fetchone("SELECT * FROM schedule_overrides WHERE id = ?", (override_id,))
+        return _schedule_override_from_row(row) if row is not None else None
+
+    def list_for_schedule(self, schedule_id: str, *, enabled_only: bool = False) -> list[ScheduleOverride]:
+        sql = "SELECT * FROM schedule_overrides WHERE schedule_id = ?"
+        params: list[object] = [schedule_id]
+        if enabled_only:
+            sql += " AND enabled = 1"
+        sql += " ORDER BY starts_at ASC, priority DESC, id ASC"
+        rows = self._store.fetchall(sql, tuple(params))
+        return [_schedule_override_from_row(row) for row in rows]
+
+    def list_active_for_schedule(
+        self,
+        schedule_id: str,
+        *,
+        effective_at: datetime,
+    ) -> list[ScheduleOverride]:
+        rows = self._store.fetchall(
+            """
+            SELECT *
+            FROM schedule_overrides
+            WHERE schedule_id = ?
+              AND enabled = 1
+              AND starts_at <= ?
+              AND ends_at >= ?
+            ORDER BY priority DESC, starts_at ASC, id ASC
+            """,
+            (schedule_id, effective_at.isoformat(), effective_at.isoformat()),
+        )
+        return [_schedule_override_from_row(row) for row in rows]
+
+    def delete(self, override_id: str) -> None:
+        self._store.execute("DELETE FROM schedule_overrides WHERE id = ?", (override_id,))
+
+
+class EscalationPolicyRepository:
+    """Persist escalation policies."""
+
+    def __init__(self, store: SQLiteStore) -> None:
+        self._store = store
+
+    def save(self, policy: EscalationPolicy) -> None:
+        payload = policy.to_dict()
+        created_at = policy.created_at or utc_now()
+        updated_at = policy.updated_at or created_at
+        self._store.execute(
+            """
+            INSERT INTO escalation_policies (
+                id,
+                name,
+                enabled,
+                default_ack_timeout_seconds,
+                default_repeat_page_seconds,
+                max_repeat_pages,
+                terminal_behavior,
+                payload_json,
+                created_at,
+                updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET
+                name = excluded.name,
+                enabled = excluded.enabled,
+                default_ack_timeout_seconds = excluded.default_ack_timeout_seconds,
+                default_repeat_page_seconds = excluded.default_repeat_page_seconds,
+                max_repeat_pages = excluded.max_repeat_pages,
+                terminal_behavior = excluded.terminal_behavior,
+                payload_json = excluded.payload_json,
+                created_at = excluded.created_at,
+                updated_at = excluded.updated_at
+            """,
+            (
+                policy.id,
+                policy.name,
+                int(policy.enabled),
+                int(policy.default_ack_timeout_seconds),
+                int(policy.default_repeat_page_seconds),
+                int(policy.max_repeat_pages),
+                policy.terminal_behavior,
+                json.dumps(payload, sort_keys=True),
+                created_at.isoformat(),
+                updated_at.isoformat(),
+            ),
+        )
+
+    def get(self, policy_id: str) -> EscalationPolicy | None:
+        row = self._store.fetchone("SELECT * FROM escalation_policies WHERE id = ?", (policy_id,))
+        return _escalation_policy_from_row(row) if row is not None else None
+
+    def list_all(self, *, enabled_only: bool = False) -> list[EscalationPolicy]:
+        sql = "SELECT * FROM escalation_policies"
+        if enabled_only:
+            sql += " WHERE enabled = 1"
+        sql += " ORDER BY name ASC, id ASC"
+        rows = self._store.fetchall(sql)
+        return [_escalation_policy_from_row(row) for row in rows]
+
+    def delete(self, policy_id: str) -> None:
+        self._store.execute("DELETE FROM escalation_policies WHERE id = ?", (policy_id,))
+
+
+class EscalationStepRepository:
+    """Persist escalation steps."""
+
+    def __init__(self, store: SQLiteStore) -> None:
+        self._store = store
+
+    def save(self, step: EscalationStep) -> None:
+        payload = step.to_dict()
+        created_at = step.created_at or utc_now()
+        updated_at = step.updated_at or created_at
+        self._store.execute(
+            """
+            INSERT INTO escalation_steps (
+                id,
+                policy_id,
+                step_index,
+                target_kind,
+                target_ref,
+                ack_timeout_seconds,
+                repeat_page_seconds,
+                max_repeat_pages,
+                reminder_enabled,
+                stop_on_ack,
+                payload_json,
+                created_at,
+                updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET
+                policy_id = excluded.policy_id,
+                step_index = excluded.step_index,
+                target_kind = excluded.target_kind,
+                target_ref = excluded.target_ref,
+                ack_timeout_seconds = excluded.ack_timeout_seconds,
+                repeat_page_seconds = excluded.repeat_page_seconds,
+                max_repeat_pages = excluded.max_repeat_pages,
+                reminder_enabled = excluded.reminder_enabled,
+                stop_on_ack = excluded.stop_on_ack,
+                payload_json = excluded.payload_json,
+                created_at = excluded.created_at,
+                updated_at = excluded.updated_at
+            """,
+            (
+                step.id,
+                step.policy_id,
+                int(step.step_index),
+                step.target_kind.value,
+                step.target_ref,
+                step.ack_timeout_seconds,
+                step.repeat_page_seconds,
+                step.max_repeat_pages,
+                int(step.reminder_enabled),
+                int(step.stop_on_ack),
+                json.dumps(payload, sort_keys=True),
+                created_at.isoformat(),
+                updated_at.isoformat(),
+            ),
+        )
+
+    def list_for_policy(self, policy_id: str) -> list[EscalationStep]:
+        rows = self._store.fetchall(
+            """
+            SELECT *
+            FROM escalation_steps
+            WHERE policy_id = ?
+            ORDER BY step_index ASC, id ASC
+            """,
+            (policy_id,),
+        )
+        return [_escalation_step_from_row(row) for row in rows]
+
+    def delete_for_policy(self, policy_id: str) -> None:
+        self._store.execute("DELETE FROM escalation_steps WHERE policy_id = ?", (policy_id,))
+
+
+class IncidentEngagementRepository:
+    """Persist active incident engagement runtime state."""
+
+    def __init__(self, store: SQLiteStore) -> None:
+        self._store = store
+
+    def save(self, engagement: IncidentEngagement) -> None:
+        payload = engagement.to_dict()
+        created_at = engagement.created_at or utc_now()
+        updated_at = engagement.updated_at or created_at
+        self._store.execute(
+            """
+            INSERT INTO incident_engagements (
+                id,
+                incident_id,
+                incident_component_id,
+                team_id,
+                policy_id,
+                status,
+                current_step_index,
+                current_target_kind,
+                current_target_ref,
+                resolved_person_id,
+                acknowledged_by,
+                acknowledged_at,
+                handoff_count,
+                repeat_page_count,
+                next_action_at,
+                ack_deadline_at,
+                last_page_at,
+                exhausted,
+                payload_json,
+                created_at,
+                updated_at,
+                closed_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET
+                incident_id = excluded.incident_id,
+                incident_component_id = excluded.incident_component_id,
+                team_id = excluded.team_id,
+                policy_id = excluded.policy_id,
+                status = excluded.status,
+                current_step_index = excluded.current_step_index,
+                current_target_kind = excluded.current_target_kind,
+                current_target_ref = excluded.current_target_ref,
+                resolved_person_id = excluded.resolved_person_id,
+                acknowledged_by = excluded.acknowledged_by,
+                acknowledged_at = excluded.acknowledged_at,
+                handoff_count = excluded.handoff_count,
+                repeat_page_count = excluded.repeat_page_count,
+                next_action_at = excluded.next_action_at,
+                ack_deadline_at = excluded.ack_deadline_at,
+                last_page_at = excluded.last_page_at,
+                exhausted = excluded.exhausted,
+                payload_json = excluded.payload_json,
+                created_at = excluded.created_at,
+                updated_at = excluded.updated_at,
+                closed_at = excluded.closed_at
+            """,
+            (
+                engagement.id,
+                engagement.incident_id,
+                engagement.incident_component_id,
+                engagement.team_id,
+                engagement.policy_id,
+                engagement.status.value,
+                int(engagement.current_step_index),
+                engagement.current_target_kind.value if engagement.current_target_kind else None,
+                engagement.current_target_ref,
+                engagement.resolved_person_id,
+                engagement.acknowledged_by,
+                engagement.acknowledged_at.isoformat() if engagement.acknowledged_at else None,
+                int(engagement.handoff_count),
+                int(engagement.repeat_page_count),
+                engagement.next_action_at.isoformat() if engagement.next_action_at else None,
+                engagement.ack_deadline_at.isoformat() if engagement.ack_deadline_at else None,
+                engagement.last_page_at.isoformat() if engagement.last_page_at else None,
+                int(engagement.exhausted),
+                json.dumps(payload, sort_keys=True),
+                created_at.isoformat(),
+                updated_at.isoformat(),
+                engagement.closed_at.isoformat() if engagement.closed_at else None,
+            ),
+        )
+
+    def get(self, engagement_id: str) -> IncidentEngagement | None:
+        row = self._store.fetchone("SELECT * FROM incident_engagements WHERE id = ?", (engagement_id,))
+        return _incident_engagement_from_row(row) if row is not None else None
+
+    def get_active_for_incident(self, incident_id: str) -> IncidentEngagement | None:
+        row = self._store.fetchone(
+            """
+            SELECT *
+            FROM incident_engagements
+            WHERE incident_id = ?
+              AND status IN (?, ?, ?)
+            ORDER BY updated_at DESC, created_at DESC
+            LIMIT 1
+            """,
+            (
+                incident_id,
+                EngagementStatus.ACTIVE.value,
+                EngagementStatus.ACKNOWLEDGED.value,
+                EngagementStatus.BLOCKED.value,
+            ),
+        )
+        return _incident_engagement_from_row(row) if row is not None else None
+
+    def list_active(self, limit: int = 50) -> list[IncidentEngagement]:
+        rows = self._store.fetchall(
+            """
+            SELECT *
+            FROM incident_engagements
+            WHERE status IN (?, ?, ?)
+            ORDER BY updated_at DESC, created_at DESC
+            LIMIT ?
+            """,
+            (
+                EngagementStatus.ACTIVE.value,
+                EngagementStatus.ACKNOWLEDGED.value,
+                EngagementStatus.BLOCKED.value,
+                limit,
+            ),
+        )
+        return [_incident_engagement_from_row(row) for row in rows]
+
+    def list_recent(self, limit: int = 50) -> list[IncidentEngagement]:
+        rows = self._store.fetchall(
+            """
+            SELECT *
+            FROM incident_engagements
+            ORDER BY updated_at DESC, created_at DESC
+            LIMIT ?
+            """,
+            (limit,),
+        )
+        return [_incident_engagement_from_row(row) for row in rows]
+
+    def list_due_actions(self, effective_now: datetime) -> list[IncidentEngagement]:
+        rows = self._store.fetchall(
+            """
+            SELECT *
+            FROM incident_engagements
+            WHERE status = ?
+              AND next_action_at IS NOT NULL
+              AND next_action_at <= ?
+            ORDER BY next_action_at ASC, updated_at ASC
+            """,
+            (EngagementStatus.ACTIVE.value, effective_now.isoformat()),
+        )
+        return [_incident_engagement_from_row(row) for row in rows]
+
+
+class EngagementTimelineRepository:
+    """Persist engagement timeline entries."""
+
+    def __init__(self, store: SQLiteStore) -> None:
+        self._store = store
+
+    def add_entry(
+        self,
+        *,
+        engagement_id: str,
+        incident_id: str,
+        event_type: str,
+        message: str,
+        payload: dict[str, object] | None = None,
+        recorded_at: datetime | None = None,
+    ) -> None:
+        self._store.execute(
+            """
+            INSERT INTO engagement_timeline (
+                engagement_id,
+                incident_id,
+                event_type,
+                message,
+                recorded_at,
+                payload_json
+            ) VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (
+                engagement_id,
+                incident_id,
+                event_type,
+                message,
+                (recorded_at or utc_now()).isoformat(),
+                json.dumps(payload or {}, sort_keys=True),
+            ),
+        )
+
+    def list_for_engagement(self, engagement_id: str) -> list[EngagementTimelineEntry]:
+        rows = self._store.fetchall(
+            """
+            SELECT *
+            FROM engagement_timeline
+            WHERE engagement_id = ?
+            ORDER BY recorded_at ASC, id ASC
+            """,
+            (engagement_id,),
+        )
+        return [_engagement_timeline_from_row(row) for row in rows]
+
+
+class EngagementDeliveryLinkRepository:
+    """Persist correlation between engagements and notifications."""
+
+    def __init__(self, store: SQLiteStore) -> None:
+        self._store = store
+
+    def save(self, link: EngagementDeliveryLink) -> None:
+        self._store.execute(
+            """
+            INSERT INTO engagement_delivery_links (
+                engagement_id,
+                notification_id,
+                delivery_id,
+                purpose,
+                step_index,
+                created_at,
+                payload_json
+            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                link.engagement_id,
+                link.notification_id,
+                link.delivery_id,
+                link.purpose.value,
+                int(link.step_index),
+                (link.created_at or utc_now()).isoformat(),
+                json.dumps(link.payload, sort_keys=True),
+            ),
+        )
+
+    def list_for_engagement(self, engagement_id: str) -> list[EngagementDeliveryLink]:
+        rows = self._store.fetchall(
+            """
+            SELECT *
+            FROM engagement_delivery_links
+            WHERE engagement_id = ?
+            ORDER BY created_at DESC, id DESC
+            """,
+            (engagement_id,),
+        )
+        return [_engagement_delivery_link_from_row(row) for row in rows]
+
+    def list_for_notification(self, notification_id: str) -> list[EngagementDeliveryLink]:
+        rows = self._store.fetchall(
+            """
+            SELECT *
+            FROM engagement_delivery_links
+            WHERE notification_id = ?
+            ORDER BY created_at DESC, id DESC
+            """,
+            (notification_id,),
+        )
+        return [_engagement_delivery_link_from_row(row) for row in rows]
+
+
 def _component_health_from_row(row: object) -> ComponentHealthState:
     assert row is not None
     return ComponentHealthState(
@@ -1367,6 +2292,264 @@ def _component_health_from_row(row: object) -> ComponentHealthState:
         last_incident_id=row["last_incident_id"],
         payload=_load_json(str(row["payload_json"])),
         updated_at=_decode_datetime(row["updated_at"]),
+    )
+
+
+def _operator_contact_target_from_value(value: object) -> OperatorContactTarget:
+    if not isinstance(value, dict):
+        msg = "Operator contact target payload must be an object."
+        raise TypeError(msg)
+    return OperatorContactTarget(
+        channel_id=str(value.get("channel_id", "")),
+        label=str(value.get("label", "")),
+        enabled=bool(value.get("enabled", True)),
+        priority=int(value.get("priority", 100) or 100),
+    )
+
+
+def _operator_person_from_row(row: object) -> OperatorPerson:
+    assert row is not None
+    contact_targets = tuple(
+        _operator_contact_target_from_value(item)
+        for item in json.loads(str(row["contact_targets_json"]))
+    )
+    return OperatorPerson(
+        id=str(row["id"]),
+        display_name=str(row["display_name"]),
+        handle=str(row["handle"]),
+        enabled=bool(row["enabled"]),
+        timezone=str(row["timezone"]),
+        contact_targets=contact_targets,
+        metadata=_load_json(str(row["metadata_json"])),
+        created_at=_decode_datetime(row["created_at"]),
+        updated_at=_decode_datetime(row["updated_at"]),
+    )
+
+
+def _operator_team_from_row(row: object) -> OperatorTeam:
+    assert row is not None
+    return OperatorTeam(
+        id=str(row["id"]),
+        name=str(row["name"]),
+        enabled=bool(row["enabled"]),
+        description=str(row["description"]) if row["description"] is not None else None,
+        default_escalation_policy_id=(
+            str(row["default_escalation_policy_id"])
+            if row["default_escalation_policy_id"] is not None
+            else None
+        ),
+        created_at=_decode_datetime(row["created_at"]),
+        updated_at=_decode_datetime(row["updated_at"]),
+    )
+
+
+def _team_membership_from_row(row: object) -> TeamMembership:
+    assert row is not None
+    return TeamMembership(
+        id=str(row["id"]),
+        team_id=str(row["team_id"]),
+        person_id=str(row["person_id"]),
+        role=TeamMembershipRole(str(row["role"])),
+        enabled=bool(row["enabled"]),
+        created_at=_decode_datetime(row["created_at"]),
+        updated_at=_decode_datetime(row["updated_at"]),
+    )
+
+
+def _ownership_binding_from_row(row: object) -> OwnershipBinding:
+    assert row is not None
+    return OwnershipBinding(
+        id=str(row["id"]),
+        name=str(row["name"]),
+        team_id=str(row["team_id"]),
+        enabled=bool(row["enabled"]),
+        component_kind=(
+            ComponentKind(str(row["component_kind"]))
+            if row["component_kind"] is not None
+            else None
+        ),
+        component_id=str(row["component_id"]) if row["component_id"] is not None else None,
+        subject_kind=(
+            OwnershipSubjectKind(str(row["subject_kind"]))
+            if row["subject_kind"] is not None
+            else None
+        ),
+        subject_ref=str(row["subject_ref"]) if row["subject_ref"] is not None else None,
+        risk_level=(
+            TargetRiskLevel(str(row["risk_level"]))
+            if row["risk_level"] is not None
+            else None
+        ),
+        escalation_policy_id=(
+            str(row["escalation_policy_id"])
+            if row["escalation_policy_id"] is not None
+            else None
+        ),
+        created_at=_decode_datetime(row["created_at"]),
+        updated_at=_decode_datetime(row["updated_at"]),
+    )
+
+
+def _oncall_schedule_from_row(row: object) -> OnCallSchedule:
+    assert row is not None
+    return OnCallSchedule(
+        id=str(row["id"]),
+        team_id=str(row["team_id"]),
+        name=str(row["name"]),
+        timezone=str(row["timezone"]),
+        enabled=bool(row["enabled"]),
+        coverage_kind=ScheduleCoverageKind(str(row["coverage_kind"])),
+        schedule_config=_load_json(str(row["schedule_config_json"])),
+        created_at=_decode_datetime(row["created_at"]),
+        updated_at=_decode_datetime(row["updated_at"]),
+    )
+
+
+def _rotation_rule_from_row(row: object) -> RotationRule:
+    assert row is not None
+    participant_ids = tuple(str(item) for item in json.loads(str(row["participant_ids_json"])))
+    return RotationRule(
+        id=str(row["id"]),
+        schedule_id=str(row["schedule_id"]),
+        name=str(row["name"]),
+        participant_ids=participant_ids,
+        enabled=bool(row["enabled"]),
+        anchor_at=_decode_datetime(row["anchor_at"]),
+        interval_kind=RotationIntervalKind(str(row["interval_kind"])),
+        interval_count=int(row["interval_count"] or 1),
+        handoff_time=str(row["handoff_time"]) if row["handoff_time"] is not None else None,
+        created_at=_decode_datetime(row["created_at"]),
+        updated_at=_decode_datetime(row["updated_at"]),
+    )
+
+
+def _schedule_override_from_row(row: object) -> ScheduleOverride:
+    assert row is not None
+    return ScheduleOverride(
+        id=str(row["id"]),
+        schedule_id=str(row["schedule_id"]),
+        replacement_person_id=str(row["replacement_person_id"]),
+        replaced_person_id=(
+            str(row["replaced_person_id"]) if row["replaced_person_id"] is not None else None
+        ),
+        starts_at=datetime.fromisoformat(str(row["starts_at"])),
+        ends_at=datetime.fromisoformat(str(row["ends_at"])),
+        reason=str(row["reason"]),
+        priority=int(row["priority"] or 0),
+        enabled=bool(row["enabled"]),
+        actor=str(row["actor"]) if row["actor"] is not None else None,
+        created_at=_decode_datetime(row["created_at"]),
+        updated_at=_decode_datetime(row["updated_at"]),
+    )
+
+
+def _escalation_policy_from_row(row: object) -> EscalationPolicy:
+    assert row is not None
+    return EscalationPolicy(
+        id=str(row["id"]),
+        name=str(row["name"]),
+        enabled=bool(row["enabled"]),
+        default_ack_timeout_seconds=int(row["default_ack_timeout_seconds"] or 0),
+        default_repeat_page_seconds=int(row["default_repeat_page_seconds"] or 0),
+        max_repeat_pages=int(row["max_repeat_pages"] or 0),
+        terminal_behavior=str(row["terminal_behavior"]),
+        created_at=_decode_datetime(row["created_at"]),
+        updated_at=_decode_datetime(row["updated_at"]),
+    )
+
+
+def _escalation_step_from_row(row: object) -> EscalationStep:
+    assert row is not None
+    return EscalationStep(
+        id=str(row["id"]),
+        policy_id=str(row["policy_id"]),
+        step_index=int(row["step_index"] or 0),
+        target_kind=EscalationTargetKind(str(row["target_kind"])),
+        target_ref=str(row["target_ref"]),
+        ack_timeout_seconds=(
+            int(row["ack_timeout_seconds"])
+            if row["ack_timeout_seconds"] is not None
+            else None
+        ),
+        repeat_page_seconds=(
+            int(row["repeat_page_seconds"])
+            if row["repeat_page_seconds"] is not None
+            else None
+        ),
+        max_repeat_pages=(
+            int(row["max_repeat_pages"])
+            if row["max_repeat_pages"] is not None
+            else None
+        ),
+        reminder_enabled=bool(row["reminder_enabled"]),
+        stop_on_ack=bool(row["stop_on_ack"]),
+        created_at=_decode_datetime(row["created_at"]),
+        updated_at=_decode_datetime(row["updated_at"]),
+    )
+
+
+def _incident_engagement_from_row(row: object) -> IncidentEngagement:
+    assert row is not None
+    return IncidentEngagement(
+        id=str(row["id"]),
+        incident_id=str(row["incident_id"]),
+        incident_component_id=str(row["incident_component_id"]),
+        team_id=str(row["team_id"]) if row["team_id"] is not None else None,
+        policy_id=str(row["policy_id"]) if row["policy_id"] is not None else None,
+        status=EngagementStatus(str(row["status"])),
+        current_step_index=int(row["current_step_index"] or 0),
+        current_target_kind=(
+            EscalationTargetKind(str(row["current_target_kind"]))
+            if row["current_target_kind"] is not None
+            else None
+        ),
+        current_target_ref=(
+            str(row["current_target_ref"]) if row["current_target_ref"] is not None else None
+        ),
+        resolved_person_id=(
+            str(row["resolved_person_id"]) if row["resolved_person_id"] is not None else None
+        ),
+        acknowledged_by=(
+            str(row["acknowledged_by"]) if row["acknowledged_by"] is not None else None
+        ),
+        acknowledged_at=_decode_datetime(row["acknowledged_at"]),
+        handoff_count=int(row["handoff_count"] or 0),
+        repeat_page_count=int(row["repeat_page_count"] or 0),
+        next_action_at=_decode_datetime(row["next_action_at"]),
+        ack_deadline_at=_decode_datetime(row["ack_deadline_at"]),
+        last_page_at=_decode_datetime(row["last_page_at"]),
+        exhausted=bool(row["exhausted"]),
+        created_at=_decode_datetime(row["created_at"]),
+        updated_at=_decode_datetime(row["updated_at"]),
+        closed_at=_decode_datetime(row["closed_at"]),
+        payload=_load_json(str(row["payload_json"])),
+    )
+
+
+def _engagement_timeline_from_row(row: object) -> EngagementTimelineEntry:
+    assert row is not None
+    return EngagementTimelineEntry(
+        id=int(row["id"]),
+        engagement_id=str(row["engagement_id"]),
+        incident_id=str(row["incident_id"]),
+        event_type=str(row["event_type"]),
+        message=str(row["message"]),
+        recorded_at=datetime.fromisoformat(str(row["recorded_at"])),
+        payload=_load_json(str(row["payload_json"])),
+    )
+
+
+def _engagement_delivery_link_from_row(row: object) -> EngagementDeliveryLink:
+    assert row is not None
+    return EngagementDeliveryLink(
+        id=int(row["id"]),
+        engagement_id=str(row["engagement_id"]),
+        notification_id=str(row["notification_id"]),
+        delivery_id=str(row["delivery_id"]) if row["delivery_id"] is not None else None,
+        purpose=EngagementDeliveryPurpose(str(row["purpose"])),
+        step_index=int(row["step_index"] or 0),
+        created_at=_decode_datetime(row["created_at"]),
+        payload=_load_json(str(row["payload_json"])),
     )
 
 

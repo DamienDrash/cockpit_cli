@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-DATABASE_VERSION = 4
+DATABASE_VERSION = 5
 
 CREATE_MIGRATIONS_TABLE = """
 CREATE TABLE IF NOT EXISTS schema_migrations (
@@ -467,5 +467,252 @@ V4_STATEMENTS: tuple[str, ...] = (
     """
     CREATE INDEX IF NOT EXISTS idx_component_watch_state_subject
     ON component_watch_state(subject_kind, subject_ref);
+    """,
+)
+
+V5_STATEMENTS: tuple[str, ...] = (
+    """
+    CREATE TABLE IF NOT EXISTS operator_people (
+        id TEXT PRIMARY KEY,
+        display_name TEXT NOT NULL,
+        handle TEXT NOT NULL,
+        enabled INTEGER NOT NULL,
+        timezone TEXT NOT NULL,
+        contact_targets_json TEXT NOT NULL,
+        metadata_json TEXT NOT NULL,
+        payload_json TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+    );
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS operator_teams (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        enabled INTEGER NOT NULL,
+        description TEXT,
+        default_escalation_policy_id TEXT,
+        payload_json TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+    );
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS team_memberships (
+        id TEXT PRIMARY KEY,
+        team_id TEXT NOT NULL,
+        person_id TEXT NOT NULL,
+        role TEXT NOT NULL,
+        enabled INTEGER NOT NULL,
+        payload_json TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        FOREIGN KEY(team_id) REFERENCES operator_teams(id),
+        FOREIGN KEY(person_id) REFERENCES operator_people(id)
+    );
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS ownership_bindings (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        team_id TEXT NOT NULL,
+        enabled INTEGER NOT NULL,
+        component_kind TEXT,
+        component_id TEXT,
+        subject_kind TEXT,
+        subject_ref TEXT,
+        risk_level TEXT,
+        escalation_policy_id TEXT,
+        payload_json TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        FOREIGN KEY(team_id) REFERENCES operator_teams(id)
+    );
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS oncall_schedules (
+        id TEXT PRIMARY KEY,
+        team_id TEXT NOT NULL,
+        name TEXT NOT NULL,
+        timezone TEXT NOT NULL,
+        enabled INTEGER NOT NULL,
+        coverage_kind TEXT NOT NULL,
+        schedule_config_json TEXT NOT NULL,
+        payload_json TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        FOREIGN KEY(team_id) REFERENCES operator_teams(id)
+    );
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS schedule_rotations (
+        id TEXT PRIMARY KEY,
+        schedule_id TEXT NOT NULL,
+        name TEXT NOT NULL,
+        participant_ids_json TEXT NOT NULL,
+        enabled INTEGER NOT NULL,
+        anchor_at TEXT,
+        interval_kind TEXT NOT NULL,
+        interval_count INTEGER NOT NULL,
+        handoff_time TEXT,
+        payload_json TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        FOREIGN KEY(schedule_id) REFERENCES oncall_schedules(id)
+    );
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS schedule_overrides (
+        id TEXT PRIMARY KEY,
+        schedule_id TEXT NOT NULL,
+        replacement_person_id TEXT NOT NULL,
+        replaced_person_id TEXT,
+        starts_at TEXT NOT NULL,
+        ends_at TEXT NOT NULL,
+        reason TEXT NOT NULL,
+        priority INTEGER NOT NULL,
+        enabled INTEGER NOT NULL,
+        actor TEXT,
+        payload_json TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        FOREIGN KEY(schedule_id) REFERENCES oncall_schedules(id)
+    );
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS escalation_policies (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        enabled INTEGER NOT NULL,
+        default_ack_timeout_seconds INTEGER NOT NULL,
+        default_repeat_page_seconds INTEGER NOT NULL,
+        max_repeat_pages INTEGER NOT NULL,
+        terminal_behavior TEXT NOT NULL,
+        payload_json TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+    );
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS escalation_steps (
+        id TEXT PRIMARY KEY,
+        policy_id TEXT NOT NULL,
+        step_index INTEGER NOT NULL,
+        target_kind TEXT NOT NULL,
+        target_ref TEXT NOT NULL,
+        ack_timeout_seconds INTEGER,
+        repeat_page_seconds INTEGER,
+        max_repeat_pages INTEGER,
+        reminder_enabled INTEGER NOT NULL,
+        stop_on_ack INTEGER NOT NULL,
+        payload_json TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        FOREIGN KEY(policy_id) REFERENCES escalation_policies(id)
+    );
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS incident_engagements (
+        id TEXT PRIMARY KEY,
+        incident_id TEXT NOT NULL,
+        incident_component_id TEXT NOT NULL,
+        team_id TEXT,
+        policy_id TEXT,
+        status TEXT NOT NULL,
+        current_step_index INTEGER NOT NULL,
+        current_target_kind TEXT,
+        current_target_ref TEXT,
+        resolved_person_id TEXT,
+        acknowledged_by TEXT,
+        acknowledged_at TEXT,
+        handoff_count INTEGER NOT NULL,
+        repeat_page_count INTEGER NOT NULL,
+        next_action_at TEXT,
+        ack_deadline_at TEXT,
+        last_page_at TEXT,
+        exhausted INTEGER NOT NULL,
+        payload_json TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        closed_at TEXT,
+        FOREIGN KEY(incident_id) REFERENCES incidents(id),
+        FOREIGN KEY(team_id) REFERENCES operator_teams(id),
+        FOREIGN KEY(policy_id) REFERENCES escalation_policies(id)
+    );
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS engagement_timeline (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        engagement_id TEXT NOT NULL,
+        incident_id TEXT NOT NULL,
+        event_type TEXT NOT NULL,
+        message TEXT NOT NULL,
+        recorded_at TEXT NOT NULL,
+        payload_json TEXT NOT NULL,
+        FOREIGN KEY(engagement_id) REFERENCES incident_engagements(id),
+        FOREIGN KEY(incident_id) REFERENCES incidents(id)
+    );
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS engagement_delivery_links (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        engagement_id TEXT NOT NULL,
+        notification_id TEXT NOT NULL,
+        delivery_id TEXT,
+        purpose TEXT NOT NULL,
+        step_index INTEGER NOT NULL,
+        created_at TEXT NOT NULL,
+        payload_json TEXT NOT NULL,
+        FOREIGN KEY(engagement_id) REFERENCES incident_engagements(id),
+        FOREIGN KEY(notification_id) REFERENCES notifications(id)
+    );
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_operator_people_handle
+    ON operator_people(handle);
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_team_memberships_team
+    ON team_memberships(team_id, enabled);
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_ownership_bindings_team
+    ON ownership_bindings(team_id, enabled);
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_ownership_bindings_match
+    ON ownership_bindings(component_id, subject_ref, component_kind, risk_level);
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_oncall_schedules_team
+    ON oncall_schedules(team_id, enabled);
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_schedule_rotations_schedule
+    ON schedule_rotations(schedule_id, enabled);
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_schedule_overrides_schedule_window
+    ON schedule_overrides(schedule_id, enabled, starts_at, ends_at);
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_escalation_steps_policy
+    ON escalation_steps(policy_id, step_index);
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_incident_engagements_incident
+    ON incident_engagements(incident_id, status, updated_at DESC);
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_incident_engagements_due
+    ON incident_engagements(status, next_action_at);
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_engagement_timeline_engagement
+    ON engagement_timeline(engagement_id, recorded_at ASC);
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_engagement_delivery_links_engagement
+    ON engagement_delivery_links(engagement_id, created_at DESC);
     """,
 )

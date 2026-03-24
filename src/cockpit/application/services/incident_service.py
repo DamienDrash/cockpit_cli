@@ -4,7 +4,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from cockpit.application.dispatch.event_bus import EventBus
 from cockpit.application.services.self_healing_service import SelfHealingService
+from cockpit.domain.events.health_events import IncidentStatusChanged
 from cockpit.domain.models.health import IncidentRecord, IncidentTimelineEntry, RecoveryAttempt
 from cockpit.infrastructure.persistence.ops_repositories import (
     ComponentHealthRepository,
@@ -31,11 +33,13 @@ class IncidentService:
     def __init__(
         self,
         *,
+        event_bus: EventBus,
         incident_repository: IncidentRepository,
         recovery_attempt_repository: RecoveryAttemptRepository,
         component_health_repository: ComponentHealthRepository,
         self_healing_service: SelfHealingService,
     ) -> None:
+        self._event_bus = event_bus
         self._incident_repository = incident_repository
         self._recovery_attempt_repository = recovery_attempt_repository
         self._component_health_repository = component_health_repository
@@ -72,6 +76,7 @@ class IncidentService:
 
     def acknowledge_incident(self, incident_id: str) -> IncidentRecord:
         incident = self._require_incident(incident_id)
+        previous_status = incident.status
         incident.status = IncidentStatus.ACKNOWLEDGED
         incident.acknowledged_at = utc_now()
         incident.updated_at = incident.acknowledged_at
@@ -81,10 +86,21 @@ class IncidentService:
             event_type="acknowledged",
             message="Incident acknowledged by operator.",
         )
+        self._event_bus.publish(
+            IncidentStatusChanged(
+                incident_id=incident.id,
+                component_id=incident.component_id,
+                component_kind=incident.component_kind,
+                previous_status=previous_status,
+                new_status=IncidentStatus.ACKNOWLEDGED,
+                message="Incident acknowledged by operator.",
+            )
+        )
         return incident
 
     def close_incident(self, incident_id: str) -> IncidentRecord:
         incident = self._require_incident(incident_id)
+        previous_status = incident.status
         incident.status = IncidentStatus.CLOSED
         incident.closed_at = utc_now()
         incident.updated_at = incident.closed_at
@@ -93,6 +109,16 @@ class IncidentService:
             incident_id=incident.id,
             event_type="closed",
             message="Incident closed by operator.",
+        )
+        self._event_bus.publish(
+            IncidentStatusChanged(
+                incident_id=incident.id,
+                component_id=incident.component_id,
+                component_kind=incident.component_kind,
+                previous_status=previous_status,
+                new_status=IncidentStatus.CLOSED,
+                message="Incident closed by operator.",
+            )
         )
         return incident
 

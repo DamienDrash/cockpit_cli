@@ -144,6 +144,7 @@ class NotificationCandidate:
     component_kind: ComponentKind | None = None
     incident_status: IncidentStatus | None = None
     source_event_id: str | None = None
+    forced_channel_ids: tuple[str, ...] = ()
     payload: dict[str, object] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, object]:

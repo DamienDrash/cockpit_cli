@@ -27,6 +27,8 @@ def _page(title: str, body: str, *, flash: str | None = None) -> str:
         "<a href='/layouts'>Layouts</a>"
         "<a href='/notifications'>Notifications</a>"
         "<a href='/watches'>Watches</a>"
+        "<a href='/oncall'>On-Call</a>"
+        "<a href='/engagements'>Engagements</a>"
         "<a href='/incidents'>Incidents</a>"
         "<a href='/diagnostics'>Diagnostics</a>"
         "</nav>"
@@ -117,6 +119,19 @@ class LocalWebAdminServer:
                     return
                 if parsed.path == "/watches":
                     self._html(_page("Watches", _watches_body(service), flash=flash))
+                    return
+                if parsed.path == "/oncall":
+                    self._html(_page("On-Call", _oncall_body(service), flash=flash))
+                    return
+                if parsed.path == "/engagements":
+                    engagement_id = query.get("engagement_id", [None])[0]
+                    self._html(
+                        _page(
+                            "Engagements",
+                            _engagements_body(service, engagement_id=engagement_id),
+                            flash=flash,
+                        )
+                    )
                     return
                 if parsed.path == "/incidents":
                     incident_id = query.get("incident_id", [None])[0]
@@ -221,6 +236,10 @@ def _redirect_target(path: str) -> str:
         return "/notifications"
     if path.startswith("/watches"):
         return "/watches"
+    if path.startswith("/oncall"):
+        return "/oncall"
+    if path.startswith("/engagements"):
+        return "/engagements"
     if path.startswith("/incidents"):
         return "/incidents"
     if path.startswith("/diagnostics"):
@@ -352,6 +371,62 @@ def _handle_post(service: WebAdminService, path: str, form: dict[str, str]) -> t
     if path == "/watches/probe":
         payload = service.probe_watch(form.get("watch_id", ""))
         return "/watches", f"Probed watch {payload.get('watch_id', '')}."
+    if path == "/oncall/people/save":
+        person = service.save_operator_person(form)
+        return "/oncall", f"Saved operator {person.display_name}."
+    if path == "/oncall/people/delete":
+        person_id = form.get("person_id", "")
+        service.delete_operator_person(person_id)
+        return "/oncall", f"Deleted operator {person_id}."
+    if path == "/oncall/teams/save":
+        team = service.save_operator_team(form)
+        return "/oncall", f"Saved team {team.name}."
+    if path == "/oncall/teams/delete":
+        team_id = form.get("team_id", "")
+        service.delete_operator_team(team_id)
+        return "/oncall", f"Deleted team {team_id}."
+    if path == "/oncall/memberships/save":
+        membership = service.save_team_membership(form)
+        return "/oncall", f"Saved membership {membership.id}."
+    if path == "/oncall/memberships/delete":
+        membership_id = form.get("membership_id", "")
+        service.delete_team_membership(membership_id)
+        return "/oncall", f"Deleted membership {membership_id}."
+    if path == "/oncall/bindings/save":
+        binding = service.save_ownership_binding(form)
+        return "/oncall", f"Saved ownership binding {binding.name}."
+    if path == "/oncall/bindings/delete":
+        binding_id = form.get("binding_id", "")
+        service.delete_ownership_binding(binding_id)
+        return "/oncall", f"Deleted ownership binding {binding_id}."
+    if path == "/oncall/schedules/save":
+        schedule = service.save_oncall_schedule(form)
+        return "/oncall", f"Saved schedule {schedule.name}."
+    if path == "/oncall/schedules/delete":
+        schedule_id = form.get("schedule_id", "")
+        service.delete_oncall_schedule(schedule_id)
+        return "/oncall", f"Deleted schedule {schedule_id}."
+    if path == "/oncall/rotations/save":
+        rotation = service.save_rotation(form)
+        return "/oncall", f"Saved rotation {rotation.name}."
+    if path == "/oncall/rotations/delete":
+        rotation_id = form.get("rotation_id", "")
+        service.delete_rotation(rotation_id)
+        return "/oncall", f"Deleted rotation {rotation_id}."
+    if path == "/oncall/overrides/save":
+        override = service.save_override(form)
+        return "/oncall", f"Saved override {override.id}."
+    if path == "/oncall/overrides/delete":
+        override_id = form.get("override_id", "")
+        service.delete_override(override_id)
+        return "/oncall", f"Deleted override {override_id}."
+    if path == "/oncall/policies/save":
+        detail = service.save_escalation_policy(form)
+        return "/oncall", f"Saved escalation policy {detail.policy.name}."
+    if path == "/oncall/policies/delete":
+        policy_id = form.get("policy_id", "")
+        service.delete_escalation_policy(policy_id)
+        return "/oncall", f"Deleted escalation policy {policy_id}."
     if path == "/layouts/clone":
         layout = service.clone_layout(
             form.get("source_layout_id", ""),
@@ -417,6 +492,26 @@ def _handle_post(service: WebAdminService, path: str, form: dict[str, str]) -> t
         return "/incidents", (
             f"Queued retry for {component_id}." if retried else f"No component named {component_id}."
         )
+    if path == "/engagements/ack":
+        engagement = service.acknowledge_engagement(
+            form.get("engagement_id", ""),
+            actor=form.get("actor", "web-admin"),
+        )
+        return "/engagements", f"Acknowledged engagement {engagement.id}."
+    if path == "/engagements/repage":
+        engagement = service.repage_engagement(
+            form.get("engagement_id", ""),
+            actor=form.get("actor", "web-admin"),
+        )
+        return "/engagements", f"Triggered re-page for {engagement.id}."
+    if path == "/engagements/handoff":
+        engagement = service.handoff_engagement(
+            form.get("engagement_id", ""),
+            actor=form.get("actor", "web-admin"),
+            target_kind=form.get("target_kind", "person"),
+            target_ref=form.get("target_ref", ""),
+        )
+        return "/engagements", f"Handed off engagement {engagement.id}."
     if path == "/diagnostics/close-tunnel":
         profile_id = form.get("profile_id", "")
         service.close_tunnel(profile_id)
@@ -501,6 +596,8 @@ def _home_body(service: WebAdminService) -> str:
     active_incidents = diagnostics["active_incidents"]
     notification_diag = diagnostics["notifications"]
     watch_diag = diagnostics["watches"]
+    oncall_diag = diagnostics.get("oncall", {})
+    engagement_diag = oncall_diag.get("engagements", {})
     return (
         "<div class='grid'>"
         f"<div class='card'><h3>Datasources</h3><p>{escape(str(datasource_diag['total_profiles']))} total / {escape(str(datasource_diag['enabled_profiles']))} enabled</p></div>"
@@ -512,6 +609,8 @@ def _home_body(service: WebAdminService) -> str:
         f"<div class='card'><h3>Incidents</h3><p>{escape(str(len(active_incidents)))} active incident(s)</p></div>"
         f"<div class='card'><h3>Notifications</h3><p>queued={escape(str(notification_diag.get('counts', {}).get('queued', 0)))} failed={escape(str(notification_diag.get('counts', {}).get('failed', 0)))} suppressed={escape(str(notification_diag.get('counts', {}).get('suppressed', 0)))}</p></div>"
         f"<div class='card'><h3>Watches</h3><p>{escape(str(len(watch_diag.get('configs', []))))} configured / {escape(str(len(watch_diag.get('unhealthy', []))))} unhealthy</p></div>"
+        f"<div class='card'><h3>On-Call</h3><p>{escape(str(len(oncall_diag.get('people', []))))} people / {escape(str(len(oncall_diag.get('teams', []))))} teams / {escape(str(len(oncall_diag.get('schedules', []))))} schedules</p></div>"
+        f"<div class='card'><h3>Engagements</h3><p>{escape(str(engagement_diag.get('counts', {}).get('active', len(engagement_diag.get('active', []))))) if isinstance(engagement_diag.get('counts', {}), dict) else escape(str(len(engagement_diag.get('active', []))))} active / {escape(str(len(engagement_diag.get('blocked', []))))} blocked</p></div>"
         "</div>"
         "<p class='muted'>Use the admin pages to manage datasource profiles, managed secret references, plugin installs, notification policy, health watches, layout variants, incidents, and runtime diagnostics.</p>"
     )
@@ -996,6 +1095,289 @@ def _watches_body(service: WebAdminService) -> str:
     )
 
 
+def _oncall_body(service: WebAdminService) -> str:
+    people = service.list_operator_people()
+    teams = service.list_operator_teams()
+    memberships = service.list_team_memberships()
+    bindings = service.list_ownership_bindings()
+    schedules = service.list_oncall_schedules()
+    policies = service.list_escalation_policies()
+    active_engagements = service.list_engagements(active_only=True)
+
+    team_options = "".join(
+        f"<option value='{escape(team.id)}'>{escape(team.name)}</option>"
+        for team in teams
+    )
+    person_options = "".join(
+        f"<option value='{escape(person.id)}'>{escape(person.display_name)} ({escape(person.handle)})</option>"
+        for person in people
+    )
+    person_options_with_blank = "<option value=''></option>" + person_options
+    policy_options = (
+        "<option value=''></option>"
+        + "".join(
+            f"<option value='{escape(policy.id)}'>{escape(policy.name)}</option>"
+            for policy in policies
+        )
+    )
+
+    people_rows = []
+    for person in people:
+        people_rows.append(
+            "<tr>"
+            f"<td><strong>{escape(person.display_name)}</strong><br><span class='muted'>{escape(person.id)}</span></td>"
+            f"<td>{escape(person.handle)}<br><span class='muted'>{escape(person.timezone)}</span></td>"
+            f"<td>{escape(str(person.enabled))}</td>"
+            f"<td><pre>{escape(json.dumps([target.to_dict() for target in person.contact_targets], indent=2, sort_keys=True))}</pre></td>"
+            "<td>"
+            f"<form class='inline' method='post' action='/oncall/people/delete'><input type='hidden' name='person_id' value='{escape(person.id)}'><button type='submit'>Delete</button></form>"
+            "</td>"
+            "</tr>"
+        )
+
+    team_rows = []
+    for team in teams:
+        team_rows.append(
+            "<tr>"
+            f"<td><strong>{escape(team.name)}</strong><br><span class='muted'>{escape(team.id)}</span></td>"
+            f"<td>{escape(str(team.enabled))}</td>"
+            f"<td>{escape(team.description or '')}</td>"
+            f"<td>{escape(team.default_escalation_policy_id or '(none)')}</td>"
+            "<td>"
+            f"<form class='inline' method='post' action='/oncall/teams/delete'><input type='hidden' name='team_id' value='{escape(team.id)}'><button type='submit'>Delete</button></form>"
+            "</td>"
+            "</tr>"
+        )
+
+    membership_rows = []
+    for membership in memberships:
+        membership_rows.append(
+            "<tr>"
+            f"<td><strong>{escape(membership.team_id)}</strong><br><span class='muted'>{escape(membership.id)}</span></td>"
+            f"<td>{escape(membership.person_id)}</td>"
+            f"<td>{escape(membership.role.value)}</td>"
+            f"<td>{escape(str(membership.enabled))}</td>"
+            "<td>"
+            f"<form class='inline' method='post' action='/oncall/memberships/delete'><input type='hidden' name='membership_id' value='{escape(membership.id)}'><button type='submit'>Delete</button></form>"
+            "</td>"
+            "</tr>"
+        )
+
+    binding_rows = []
+    for binding in bindings:
+        binding_rows.append(
+            "<tr>"
+            f"<td><strong>{escape(binding.name)}</strong><br><span class='muted'>{escape(binding.id)}</span></td>"
+            f"<td>{escape(binding.team_id)}</td>"
+            f"<td>{escape(getattr(binding.component_kind, 'value', binding.component_kind) if binding.component_kind else '(any)')} / {escape(binding.component_id or '(any)')}</td>"
+            f"<td>{escape(getattr(binding.subject_kind, 'value', binding.subject_kind) if binding.subject_kind else '(any)')} / {escape(binding.subject_ref or '(any)')}<br><span class='muted'>risk={escape(getattr(binding.risk_level, 'value', binding.risk_level) if binding.risk_level else '(any)')} policy={escape(binding.escalation_policy_id or '(team default)')}</span></td>"
+            "<td>"
+            f"<form class='inline' method='post' action='/oncall/bindings/delete'><input type='hidden' name='binding_id' value='{escape(binding.id)}'><button type='submit'>Delete</button></form>"
+            "</td>"
+            "</tr>"
+        )
+
+    schedule_rows = []
+    for schedule in schedules:
+        rotations = service.list_rotations(schedule.id)
+        overrides = service.list_overrides(schedule.id)
+        schedule_rows.append(
+            "<tr>"
+            f"<td><strong>{escape(schedule.name)}</strong><br><span class='muted'>{escape(schedule.id)}</span></td>"
+            f"<td>{escape(schedule.team_id)}</td>"
+            f"<td>{escape(schedule.coverage_kind.value)}<br><span class='muted'>{escape(schedule.timezone)}</span></td>"
+            f"<td>{escape(str(schedule.enabled))}<br><span class='muted'>rotations={escape(str(len(rotations)))} overrides={escape(str(len(overrides)))}</span></td>"
+            f"<td><pre>{escape(json.dumps(schedule.schedule_config, indent=2, sort_keys=True))}</pre></td>"
+            "<td>"
+            f"<form class='inline' method='post' action='/oncall/schedules/delete'><input type='hidden' name='schedule_id' value='{escape(schedule.id)}'><button type='submit'>Delete</button></form>"
+            "</td>"
+            "</tr>"
+        )
+
+    rotation_rows = []
+    override_rows = []
+    for schedule in schedules:
+        for rotation in service.list_rotations(schedule.id):
+            rotation_rows.append(
+                "<tr>"
+                f"<td><strong>{escape(rotation.name)}</strong><br><span class='muted'>{escape(rotation.id)}</span></td>"
+                f"<td>{escape(rotation.schedule_id)}</td>"
+                f"<td>{escape(rotation.interval_kind.value)} / {escape(str(rotation.interval_count))}</td>"
+                f"<td>{escape(str(rotation.enabled))}<br><span class='muted'>{escape(str(rotation.anchor_at or '(none)'))}</span></td>"
+                f"<td>{escape(', '.join(rotation.participant_ids))}</td>"
+                "<td>"
+                f"<form class='inline' method='post' action='/oncall/rotations/delete'><input type='hidden' name='rotation_id' value='{escape(rotation.id)}'><button type='submit'>Delete</button></form>"
+                "</td>"
+                "</tr>"
+            )
+        for override in service.list_overrides(schedule.id):
+            override_rows.append(
+                "<tr>"
+                f"<td><strong>{escape(override.id)}</strong></td>"
+                f"<td>{escape(override.schedule_id)}</td>"
+                f"<td>{escape(override.replacement_person_id)}<br><span class='muted'>replaces={escape(override.replaced_person_id or '(whoever is active)')}</span></td>"
+                f"<td>{escape(str(override.starts_at))}<br><span class='muted'>{escape(str(override.ends_at))}</span></td>"
+                f"<td>{escape(override.reason)}<br><span class='muted'>priority={escape(str(override.priority))} actor={escape(override.actor or '(system)')}</span></td>"
+                "<td>"
+                f"<form class='inline' method='post' action='/oncall/overrides/delete'><input type='hidden' name='override_id' value='{escape(override.id)}'><button type='submit'>Delete</button></form>"
+                "</td>"
+                "</tr>"
+            )
+
+    policy_rows = []
+    for policy in policies:
+        detail = service.escalation_policy_detail(policy.id)
+        steps_payload = [step.to_dict() for step in detail.steps] if detail is not None else []
+        policy_rows.append(
+            "<tr>"
+            f"<td><strong>{escape(policy.name)}</strong><br><span class='muted'>{escape(policy.id)}</span></td>"
+            f"<td>{escape(str(policy.enabled))}</td>"
+            f"<td>ack={escape(str(policy.default_ack_timeout_seconds))}s repeat={escape(str(policy.default_repeat_page_seconds))}s max_repeat={escape(str(policy.max_repeat_pages))}</td>"
+            f"<td><pre>{escape(json.dumps(steps_payload, indent=2, sort_keys=True))}</pre></td>"
+            "<td>"
+            f"<form class='inline' method='post' action='/oncall/policies/delete'><input type='hidden' name='policy_id' value='{escape(policy.id)}'><button type='submit'>Delete</button></form>"
+            "</td>"
+            "</tr>"
+        )
+
+    engagements_preview = (
+        "<pre>"
+        + escape(json.dumps(active_engagements[:10], indent=2, sort_keys=True))
+        + "</pre>"
+        if active_engagements
+        else "<p class='muted'>No active engagements.</p>"
+    )
+
+    return (
+        "<div class='grid'>"
+        f"<div class='card'><h3>People</h3><p>{escape(str(len(people)))} configured</p></div>"
+        f"<div class='card'><h3>Teams</h3><p>{escape(str(len(teams)))} configured</p></div>"
+        f"<div class='card'><h3>Schedules</h3><p>{escape(str(len(schedules)))} configured</p></div>"
+        f"<div class='card'><h3>Policies</h3><p>{escape(str(len(policies)))} configured</p></div>"
+        "</div>"
+        "<div class='card'><h3>Create operator</h3>"
+        "<form method='post' action='/oncall/people/save'>"
+        "<div class='grid'>"
+        "<div><label>Operator id</label><input name='person_id' placeholder='optional'></div>"
+        "<div><label>Display name</label><input name='display_name' required placeholder='Alice Example'></div>"
+        "<div><label>Handle</label><input name='handle' required placeholder='alice'></div>"
+        "<div><label>Timezone</label><input name='timezone' value='Europe/Berlin'></div>"
+        "</div>"
+        "<p><label><input type='checkbox' name='enabled' value='1' checked> Enabled</label></p>"
+        "<p><label>Contact targets JSON</label><textarea name='contact_targets_json' rows='6' placeholder='[{\"channel_id\":\"slack-alice\",\"label\":\"Slack\",\"enabled\":true,\"priority\":100}]'></textarea></p>"
+        "<p><label>Metadata JSON</label><textarea name='metadata_json' rows='4' placeholder='{\"role\":\"primary\"}'></textarea></p>"
+        "<p><button type='submit'>Save operator</button></p></form></div>"
+        "<div class='card'><h3>Create team</h3>"
+        "<form method='post' action='/oncall/teams/save'>"
+        "<div class='grid'>"
+        "<div><label>Team id</label><input name='team_id' placeholder='optional'></div>"
+        "<div><label>Name</label><input name='name' required placeholder='Platform Ops'></div>"
+        f"<div><label>Default escalation policy</label><select name='default_escalation_policy_id'>{policy_options}</select></div>"
+        "<div><label>Description</label><input name='description' placeholder='Primary platform operations'></div>"
+        "</div>"
+        "<p><label><input type='checkbox' name='enabled' value='1' checked> Enabled</label></p>"
+        "<p><button type='submit'>Save team</button></p></form></div>"
+        "<div class='card'><h3>Create membership</h3>"
+        "<form method='post' action='/oncall/memberships/save'>"
+        "<div class='grid'>"
+        "<div><label>Membership id</label><input name='membership_id' placeholder='optional'></div>"
+        f"<div><label>Team</label><select name='team_id'>{team_options}</select></div>"
+        f"<div><label>Person</label><select name='person_id'>{person_options}</select></div>"
+        "<div><label>Role</label><select name='role'><option value='member'>member</option><option value='lead'>lead</option></select></div>"
+        "</div>"
+        "<p><label><input type='checkbox' name='enabled' value='1' checked> Enabled</label></p>"
+        "<p><button type='submit'>Save membership</button></p></form></div>"
+        "<div class='card'><h3>Create ownership binding</h3>"
+        "<form method='post' action='/oncall/bindings/save'>"
+        "<div class='grid'>"
+        "<div><label>Binding id</label><input name='binding_id' placeholder='optional'></div>"
+        "<div><label>Name</label><input name='name' required placeholder='Prod docker ownership'></div>"
+        f"<div><label>Team</label><select name='team_id'>{team_options}</select></div>"
+        f"<div><label>Escalation policy</label><select name='escalation_policy_id'>{policy_options}</select></div>"
+        "<div><label>Component kind</label><input name='component_kind' placeholder='docker_runtime'></div>"
+        "<div><label>Component id</label><input name='component_id' placeholder='docker:web'></div>"
+        "<div><label>Subject kind</label><input name='subject_kind' placeholder='datasource'></div>"
+        "<div><label>Subject ref</label><input name='subject_ref' placeholder='analytics'></div>"
+        "<div><label>Risk level</label><select name='risk_level'><option value=''></option><option value='dev'>dev</option><option value='stage'>stage</option><option value='prod'>prod</option></select></div>"
+        "</div>"
+        "<p><label><input type='checkbox' name='enabled' value='1' checked> Enabled</label></p>"
+        "<p><button type='submit'>Save binding</button></p></form></div>"
+        "<div class='card'><h3>Create schedule</h3>"
+        "<form method='post' action='/oncall/schedules/save'>"
+        "<div class='grid'>"
+        "<div><label>Schedule id</label><input name='schedule_id' placeholder='optional'></div>"
+        f"<div><label>Team</label><select name='team_id'>{team_options}</select></div>"
+        "<div><label>Name</label><input name='name' required placeholder='Business Hours'></div>"
+        "<div><label>Timezone</label><input name='timezone' value='Europe/Berlin'></div>"
+        "<div><label>Coverage</label><select name='coverage_kind'><option value='always'>always</option><option value='weekly_window'>weekly_window</option></select></div>"
+        "</div>"
+        "<p><label><input type='checkbox' name='enabled' value='1' checked> Enabled</label></p>"
+        "<p><label>Schedule config JSON</label><textarea name='schedule_config_json' rows='4' placeholder='{\"days\":[0,1,2,3,4],\"start_time\":\"09:00\",\"end_time\":\"17:00\"}'></textarea></p>"
+        "<p><button type='submit'>Save schedule</button></p></form></div>"
+        "<div class='card'><h3>Create rotation</h3>"
+        "<form method='post' action='/oncall/rotations/save'>"
+        "<div class='grid'>"
+        "<div><label>Rotation id</label><input name='rotation_id' placeholder='optional'></div>"
+        "<div><label>Schedule id</label><input name='schedule_id' required></div>"
+        "<div><label>Name</label><input name='name' required placeholder='Primary rotation'></div>"
+        "<div><label>Participants CSV</label><input name='participant_ids' placeholder='opr-1, opr-2'></div>"
+        "<div><label>Anchor at</label><input name='anchor_at' placeholder='2026-03-24T09:00:00+01:00'></div>"
+        "<div><label>Interval kind</label><select name='interval_kind'><option value='hours'>hours</option><option value='days'>days</option></select></div>"
+        "<div><label>Interval count</label><input name='interval_count' value='7'></div>"
+        "<div><label>Handoff time</label><input name='handoff_time' placeholder='09:00'></div>"
+        "</div>"
+        "<p><label><input type='checkbox' name='enabled' value='1' checked> Enabled</label></p>"
+        "<p><button type='submit'>Save rotation</button></p></form></div>"
+        "<div class='card'><h3>Create override</h3>"
+        "<form method='post' action='/oncall/overrides/save'>"
+        "<div class='grid'>"
+        "<div><label>Override id</label><input name='override_id' placeholder='optional'></div>"
+        "<div><label>Schedule id</label><input name='schedule_id' required></div>"
+        f"<div><label>Replacement person</label><select name='replacement_person_id'>{person_options}</select></div>"
+        f"<div><label>Replaced person</label><select name='replaced_person_id'>{person_options_with_blank}</select></div>"
+        "<div><label>Starts at</label><input name='starts_at' placeholder='2026-03-24T18:00:00+01:00'></div>"
+        "<div><label>Ends at</label><input name='ends_at' placeholder='2026-03-25T08:00:00+01:00'></div>"
+        "<div><label>Priority</label><input name='priority' value='100'></div>"
+        "<div><label>Actor</label><input name='actor' placeholder='operator'></div>"
+        "</div>"
+        "<p><label><input type='checkbox' name='enabled' value='1' checked> Enabled</label></p>"
+        "<p><label>Reason</label><input name='reason' required placeholder='Vacation cover'></p>"
+        "<p><button type='submit'>Save override</button></p></form></div>"
+        "<div class='card'><h3>Create escalation policy</h3>"
+        "<form method='post' action='/oncall/policies/save'>"
+        "<div class='grid'>"
+        "<div><label>Policy id</label><input name='policy_id' placeholder='optional'></div>"
+        "<div><label>Name</label><input name='name' required placeholder='Default escalation'></div>"
+        "<div><label>Ack timeout seconds</label><input name='default_ack_timeout_seconds' value='900'></div>"
+        "<div><label>Repeat page seconds</label><input name='default_repeat_page_seconds' value='300'></div>"
+        "<div><label>Max repeat pages</label><input name='max_repeat_pages' value='2'></div>"
+        "<div><label>Terminal behavior</label><select name='terminal_behavior'><option value='exhaust'>exhaust</option></select></div>"
+        "</div>"
+        "<p><label><input type='checkbox' name='enabled' value='1' checked> Enabled</label></p>"
+        "<p><label>Steps JSON</label><textarea name='steps_json' rows='8' placeholder='[{\"step_index\":0,\"target_kind\":\"team\",\"target_ref\":\"team-1\",\"ack_timeout_seconds\":900,\"repeat_page_seconds\":300,\"max_repeat_pages\":2,\"reminder_enabled\":true,\"stop_on_ack\":true}]'></textarea></p>"
+        "<p><button type='submit'>Save escalation policy</button></p></form></div>"
+        "<div class='card'><h3>Active engagements</h3>"
+        f"{engagements_preview}"
+        "</div>"
+        "<div class='card'><h3>Operators</h3><table><thead><tr><th>Person</th><th>Handle</th><th>Enabled</th><th>Contacts</th><th>Actions</th></tr></thead>"
+        f"<tbody>{''.join(people_rows) if people_rows else '<tr><td colspan=\"5\">No operators configured.</td></tr>'}</tbody></table></div>"
+        "<div class='card'><h3>Teams</h3><table><thead><tr><th>Team</th><th>Enabled</th><th>Description</th><th>Policy</th><th>Actions</th></tr></thead>"
+        f"<tbody>{''.join(team_rows) if team_rows else '<tr><td colspan=\"5\">No teams configured.</td></tr>'}</tbody></table></div>"
+        "<div class='card'><h3>Memberships</h3><table><thead><tr><th>Team</th><th>Person</th><th>Role</th><th>Enabled</th><th>Actions</th></tr></thead>"
+        f"<tbody>{''.join(membership_rows) if membership_rows else '<tr><td colspan=\"5\">No memberships configured.</td></tr>'}</tbody></table></div>"
+        "<div class='card'><h3>Ownership bindings</h3><table><thead><tr><th>Binding</th><th>Team</th><th>Component</th><th>Scope</th><th>Actions</th></tr></thead>"
+        f"<tbody>{''.join(binding_rows) if binding_rows else '<tr><td colspan=\"5\">No ownership bindings configured.</td></tr>'}</tbody></table></div>"
+        "<div class='card'><h3>Schedules</h3><table><thead><tr><th>Schedule</th><th>Team</th><th>Coverage</th><th>Status</th><th>Config</th><th>Actions</th></tr></thead>"
+        f"<tbody>{''.join(schedule_rows) if schedule_rows else '<tr><td colspan=\"6\">No schedules configured.</td></tr>'}</tbody></table></div>"
+        "<div class='card'><h3>Rotations</h3><table><thead><tr><th>Rotation</th><th>Schedule</th><th>Interval</th><th>Status</th><th>Participants</th><th>Actions</th></tr></thead>"
+        f"<tbody>{''.join(rotation_rows) if rotation_rows else '<tr><td colspan=\"6\">No rotations configured.</td></tr>'}</tbody></table></div>"
+        "<div class='card'><h3>Overrides</h3><table><thead><tr><th>Override</th><th>Schedule</th><th>Replacement</th><th>Window</th><th>Reason</th><th>Actions</th></tr></thead>"
+        f"<tbody>{''.join(override_rows) if override_rows else '<tr><td colspan=\"6\">No overrides configured.</td></tr>'}</tbody></table></div>"
+        "<div class='card'><h3>Escalation policies</h3><table><thead><tr><th>Policy</th><th>Enabled</th><th>Defaults</th><th>Steps</th><th>Actions</th></tr></thead>"
+        f"<tbody>{''.join(policy_rows) if policy_rows else '<tr><td colspan=\"5\">No escalation policies configured.</td></tr>'}</tbody></table></div>"
+    )
+
+
 def _layout_body(service: WebAdminService) -> str:
     layouts = service.list_layouts()
     panels = service.available_panels()
@@ -1086,6 +1468,7 @@ def _diagnostics_body(service: WebAdminService) -> str:
     recent_attempts = diagnostics.get("recent_recovery_attempts", [])
     notifications = diagnostics.get("notifications", {})
     watches = diagnostics.get("watches", {})
+    oncall = diagnostics.get("oncall", {})
     return (
         "<div class='card'><h3>Environment</h3>"
         f"<p>Project root: <code>{escape(str(diagnostics['project_root']))}</code></p>"
@@ -1127,6 +1510,9 @@ def _diagnostics_body(service: WebAdminService) -> str:
         "<div class='card'><h3>Watch State</h3>"
         f"<pre>{escape(json.dumps(watches, indent=2, sort_keys=True))}</pre>"
         "</div>"
+        "<div class='card'><h3>On-Call</h3>"
+        f"<pre>{escape(json.dumps(oncall, indent=2, sort_keys=True))}</pre>"
+        "</div>"
         "<div class='card'><h3>Supervised Tasks</h3>"
         f"<pre>{escape(json.dumps(diagnostics.get('tasks', []), indent=2, sort_keys=True))}</pre>"
         "</div>"
@@ -1142,11 +1528,111 @@ def _diagnostics_body(service: WebAdminService) -> str:
         "<div class='card'><h3>Curl Diagnostics</h3>"
         f"<pre>{escape(json.dumps(operations.get('curl', []), indent=2, sort_keys=True))}</pre>"
         "</div>"
+        "<div class='card'><h3>Engagement Diagnostics</h3>"
+        f"<pre>{escape(json.dumps(operations.get('engagement', []), indent=2, sort_keys=True))}</pre>"
+        "</div>"
         "<div class='card'><h3>Notification Delivery Operations</h3>"
         f"<pre>{escape(json.dumps(operations.get('notification', []), indent=2, sort_keys=True))}</pre>"
         "</div>"
         "<div class='card'><h3>Guard Decisions</h3>"
         f"<pre>{escape(json.dumps(operations.get('recent_guard_decisions', []), indent=2, sort_keys=True))}</pre>"
+        "</div>"
+    )
+
+
+def _engagements_body(service: WebAdminService, *, engagement_id: str | None) -> str:
+    engagements = service.list_engagements()
+    detail = service.engagement_detail(engagement_id) if engagement_id else None
+    active_only = service.list_engagements(active_only=True)
+    return (
+        "<div class='grid'>"
+        f"<div class='card'><h3>Active</h3><p>{escape(str(len(active_only)))} active engagement(s)</p></div>"
+        f"<div class='card'><h3>Recent</h3><p>{escape(str(len(engagements)))} engagement record(s)</p></div>"
+        "</div>"
+        "<div class='card'><h3>Engagement Center</h3>"
+        "<p class='muted'>Canonical paging and escalation runtime state for active incidents.</p>"
+        f"{_engagement_table(engagements, include_actions=True)}"
+        "</div>"
+        + (
+            _engagement_detail_block(detail)
+            if detail is not None
+            else "<div class='card'><h3>Engagement Detail</h3><p class='muted'>Select an engagement to inspect timeline, deliveries, and handoff controls.</p></div>"
+        )
+    )
+
+
+def _engagement_table(engagements: object, *, include_actions: bool) -> str:
+    if not isinstance(engagements, list) or not engagements:
+        return "<p class='muted'>No engagements recorded.</p>"
+    rows = []
+    for engagement in engagements:
+        if not isinstance(engagement, dict):
+            continue
+        engagement_id = str(engagement.get("id", ""))
+        incident_id = str(engagement.get("incident_id", ""))
+        actions = ""
+        if include_actions:
+            actions = (
+                f"<form class='inline' method='get' action='/engagements'><input type='hidden' name='engagement_id' value='{escape(engagement_id)}'><button type='submit'>View</button></form> "
+                f"<form class='inline' method='post' action='/engagements/ack'><input type='hidden' name='engagement_id' value='{escape(engagement_id)}'><button type='submit'>Ack</button></form> "
+                f"<form class='inline' method='post' action='/engagements/repage'><input type='hidden' name='engagement_id' value='{escape(engagement_id)}'><button type='submit'>Re-page</button></form>"
+            )
+        rows.append(
+            "<tr>"
+            f"<td><strong>{escape(engagement_id)}</strong><br><span class='muted'>incident={escape(incident_id)}</span></td>"
+            f"<td>{escape(str(engagement.get('status', '')))}</td>"
+            f"<td>{escape(str(engagement.get('team_id', '(unassigned)')))}</td>"
+            f"<td>{escape(str(engagement.get('current_step_index', '0')))}<br><span class='muted'>{escape(str(engagement.get('current_target_ref', '(none)')))}</span></td>"
+            f"<td>{escape(str(engagement.get('ack_deadline_at') or '(none)'))}<br><span class='muted'>next={escape(str(engagement.get('next_action_at') or '(none)'))}</span></td>"
+            f"<td>{actions or escape(str(engagement.get('updated_at', '')))}</td>"
+            "</tr>"
+        )
+    return (
+        "<table><thead><tr><th>Engagement</th><th>Status</th><th>Team</th><th>Step</th><th>Deadlines</th><th>Actions</th></tr></thead>"
+        f"<tbody>{''.join(rows)}</tbody></table>"
+    )
+
+
+def _engagement_detail_block(detail: object) -> str:
+    engagement = getattr(detail, "engagement", None)
+    if engagement is None:
+        return "<div class='card'><h3>Engagement Detail</h3><p class='muted'>Engagement not found.</p></div>"
+    incident = getattr(detail, "incident", None)
+    timeline = getattr(detail, "timeline", [])
+    delivery_links = getattr(detail, "delivery_links", [])
+    current_target_ref = escape(str(engagement.current_target_ref or ""))
+    incident_line = (
+        f"<p class='muted'>Incident: {escape(incident.summary)} ({escape(incident.status.value)})</p>"
+        if incident is not None
+        else "<p class='muted'>Incident record is no longer available.</p>"
+    )
+    return (
+        "<div class='card'><h3>Engagement Detail</h3>"
+        f"<p><strong>{escape(engagement.id)}</strong><br><span class='muted'>incident={escape(engagement.incident_id)} component={escape(engagement.incident_component_id)}</span></p>"
+        f"<p>Status: <code>{escape(engagement.status.value)}</code> team=<code>{escape(str(engagement.team_id or '(none)'))}</code> policy=<code>{escape(str(engagement.policy_id or '(none)'))}</code></p>"
+        f"<p>Step <code>{escape(str(engagement.current_step_index))}</code> target=<code>{escape(engagement.current_target_kind.value if engagement.current_target_kind else '(none)')}</code> ref=<code>{current_target_ref or '(none)'}</code></p>"
+        f"<p>Ack deadline: <code>{escape(str(engagement.ack_deadline_at or '(none)'))}</code> next action: <code>{escape(str(engagement.next_action_at or '(none)'))}</code></p>"
+        f"{incident_line}"
+        "<div class='grid'>"
+        "<div class='card'><h3>Actions</h3>"
+        f"<form method='post' action='/engagements/ack'><input type='hidden' name='engagement_id' value='{escape(engagement.id)}'><input type='hidden' name='actor' value='web-admin'><button type='submit'>Acknowledge</button></form>"
+        f"<form method='post' action='/engagements/repage'><input type='hidden' name='engagement_id' value='{escape(engagement.id)}'><input type='hidden' name='actor' value='web-admin'><button type='submit'>Re-page</button></form>"
+        "<form method='post' action='/engagements/handoff'>"
+        f"<input type='hidden' name='engagement_id' value='{escape(engagement.id)}'>"
+        "<input type='hidden' name='actor' value='web-admin'>"
+        "<div class='grid'>"
+        "<div><label>Target kind</label><select name='target_kind'><option value='person'>person</option><option value='team'>team</option><option value='channel'>channel</option></select></div>"
+        "<div><label>Target ref</label><input name='target_ref' required placeholder='opr-1 or team-1 or slack-ops'></div>"
+        "</div><p><button type='submit'>Hand off</button></p></form>"
+        "</div>"
+        "<div class='card'><h3>Engagement Snapshot</h3>"
+        f"<pre>{escape(json.dumps(engagement.to_dict(), indent=2, sort_keys=True))}</pre>"
+        "</div>"
+        "</div>"
+        "<h3>Timeline</h3>"
+        f"<pre>{escape(json.dumps([entry.to_dict() for entry in timeline], indent=2, sort_keys=True))}</pre>"
+        "<h3>Delivery Links</h3>"
+        f"<pre>{escape(json.dumps([link.to_dict() for link in delivery_links], indent=2, sort_keys=True))}</pre>"
         "</div>"
     )
 

@@ -1,4 +1,4 @@
-"""Compact operator summary panel for Stage 2 runtime state."""
+"""Compact operator summary panel for operator runtime state."""
 
 from __future__ import annotations
 
@@ -9,10 +9,20 @@ from textual.widgets import Static
 
 from cockpit.application.dispatch.event_bus import EventBus
 from cockpit.application.services.component_watch_service import ComponentWatchService
+from cockpit.application.services.escalation_service import EscalationService
 from cockpit.application.services.incident_service import IncidentService
 from cockpit.application.services.notification_service import NotificationService
 from cockpit.application.services.self_healing_service import SelfHealingService
 from cockpit.domain.events.base import BaseEvent
+from cockpit.domain.events.escalation_events import (
+    EngagementAcknowledged,
+    EngagementEscalated,
+    EngagementExhausted,
+    EngagementHandedOff,
+    EngagementPaged,
+    EngagementStatusChanged,
+    IncidentEngagementCreated,
+)
 from cockpit.domain.events.health_events import (
     ComponentHealthChanged,
     ComponentQuarantined,
@@ -25,8 +35,8 @@ from cockpit.domain.events.notification_events import (
     NotificationDeliveryFailed,
     NotificationQueued,
     NotificationStatusChanged,
-    NotificationSuppressed,
-)
+        NotificationSuppressed,
+    )
 from cockpit.domain.events.runtime_events import PanelMounted, PanelStateChanged
 from cockpit.domain.models.panel_state import PanelState
 from cockpit.shared.enums import IncidentStatus
@@ -50,6 +60,13 @@ class OpsPanel(Static):
         NotificationDelivered,
         NotificationDeliveryFailed,
         NotificationStatusChanged,
+        IncidentEngagementCreated,
+        EngagementStatusChanged,
+        EngagementPaged,
+        EngagementAcknowledged,
+        EngagementHandedOff,
+        EngagementEscalated,
+        EngagementExhausted,
     )
 
     def __init__(
@@ -60,6 +77,7 @@ class OpsPanel(Static):
         incident_service: IncidentService,
         notification_service: NotificationService,
         component_watch_service: ComponentWatchService,
+        escalation_service: EscalationService,
     ) -> None:
         super().__init__("", id=self.PANEL_ID, markup=False)
         self._event_bus = event_bus
@@ -67,6 +85,7 @@ class OpsPanel(Static):
         self._incident_service = incident_service
         self._notification_service = notification_service
         self._component_watch_service = component_watch_service
+        self._escalation_service = escalation_service
         self._main_thread_id = get_ident()
         self._subscriptions_registered = False
         self._workspace_name = "No workspace"
@@ -76,8 +95,11 @@ class OpsPanel(Static):
         self._health: dict[str, int] = {}
         self._incidents: list[dict[str, object]] = []
         self._quarantined: list[dict[str, object]] = []
+        self._engagements: list[dict[str, object]] = []
         self._notification_summary: dict[str, object] = {}
         self._unhealthy_watches: list[dict[str, object]] = []
+        self._selected_engagement_id: str | None = None
+        self._selected_engagement_index = 0
 
     def on_mount(self) -> None:
         self._main_thread_id = get_ident()
@@ -98,16 +120,19 @@ class OpsPanel(Static):
         self._workspace_root = str(context.get("workspace_root", ""))
         self._workspace_id = self._optional_str(context.get("workspace_id"))
         self._session_id = self._optional_str(context.get("session_id"))
+        self._selected_engagement_id = self._optional_str(context.get("selected_engagement_id"))
         self.refresh_summary()
 
     def restore_state(self, snapshot: dict[str, object]) -> None:
-        del snapshot
+        self._selected_engagement_id = self._optional_str(snapshot.get("selected_engagement_id"))
 
     def snapshot_state(self) -> PanelState:
         return PanelState(
             panel_id=self.PANEL_ID,
             panel_type=self.PANEL_TYPE,
-            snapshot={},
+            snapshot={
+                "selected_engagement_id": self._selected_engagement_id,
+            },
         )
 
     def suspend(self) -> None:
@@ -120,16 +145,28 @@ class OpsPanel(Static):
         """No runtime resources need disposal."""
 
     def command_context(self) -> dict[str, object]:
+        selected = self._selected_engagement()
         return {
             "panel_id": self.PANEL_ID,
             "workspace_id": self._workspace_id,
             "session_id": self._session_id,
             "workspace_root": self._workspace_root,
+            "selected_engagement_id": self._selected_engagement_id,
+            "selected_incident_id": selected.get("incident_id") if isinstance(selected, dict) else None,
+            "selected_engagement_status": selected.get("status") if isinstance(selected, dict) else None,
         }
 
     def on_key(self, event: events.Key) -> None:
         if event.key == "r":
             self.refresh_summary()
+            event.stop()
+            return
+        if event.key in {"down", "j"}:
+            self._move_selection(1)
+            event.stop()
+            return
+        if event.key in {"up", "k"}:
+            self._move_selection(-1)
             event.stop()
 
     def refresh_summary(self) -> None:
@@ -150,6 +187,12 @@ class OpsPanel(Static):
             state.to_dict()
             for state in self._self_healing_service.list_quarantined()[:6]
         ]
+        previous_selected = self._selected_engagement_id
+        self._engagements = [
+            engagement.to_dict()
+            for engagement in self._escalation_service.list_active_engagements(limit=8)
+        ]
+        self._sync_engagement_selection(previous_selected)
         self._notification_summary = self._notification_service.summary()
         self._unhealthy_watches = [
             state.to_dict()
@@ -200,6 +243,24 @@ class OpsPanel(Static):
                 lines.append(
                     f"- {item.get('component_id', '')}: {item.get('quarantine_reason') or item.get('status', '')}"
                 )
+        lines.extend(["", "Active engagements:"])
+        if not self._engagements:
+            lines.append("None.")
+        else:
+            for index, engagement in enumerate(self._engagements):
+                prefix = ">" if index == self._selected_engagement_index else " "
+                lines.append(
+                    (
+                        f"{prefix} {engagement.get('status', '')} "
+                        f"{engagement.get('id', '')} "
+                        f"incident={engagement.get('incident_id', '')} "
+                        f"step={engagement.get('current_step_index', 0)} "
+                        f"target={engagement.get('current_target_ref', '')}"
+                    )
+                )
+                next_action = engagement.get("next_action_at") or engagement.get("ack_deadline_at")
+                if next_action:
+                    lines.append(f"  next={next_action}")
         lines.extend(
             [
                 "",
@@ -244,7 +305,12 @@ class OpsPanel(Static):
                 lines.append(
                     f"- {item.get('status', '')} {item.get('title', '')}: {item.get('summary', '')}"
                 )
-        lines.extend(["", "Press r to refresh."])
+        lines.extend(
+            [
+                "",
+                "Keys: r refresh, j/down next engagement, k/up previous engagement.",
+            ]
+        )
         return "\n".join(lines)
 
     def _publish_panel_state(self) -> None:
@@ -262,6 +328,40 @@ class OpsPanel(Static):
             self.app.call_from_thread(self.refresh_summary)
             return
         self.refresh_summary()
+
+    def _move_selection(self, delta: int) -> None:
+        if not self._engagements:
+            return
+        self._selected_engagement_index = (self._selected_engagement_index + delta) % len(
+            self._engagements
+        )
+        self._selected_engagement_id = self._optional_str(
+            self._engagements[self._selected_engagement_index].get("id")
+        )
+        self._render_state()
+        self._publish_panel_state()
+
+    def _sync_engagement_selection(self, previous_selected: str | None) -> None:
+        if not self._engagements:
+            self._selected_engagement_id = None
+            self._selected_engagement_index = 0
+            return
+        selected_id = previous_selected or self._selected_engagement_id
+        if isinstance(selected_id, str):
+            for index, engagement in enumerate(self._engagements):
+                if engagement.get("id") == selected_id:
+                    self._selected_engagement_index = index
+                    self._selected_engagement_id = selected_id
+                    return
+        self._selected_engagement_index = 0
+        self._selected_engagement_id = self._optional_str(self._engagements[0].get("id"))
+
+    def _selected_engagement(self) -> dict[str, object] | None:
+        if not self._engagements:
+            return None
+        if 0 <= self._selected_engagement_index < len(self._engagements):
+            return self._engagements[self._selected_engagement_index]
+        return None
 
     @staticmethod
     def _optional_str(value: object) -> str | None:

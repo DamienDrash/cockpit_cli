@@ -100,6 +100,15 @@ class OperationsDiagnosticsServiceTests(unittest.TestCase):
                 summary="500 error",
                 payload={"method": "POST", "risk_level": "prod", "placeholder_names": ["TOKEN"]},
             )
+            ops_repo.record(
+                operation_family=OperationFamily.ENGAGEMENT,
+                component_id="engagement:eng-1",
+                subject_ref="inc-1",
+                success=True,
+                severity="high",
+                summary="page dispatched",
+                payload={"engagement_id": "eng-1"},
+            )
             service = OperationsDiagnosticsService(
                 docker_adapter=_FakeDockerAdapter(),
                 database_adapter=DatabaseAdapter(),
@@ -117,6 +126,7 @@ class OperationsDiagnosticsServiceTests(unittest.TestCase):
             self.assertEqual(len(overview["docker"]), 1)
             self.assertEqual(len(overview["db"]), 1)
             self.assertEqual(len(overview["curl"]), 1)
+            self.assertEqual(len(overview["engagement"]), 1)
             self.assertIn("notification", overview)
             self.assertEqual(overview["db"][0]["recent_failure_count"], 1)
             self.assertEqual(overview["curl"][0]["failure_streak"], 1)

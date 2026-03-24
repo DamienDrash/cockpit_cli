@@ -116,6 +116,11 @@ class NotificationService:
         for attempt in self._delivery_repository.list_due_attempts():
             self._deliver_attempt(attempt)
 
+    def send(self, candidate: NotificationCandidate) -> NotificationRecord | None:
+        """Persist and route a notification candidate immediately."""
+
+        return self._enqueue(candidate)
+
     def _on_incident_opened(self, event: IncidentOpened) -> None:
         self._enqueue(
             NotificationCandidate(
@@ -199,13 +204,13 @@ class NotificationService:
             )
         )
 
-    def _enqueue(self, candidate: NotificationCandidate) -> None:
+    def _enqueue(self, candidate: NotificationCandidate) -> NotificationRecord | None:
         routing = self._notification_policy_service.resolve(candidate)
         if self._notification_repository.recent_by_dedupe_key(
             candidate.dedupe_key,
             within_seconds=routing.dedupe_window_seconds,
         ):
-            return
+            return None
         suppressed, suppression_reason = self._suppression_service.evaluate(candidate)
         notification = NotificationRecord(
             id=make_id("ntf"),
@@ -250,14 +255,17 @@ class NotificationService:
                 summary=notification.suppression_reason or "notification suppressed",
                 payload={"suppressed": True},
             )
-            return
+            return notification
 
-        channels = self._notification_policy_service.enabled_channels_for_ids(routing.channel_ids)
+        routed_channel_ids = (
+            candidate.forced_channel_ids if candidate.forced_channel_ids else routing.channel_ids
+        )
+        channels = self._notification_policy_service.enabled_channels_for_ids(routed_channel_ids)
         if not channels:
             notification.status = NotificationStatus.FAILED
             notification.suppression_reason = "No enabled channels matched the routing decision."
             self._notification_repository.save(notification)
-            return
+            return notification
         for channel in channels:
             attempt = NotificationDeliveryAttempt(
                 id=make_id("ndl"),
@@ -269,6 +277,7 @@ class NotificationService:
             )
             self._delivery_repository.save(attempt)
         self.run_due_deliveries()
+        return notification
 
     def _deliver_attempt(self, attempt: NotificationDeliveryAttempt) -> None:
         notification = self._notification_repository.get(attempt.notification_id)

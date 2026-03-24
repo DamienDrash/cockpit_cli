@@ -93,6 +93,24 @@ class _FakeWatchService:
         return [WatchState()]
 
 
+class _FakeEscalationService:
+    def list_active_engagements(self, *, limit=25):
+        del limit
+
+        class Engagement:
+            def to_dict(self):
+                return {
+                    "id": "eng-1",
+                    "incident_id": "inc-1",
+                    "status": "active",
+                    "current_step_index": 0,
+                    "current_target_ref": "team-1",
+                    "next_action_at": "2026-03-24T10:05:00+00:00",
+                }
+
+        return [Engagement()]
+
+
 @unittest.skipIf(OpsPanel is None, "textual is not installed in this environment")
 class OpsPanelTests(unittest.TestCase):
     def test_renders_operator_summary(self) -> None:
@@ -102,6 +120,7 @@ class OpsPanelTests(unittest.TestCase):
             incident_service=_FakeIncidentService(),
             notification_service=_FakeNotificationService(),
             component_watch_service=_FakeWatchService(),
+            escalation_service=_FakeEscalationService(),
         )
 
         panel.initialize(
@@ -115,8 +134,11 @@ class OpsPanelTests(unittest.TestCase):
 
         self.assertIn("Active incidents:", rendered)
         self.assertIn("plugin-host:notes", rendered)
+        self.assertIn("Active engagements:", rendered)
+        self.assertIn("eng-1", rendered)
         self.assertIn("Failed deliveries:", rendered)
         self.assertIn("watch:datasource:pg-main", rendered)
+        self.assertEqual(panel.command_context()["selected_engagement_id"], "eng-1")
 
 
 if __name__ == "__main__":

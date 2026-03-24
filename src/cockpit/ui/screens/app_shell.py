@@ -59,6 +59,8 @@ class CockpitApp(App[None]):
         ("ctrl+r", "restart_terminal", "Restart Terminal"),
         ("ctrl+alt+c", "copy_terminal_buffer", "Copy Terminal Buffer"),
         ("ctrl+shift+c", "copy_terminal_selection", "Copy Terminal Selection"),
+        ("ctrl+shift+a", "acknowledge_selected_engagement", "Acknowledge Engagement"),
+        ("ctrl+shift+p", "repage_selected_engagement", "Re-page Engagement"),
         ("f8", "restart_selected_docker", "Restart Container"),
         ("f9", "stop_selected_docker", "Stop Container"),
         ("f10", "remove_selected_docker", "Remove Container"),
@@ -358,6 +360,26 @@ class CockpitApp(App[None]):
             )
         )
 
+    def action_acknowledge_selected_engagement(self) -> None:
+        self._dispatch_command(
+            Command(
+                id=make_id("cmd"),
+                source=CommandSource.KEYBINDING,
+                name="engagement.ack",
+                context=self._command_context(),
+            )
+        )
+
+    def action_repage_selected_engagement(self) -> None:
+        self._dispatch_command(
+            Command(
+                id=make_id("cmd"),
+                source=CommandSource.KEYBINDING,
+                name="engagement.repage",
+                context=self._command_context(),
+            )
+        )
+
     def action_toggle_palette(self) -> None:
         palette = self.query_one(CommandPalette)
         if palette.is_open:
@@ -401,6 +423,9 @@ class CockpitApp(App[None]):
             "cron.disable",
             "db.run_query",
             "curl.send",
+            "engagement.ack",
+            "engagement.repage",
+            "engagement.handoff",
         }:
             self._persist_current_snapshot()
 
@@ -682,6 +707,14 @@ class CockpitApp(App[None]):
                 "Copy Terminal Selection",
                 "terminal copy_selection",
             ),
+            "engagement.ack": (
+                "Acknowledge Selected Engagement",
+                "engagement ack",
+            ),
+            "engagement.repage": (
+                "Re-page Selected Engagement",
+                "engagement repage",
+            ),
         }
         items: list[PaletteItem] = []
         for command_name in self.container.command_catalog:
@@ -746,6 +779,29 @@ class CockpitApp(App[None]):
                         description=command_name,
                     )
                 )
+                continue
+            if command_name in {"engagement.ack", "engagement.repage", "engagement.handoff"}:
+                selected_engagement_id = context.get("selected_engagement_id")
+                if not isinstance(selected_engagement_id, str) or not selected_engagement_id:
+                    continue
+                if command_name == "engagement.ack":
+                    items.append(
+                        PaletteItem(
+                            label="Acknowledge Selected Engagement",
+                            command_text=f"engagement ack {shlex.quote(selected_engagement_id)}",
+                            description=command_name,
+                        )
+                    )
+                    continue
+                if command_name == "engagement.repage":
+                    items.append(
+                        PaletteItem(
+                            label="Re-page Selected Engagement",
+                            command_text=f"engagement repage {shlex.quote(selected_engagement_id)}",
+                            description=command_name,
+                        )
+                    )
+                    continue
                 continue
             label_command = labels.get(command_name)
             if label_command is None:

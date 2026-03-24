@@ -10,6 +10,8 @@ from cockpit.application.dispatch.command_parser import CommandParser
 from cockpit.application.dispatch.event_bus import EventBus
 from cockpit.application.services.datasource_service import DataSourceService
 from cockpit.application.services.component_watch_service import ComponentWatchService
+from cockpit.application.services.escalation_policy_service import EscalationPolicyService
+from cockpit.application.services.escalation_service import EscalationService
 from cockpit.application.services.guard_policy_service import GuardPolicyService
 from cockpit.application.handlers.curl_handlers import SendHttpRequestHandler
 from cockpit.application.handlers.cron_handlers import SetCronJobEnabledHandler
@@ -18,6 +20,11 @@ from cockpit.application.handlers.docker_handlers import (
     RemoveDockerContainerHandler,
     RestartDockerContainerHandler,
     StopDockerContainerHandler,
+)
+from cockpit.application.handlers.escalation_handlers import (
+    AcknowledgeEngagementHandler,
+    HandoffEngagementHandler,
+    RepageEngagementHandler,
 )
 from cockpit.application.services.incident_service import IncidentService
 from cockpit.application.services.notification_policy_service import NotificationPolicyService
@@ -31,6 +38,8 @@ from cockpit.application.handlers.layout_handlers import (
 from cockpit.application.services.operations_diagnostics_service import (
     OperationsDiagnosticsService,
 )
+from cockpit.application.services.oncall_resolution_service import OnCallResolutionService
+from cockpit.application.services.oncall_service import OnCallService
 from cockpit.application.services.recovery_policy_service import RecoveryPolicyService
 from cockpit.application.services.suppression_service import SuppressionService
 from cockpit.application.handlers.session_handlers import RestoreSessionHandler
@@ -93,15 +102,27 @@ from cockpit.infrastructure.persistence.repositories import (
 from cockpit.infrastructure.persistence.ops_repositories import (
     ComponentHealthRepository,
     ComponentWatchRepository,
+    EngagementDeliveryLinkRepository,
+    EngagementTimelineRepository,
+    EscalationPolicyRepository,
+    EscalationStepRepository,
     GuardDecisionRepository,
     IncidentRepository,
+    IncidentEngagementRepository,
     NotificationChannelRepository,
     NotificationDeliveryRepository,
     NotificationRepository,
     NotificationRuleRepository,
     NotificationSuppressionRepository,
+    OnCallScheduleRepository,
     OperationDiagnosticsRepository,
+    OperatorPersonRepository,
+    OperatorTeamRepository,
+    OwnershipBindingRepository,
     RecoveryAttemptRepository,
+    RotationRuleRepository,
+    ScheduleOverrideRepository,
+    TeamMembershipRepository,
 )
 from cockpit.infrastructure.notifications.ntfy_adapter import NtfyNotificationAdapter
 from cockpit.infrastructure.notifications.slack_adapter import SlackNotificationAdapter
@@ -118,6 +139,7 @@ from cockpit.infrastructure.system.clipboard import ClipboardService
 from cockpit.plugins.loader import PluginBootstrapContext, PluginLoader
 from cockpit.runtime.pty_manager import PTYManager
 from cockpit.runtime.health_monitor import RuntimeHealthMonitor
+from cockpit.runtime.escalation_monitor import EscalationMonitor
 from cockpit.runtime.stream_router import StreamRouter
 from cockpit.runtime.task_supervisor import TaskSupervisor
 from cockpit.shared.config import default_db_path, discover_project_root
@@ -158,7 +180,12 @@ class ApplicationContainer:
     suppression_service: SuppressionService
     component_watch_service: ComponentWatchService
     guard_policy_service: GuardPolicyService
+    oncall_service: OnCallService
+    oncall_resolution_service: OnCallResolutionService
+    escalation_policy_service: EscalationPolicyService
+    escalation_service: EscalationService
     health_monitor: RuntimeHealthMonitor
+    escalation_monitor: EscalationMonitor
     stream_router: StreamRouter
     pty_manager: PTYManager
     cron_adapter: CronAdapter
@@ -175,6 +202,7 @@ class ApplicationContainer:
 
     def shutdown(self) -> None:
         self.health_monitor.stop()
+        self.escalation_monitor.stop()
         self.pty_manager.shutdown()
         self.plugin_service.shutdown()
         self.tunnel_manager.shutdown()
@@ -227,6 +255,18 @@ def build_container(
     notification_repository = NotificationRepository(store)
     notification_delivery_repository = NotificationDeliveryRepository(store)
     component_watch_repository = ComponentWatchRepository(store)
+    operator_person_repository = OperatorPersonRepository(store)
+    operator_team_repository = OperatorTeamRepository(store)
+    team_membership_repository = TeamMembershipRepository(store)
+    ownership_binding_repository = OwnershipBindingRepository(store)
+    schedule_repository = OnCallScheduleRepository(store)
+    rotation_repository = RotationRuleRepository(store)
+    override_repository = ScheduleOverrideRepository(store)
+    escalation_policy_repository = EscalationPolicyRepository(store)
+    escalation_step_repository = EscalationStepRepository(store)
+    incident_engagement_repository = IncidentEngagementRepository(store)
+    engagement_timeline_repository = EngagementTimelineRepository(store)
+    engagement_delivery_link_repository = EngagementDeliveryLinkRepository(store)
     stream_router = StreamRouter()
     task_supervisor = TaskSupervisor()
     ssh_command_runner = ssh_command_runner or SSHCommandRunner()
@@ -259,6 +299,10 @@ def build_container(
     notification_policy_service = NotificationPolicyService(
         channel_repository=notification_channel_repository,
         rule_repository=notification_rule_repository,
+    )
+    escalation_policy_service = EscalationPolicyService(
+        policy_repository=escalation_policy_repository,
+        step_repository=escalation_step_repository,
     )
     suppression_service = SuppressionService(
         repository=notification_suppression_repository,
@@ -314,10 +358,29 @@ def build_container(
         component_watch_service=component_watch_service,
     )
     incident_service = IncidentService(
+        event_bus=event_bus,
         incident_repository=incident_repository,
         recovery_attempt_repository=recovery_attempt_repository,
         component_health_repository=component_health_repository,
         self_healing_service=self_healing_service,
+    )
+    oncall_service = OnCallService(
+        person_repository=operator_person_repository,
+        team_repository=operator_team_repository,
+        membership_repository=team_membership_repository,
+        ownership_binding_repository=ownership_binding_repository,
+        schedule_repository=schedule_repository,
+        rotation_repository=rotation_repository,
+        override_repository=override_repository,
+        escalation_policy_repository=escalation_policy_repository,
+    )
+    oncall_resolution_service = OnCallResolutionService(
+        person_repository=operator_person_repository,
+        team_repository=operator_team_repository,
+        ownership_binding_repository=ownership_binding_repository,
+        schedule_repository=schedule_repository,
+        rotation_repository=rotation_repository,
+        override_repository=override_repository,
     )
     operations_diagnostics_service = OperationsDiagnosticsService(
         docker_adapter=docker_adapter,
@@ -344,6 +407,17 @@ def build_container(
             NotificationChannelKind.NTFY: NtfyNotificationAdapter(),
         },
     )
+    escalation_service = EscalationService(
+        event_bus=event_bus,
+        incident_repository=incident_repository,
+        engagement_repository=incident_engagement_repository,
+        timeline_repository=engagement_timeline_repository,
+        delivery_link_repository=engagement_delivery_link_repository,
+        oncall_resolution_service=oncall_resolution_service,
+        escalation_policy_service=escalation_policy_service,
+        notification_service=notification_service,
+        operations_diagnostics_service=operations_diagnostics_service,
+    )
     health_monitor = RuntimeHealthMonitor(
         event_bus=event_bus,
         task_supervisor=task_supervisor,
@@ -352,6 +426,10 @@ def build_container(
         plugin_service=plugin_service,
         component_watch_service=component_watch_service,
         notification_service=notification_service,
+    )
+    escalation_monitor = EscalationMonitor(
+        escalation_service=escalation_service,
+        task_supervisor=task_supervisor,
     )
     activity_log_service = ActivityLogService(
         history_repository=history_repository,
@@ -449,6 +527,7 @@ def build_container(
                 incident_service=container.incident_service,
                 notification_service=container.notification_service,
                 component_watch_service=container.component_watch_service,
+                escalation_service=container.escalation_service,
             ),
         )
     )
@@ -586,6 +665,18 @@ def build_container(
             operations_diagnostics_service=operations_diagnostics_service,
         ),
     )
+    command_dispatcher.register(
+        "engagement.ack",
+        AcknowledgeEngagementHandler(escalation_service),
+    )
+    command_dispatcher.register(
+        "engagement.repage",
+        RepageEngagementHandler(escalation_service),
+    )
+    command_dispatcher.register(
+        "engagement.handoff",
+        HandoffEngagementHandler(escalation_service),
+    )
 
     plugin_loader = PluginLoader(allowed_module_prefixes=("cockpit.plugins.",))
     plugin_payload = dict(plugin_config)
@@ -616,6 +707,9 @@ def build_container(
         suppression_service=suppression_service,
         component_watch_service=component_watch_service,
         guard_policy_service=guard_policy_service,
+        oncall_service=oncall_service,
+        escalation_policy_service=escalation_policy_service,
+        escalation_service=escalation_service,
         panel_registry=panel_registry,
         state_repository=web_admin_state_repository,
         command_catalog=tuple(command_catalog_entries),
@@ -624,6 +718,7 @@ def build_container(
         project_root=project_root,
     )
     health_monitor.start()
+    escalation_monitor.start()
 
     return ApplicationContainer(
         project_root=project_root,
@@ -647,7 +742,12 @@ def build_container(
         suppression_service=suppression_service,
         component_watch_service=component_watch_service,
         guard_policy_service=guard_policy_service,
+        oncall_service=oncall_service,
+        oncall_resolution_service=oncall_resolution_service,
+        escalation_policy_service=escalation_policy_service,
+        escalation_service=escalation_service,
         health_monitor=health_monitor,
+        escalation_monitor=escalation_monitor,
         stream_router=stream_router,
         pty_manager=pty_manager,
         cron_adapter=cron_adapter,

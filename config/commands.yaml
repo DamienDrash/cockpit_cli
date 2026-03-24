@@ -23,3 +23,6 @@ commands:
   - cron.disable
   - db.run_query
   - curl.send
+  - engagement.ack
+  - engagement.repage
+  - engagement.handoff
