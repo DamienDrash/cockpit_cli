@@ -143,8 +143,20 @@ class WorkPanel(BasePanel):
 
     def attach_terminal(self) -> None:
         terminal = self.query_one(EmbeddedTerminal)
-        terminal.clear("Launching terminal...")
         target_label = self._target_label() or "local"
+        
+        # Check if we already have a session for this panel
+        existing = self._pty_manager.get_session(self.PANEL_ID)
+        if existing is not None:
+            terminal.clear(f"Terminal running in {existing.cwd}")
+            self.query_one("#work-panel-note", Static).update(
+                f"Terminal active on {target_label}. Focus the terminal region to type."
+            )
+            self._restore_terminal_buffer()
+            self._sync_terminal_size()
+            return
+
+        terminal.clear("Launching terminal...")
         self.query_one("#work-panel-note", Static).update(
             "Terminal target: "
             f"{target_label} {self._cwd or self._workspace_root or '(unset)'}"

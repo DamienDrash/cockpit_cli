@@ -138,10 +138,21 @@ class FallbackTerminalEngine:
             elif final == "l":
                 self._alternate_active = False
             return
-        if raw_params.startswith("?"):
+        if raw_params.startswith("?") or raw_params.startswith(">"):
             return
 
-        params = [int(part) if part else 0 for part in raw_params.split(";")] if raw_params else [0]
+        params: list[int] = []
+        for part in raw_params.split(";"):
+            if not part:
+                params.append(0)
+                continue
+            # Extract numeric part to avoid ValueError on sequences like '>0'
+            # though we already check for startswith('>') above, this is more robust
+            numeric = "".join(c for c in part if c.isdigit())
+            params.append(int(numeric) if numeric else 0)
+
+        if not params:
+            params = [0]
         state = self._state()
         if final == "A":
             state.row = max(0, state.row - max(1, params[0] or 1))

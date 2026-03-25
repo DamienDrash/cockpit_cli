@@ -81,6 +81,12 @@ class PTYManager:
                 target_ref=target_ref,
             )
             master_fd, slave_fd = pty.openpty()
+
+            def preexec() -> None:
+                os.setsid()
+                # Set the slave FD as the controlling terminal
+                fcntl.ioctl(0, termios.TIOCSCTTY, 0)
+
             process = subprocess.Popen(
                 launch.command,
                 stdin=slave_fd,
@@ -89,6 +95,7 @@ class PTYManager:
                 cwd=launch.cwd,
                 env=launch.env,
                 close_fds=True,
+                preexec_fn=preexec,
             )
             os.close(slave_fd)
             slave_fd = -1
