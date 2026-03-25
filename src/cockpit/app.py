@@ -6,6 +6,7 @@ from argparse import ArgumentParser, Namespace
 from collections.abc import Sequence
 from pathlib import Path
 import shlex
+import sys
 from threading import Thread
 from time import sleep
 import webbrowser
