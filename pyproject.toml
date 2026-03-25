@@ -7,7 +7,7 @@ name = "cockpit-cli"
 version = "0.1.3"
 description = "Keyboard-first TUI platform for developer workspaces."
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.11,<3.14"
 dependencies = [
   "cffi>=1.17",
   "packaging>=24.0",
@@ -38,7 +38,7 @@ duckdb = [
 ]
 bigquery = [
   "google-cloud-bigquery>=3.30",
-  "pybigquery>=0.10",
+  "sqlalchemy-bigquery>=1.16.0",
 ]
 snowflake = [
   "snowflake-sqlalchemy>=1.6",
@@ -60,6 +60,32 @@ vault = [
   "cryptography>=44.0",
   "keyring>=25.6",
 ]
+all-datasources-pure = [
+  "ibis-framework>=10.0",
+  "psycopg[binary]>=3.2",
+  "PyMySQL>=1.1",
+  "duckdb>=1.1",
+  "duckdb-engine>=0.13",
+  "google-cloud-bigquery>=3.30",
+  "sqlalchemy-bigquery>=1.16.0",
+  "pymongo>=4.10",
+  "redis>=5.0",
+]
+all-datasources-native = [
+  "ibis-framework>=10.0",
+  "psycopg[binary]>=3.2",
+  "PyMySQL>=1.1",
+  "mariadb>=1.1",
+  "pyodbc>=5.1",
+  "duckdb>=1.1",
+  "duckdb-engine>=0.13",
+  "google-cloud-bigquery>=3.30",
+  "sqlalchemy-bigquery>=1.16.0",
+  "snowflake-sqlalchemy>=1.6",
+  "pymongo>=4.10",
+  "redis>=5.0",
+  "chromadb>=0.5",
+]
 all-datasources = [
   "ibis-framework>=10.0",
   "psycopg[binary]>=3.2",
@@ -69,7 +95,7 @@ all-datasources = [
   "duckdb>=1.1",
   "duckdb-engine>=0.13",
   "google-cloud-bigquery>=3.30",
-  "pybigquery>=0.10",
+  "sqlalchemy-bigquery>=1.16.0",
   "snowflake-sqlalchemy>=1.6",
   "pymongo>=4.10",
   "redis>=5.0",

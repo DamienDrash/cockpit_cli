@@ -33,8 +33,16 @@ def runbooks_dir(start: Path | None = None) -> Path:
     return config_dir(start) / "runbooks"
 
 
+def remediations_dir(start: Path | None = None) -> Path:
+    return config_dir(start) / "remediations"
+
+
 def state_dir(start: Path | None = None) -> Path:
     return discover_project_root(start) / ".cockpit"
+
+
+def exports_dir(start: Path | None = None) -> Path:
+    return state_dir(start) / "exports"
 
 
 def default_db_path(start: Path | None = None) -> Path:

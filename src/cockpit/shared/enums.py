@@ -63,6 +63,8 @@ class ComponentKind(StrEnum):
     DATASOURCE_WATCH = "datasource_watch"
     DOCKER_CONTAINER_WATCH = "docker_container_watch"
     RESPONSE_RUN = "response_run"
+    REMEDIATION_RUN = "remediation_run"
+    CASE_FILE = "case_file"
 
 
 class HealthStatus(StrEnum):
@@ -128,6 +130,8 @@ class OperationFamily(StrEnum):
     ENGAGEMENT = "engagement"
     RESPONSE = "response"
     REVIEW = "review"
+    REMEDIATION = "remediation"
+    CASE_FILE = "case_file"
 
 
 class NotificationChannelKind(StrEnum):
@@ -239,6 +243,98 @@ class RunbookExecutorKind(StrEnum):
     HTTP = "http"
     DOCKER = "docker"
     DB = "db"
+
+
+class RemediationRunStatus(StrEnum):
+    CREATED = "created"
+    READY = "ready"
+    RUNNING = "running"
+    WAITING = "waiting"
+    PARTIAL = "partial"
+    COMPLETED = "completed"
+    FAILED = "failed"
+    ABORTED = "aborted"
+    BLOCKED = "blocked"
+
+
+class RemediationTargetStatus(StrEnum):
+    PENDING = "pending"
+    READY = "ready"
+    WAITING_LOCK = "waiting_lock"
+    WAITING_WINDOW = "waiting_window"
+    WAITING_APPROVAL = "waiting_approval"
+    RUNNING = "running"
+    SUCCEEDED = "succeeded"
+    FAILED = "failed"
+    BLOCKED = "blocked"
+    COMPENSATED = "compensated"
+    ABORTED = "aborted"
+
+
+class RemediationLeaseStatus(StrEnum):
+    ACTIVE = "active"
+    RELEASED = "released"
+    EXPIRED = "expired"
+
+
+class RemediationTargetSelectorKind(StrEnum):
+    INCIDENT_COMPONENT = "incident_component"
+    EXPLICIT = "explicit"
+
+
+class RemediationFailureMode(StrEnum):
+    CONTINUE = "continue"
+    HALT = "halt"
+    COMPENSATE = "compensate"
+
+
+class ExecutionWindowKind(StrEnum):
+    ALWAYS = "always"
+    UTC_HOURS = "utc_hours"
+
+
+class LeaseScopeKind(StrEnum):
+    COMPONENT = "component"
+    DATASOURCE = "datasource"
+    TARGET = "target"
+    INCIDENT = "incident"
+    CUSTOM = "custom"
+
+
+class CaseFileStatus(StrEnum):
+    OPEN = "open"
+    READY = "ready"
+    SEALED = "sealed"
+    EXPORTED = "exported"
+
+
+class EvidenceCompletenessStatus(StrEnum):
+    INCOMPLETE = "incomplete"
+    PARTIAL = "partial"
+    COMPLETE = "complete"
+
+
+class CaseFileExportStatus(StrEnum):
+    PENDING = "pending"
+    RUNNING = "running"
+    SUCCEEDED = "succeeded"
+    FAILED = "failed"
+
+
+class EvidenceItemCategory(StrEnum):
+    INCIDENT = "incident"
+    RESPONSE = "response"
+    REMEDIATION = "remediation"
+    TARGET_OUTPUT = "target_output"
+    GUARD_DECISION = "guard_decision"
+    DIAGNOSTICS = "diagnostics"
+    REVIEW = "review"
+    EXPORT = "export"
+
+
+class EvidenceRedactionState(StrEnum):
+    RAW = "raw"
+    REDACTED = "redacted"
 
 
 class RunbookRiskClass(StrEnum):

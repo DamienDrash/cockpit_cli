@@ -187,10 +187,13 @@ class DockerPanel(Static):
         return self._containers[0] if self._containers else None
 
     def _publish_panel_state(self) -> None:
+        state = self.snapshot_state()
         self._event_bus.publish(
             PanelStateChanged(
                 panel_id=self.PANEL_ID,
-                snapshot=dict(self.snapshot_state().snapshot),
+                panel_type=self.PANEL_TYPE,
+                snapshot=state.snapshot,
+                config=state.config,
             )
         )
 

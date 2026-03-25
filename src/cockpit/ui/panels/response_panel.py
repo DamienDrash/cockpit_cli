@@ -272,12 +272,13 @@ class ResponsePanel(Static):
         self.call_from_thread(self.refresh_state)
 
     def _publish_panel_state(self) -> None:
+        state = self.snapshot_state()
         self._event_bus.publish(
             PanelStateChanged(
                 panel_id=self.PANEL_ID,
                 panel_type=self.PANEL_TYPE,
-                snapshot=self.snapshot_state().snapshot,
-                config=self.snapshot_state().config,
+                snapshot=state.snapshot,
+                config=state.config,
             )
         )
 

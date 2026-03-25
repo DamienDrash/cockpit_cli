@@ -161,10 +161,13 @@ class CurlPanel(Static):
         return "\n".join(lines)
 
     def _publish_panel_state(self) -> None:
+        state = self.snapshot_state()
         self._event_bus.publish(
             PanelStateChanged(
                 panel_id=self.PANEL_ID,
-                snapshot=dict(self.snapshot_state().snapshot),
+                panel_type=self.PANEL_TYPE,
+                snapshot=state.snapshot,
+                config=state.config,
             )
         )
 

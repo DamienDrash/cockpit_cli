@@ -22,7 +22,9 @@ class PanelFocused(RuntimeEvent):
 @dataclass(slots=True, kw_only=True)
 class PanelStateChanged(RuntimeEvent):
     panel_id: str
+    panel_type: str
     snapshot: dict[str, object]
+    config: dict[str, object]
 
 
 @dataclass(slots=True, kw_only=True)

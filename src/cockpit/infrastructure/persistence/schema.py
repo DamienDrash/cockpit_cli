@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-DATABASE_VERSION = 6
+DATABASE_VERSION = 7
 
 CREATE_MIGRATIONS_TABLE = """
 CREATE TABLE IF NOT EXISTS schema_migrations (
@@ -941,5 +941,185 @@ V6_STATEMENTS: tuple[str, ...] = (
     """
     CREATE INDEX IF NOT EXISTS idx_response_timeline_run
     ON response_timeline(response_run_id, recorded_at ASC);
+    """,
+)
+
+V7_STATEMENTS: tuple[str, ...] = (
+    """
+    CREATE TABLE IF NOT EXISTS remediation_catalog (
+        catalog_key TEXT PRIMARY KEY,
+        plan_id TEXT NOT NULL,
+        plan_version TEXT NOT NULL,
+        title TEXT NOT NULL,
+        description TEXT,
+        risk_class TEXT NOT NULL,
+        source_path TEXT NOT NULL,
+        checksum TEXT NOT NULL,
+        tags_json TEXT NOT NULL,
+        scope_json TEXT NOT NULL,
+        payload_json TEXT NOT NULL,
+        loaded_at TEXT NOT NULL
+    );
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS remediation_runs (
+        id TEXT PRIMARY KEY,
+        incident_id TEXT NOT NULL,
+        response_run_id TEXT,
+        engagement_id TEXT,
+        plan_id TEXT NOT NULL,
+        plan_version TEXT NOT NULL,
+        status TEXT NOT NULL,
+        risk_level TEXT NOT NULL,
+        started_by TEXT,
+        started_at TEXT,
+        updated_at TEXT NOT NULL,
+        completed_at TEXT,
+        summary TEXT,
+        last_error TEXT,
+        policy_payload_json TEXT NOT NULL,
+        payload_json TEXT NOT NULL,
+        FOREIGN KEY(incident_id) REFERENCES incidents(id),
+        FOREIGN KEY(response_run_id) REFERENCES response_runs(id),
+        FOREIGN KEY(engagement_id) REFERENCES incident_engagements(id)
+    );
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS remediation_target_runs (
+        id TEXT PRIMARY KEY,
+        remediation_run_id TEXT NOT NULL,
+        unit_key TEXT NOT NULL,
+        target_ref TEXT NOT NULL,
+        target_kind TEXT NOT NULL,
+        status TEXT NOT NULL,
+        attempt_count INTEGER NOT NULL,
+        guard_decision_id INTEGER,
+        approval_request_id TEXT,
+        lease_id TEXT,
+        started_at TEXT,
+        finished_at TEXT,
+        output_summary TEXT,
+        output_payload_json TEXT NOT NULL,
+        last_error TEXT,
+        evidence_complete INTEGER NOT NULL,
+        payload_json TEXT NOT NULL,
+        FOREIGN KEY(remediation_run_id) REFERENCES remediation_runs(id)
+    );
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS remediation_execution_leases (
+        id TEXT PRIMARY KEY,
+        scope_ref TEXT NOT NULL,
+        scope_kind TEXT NOT NULL,
+        holder_run_id TEXT NOT NULL,
+        holder_target_run_id TEXT NOT NULL,
+        status TEXT NOT NULL,
+        acquired_at TEXT NOT NULL,
+        expires_at TEXT,
+        released_at TEXT,
+        release_reason TEXT,
+        payload_json TEXT NOT NULL,
+        FOREIGN KEY(holder_run_id) REFERENCES remediation_runs(id),
+        FOREIGN KEY(holder_target_run_id) REFERENCES remediation_target_runs(id)
+    );
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS remediation_timeline (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        remediation_run_id TEXT NOT NULL,
+        incident_id TEXT NOT NULL,
+        event_type TEXT NOT NULL,
+        message TEXT NOT NULL,
+        recorded_at TEXT NOT NULL,
+        payload_json TEXT NOT NULL,
+        FOREIGN KEY(remediation_run_id) REFERENCES remediation_runs(id),
+        FOREIGN KEY(incident_id) REFERENCES incidents(id)
+    );
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS case_files (
+        id TEXT PRIMARY KEY,
+        incident_id TEXT NOT NULL,
+        engagement_id TEXT,
+        response_run_id TEXT,
+        remediation_run_id TEXT,
+        review_id TEXT,
+        status TEXT NOT NULL,
+        completeness_status TEXT NOT NULL,
+        manifest_version INTEGER NOT NULL,
+        summary TEXT,
+        opened_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        sealed_at TEXT,
+        payload_json TEXT NOT NULL,
+        FOREIGN KEY(incident_id) REFERENCES incidents(id),
+        FOREIGN KEY(engagement_id) REFERENCES incident_engagements(id),
+        FOREIGN KEY(response_run_id) REFERENCES response_runs(id),
+        FOREIGN KEY(remediation_run_id) REFERENCES remediation_runs(id),
+        FOREIGN KEY(review_id) REFERENCES postincident_reviews(id)
+    );
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS case_file_evidence_items (
+        id TEXT PRIMARY KEY,
+        case_file_id TEXT NOT NULL,
+        category TEXT NOT NULL,
+        source_kind TEXT NOT NULL,
+        source_ref TEXT NOT NULL,
+        label TEXT NOT NULL,
+        payload_json TEXT NOT NULL,
+        redaction_state TEXT NOT NULL,
+        required INTEGER NOT NULL,
+        included_at TEXT NOT NULL,
+        FOREIGN KEY(case_file_id) REFERENCES case_files(id)
+    );
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS case_file_exports (
+        id TEXT PRIMARY KEY,
+        case_file_id TEXT NOT NULL,
+        status TEXT NOT NULL,
+        requested_by TEXT,
+        requested_at TEXT NOT NULL,
+        completed_at TEXT,
+        format TEXT NOT NULL,
+        storage_ref TEXT,
+        manifest_payload_json TEXT NOT NULL,
+        error_message TEXT,
+        payload_json TEXT NOT NULL,
+        FOREIGN KEY(case_file_id) REFERENCES case_files(id)
+    );
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_remediation_catalog_lookup
+    ON remediation_catalog(plan_id, plan_version, loaded_at DESC);
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_remediation_runs_incident
+    ON remediation_runs(incident_id, status, updated_at DESC);
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_remediation_target_runs_run
+    ON remediation_target_runs(remediation_run_id, status, unit_key, target_ref);
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_remediation_target_runs_waiting
+    ON remediation_target_runs(status, remediation_run_id);
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_remediation_execution_leases_scope
+    ON remediation_execution_leases(scope_ref, status, acquired_at DESC);
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_case_files_incident
+    ON case_files(incident_id, updated_at DESC);
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_case_file_evidence_case_file
+    ON case_file_evidence_items(case_file_id, category, included_at ASC);
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_case_file_exports_case_file
+    ON case_file_exports(case_file_id, requested_at DESC);
     """,
 )
