@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "cockpit-cli"
-version = "0.1.4"
+version = "0.1.5"
 description = "Keyboard-first TUI platform for developer workspaces."
 readme = "README.md"
 requires-python = ">=3.11,<3.14"
@@ -45,6 +45,9 @@ snowflake = [
 ]
 mongo = [
   "pymongo>=4.10",
+]
+colors = [
+  "rich>=13.7.0",
 ]
 redis = [
   "redis>=5.0",
@@ -107,7 +110,7 @@ dev = [
 ]
 release = [
   "build>=1.2",
-  "cyclonedx-bom>=4.2",
+  "twine>=6.1",
   "sigstore>=3.6",
 ]
 
@@ -116,9 +119,6 @@ cockpit-cli = "cockpit.app:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/cockpit"]
-
-[tool.hatch.build.targets.wheel.force-include]
-"third_party/libvterm" = "third_party/libvterm"
 
 [tool.hatch.build.targets.sdist]
 include = [

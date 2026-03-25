@@ -6,15 +6,19 @@ from argparse import ArgumentParser, Namespace
 from collections.abc import Sequence
 from pathlib import Path
 import shlex
-import sys
 from threading import Thread
 from time import sleep
 import webbrowser
+
+from rich.console import Console
+from rich.table import Table
+from rich import box
 
 from cockpit.application.services.connection_service import ConnectionService
 from cockpit.infrastructure.config.config_loader import ConfigLoader
 from cockpit.infrastructure.web.admin_server import LocalWebAdminServer
 from cockpit.runtime.task_supervisor import SupervisedTaskContext
+from cockpit.ui.branding import show_splash
 
 
 def build_arg_parser() -> ArgumentParser:
@@ -69,20 +73,64 @@ def startup_command_text_from_args(args: Namespace) -> str | None:
     return None
 
 
-def list_connections_text(*, start: Path | None = None) -> str:
-    """Render configured connection profiles for CLI output."""
+def list_connections(console: Console, *, start: Path | None = None) -> None:
+    """Render configured connection profiles for CLI output using rich."""
     service = ConnectionService(ConfigLoader(start=start))
     profiles = service.list_profiles()
+
+    console.print()
     if not profiles:
-        return "No connection profiles configured."
-    lines = ["Configured connections:"]
+        console.print("[yellow]No connection profiles configured.[/yellow]")
+        return
+
+    table = Table(title="Configured Connections", box=box.ROUNDED, header_style="bold cyan")
+    table.add_column("Alias", style="bold green")
+    table.add_column("Target", style="white")
+    table.add_column("Default Path", style="dim")
+    table.add_column("Description", style="italic")
+
     for profile in profiles:
-        description = f" - {profile.description}" if profile.description else ""
-        lines.append(
-            f"- {profile.alias}: {profile.target_ref} "
-            f"(default_path={profile.default_path}){description}"
+        table.add_row(
+            profile.alias,
+            profile.target_ref,
+            profile.default_path or "/",
+            profile.description or "",
         )
-    return "\n".join(lines)
+
+    console.print(table)
+    console.print("\n[bold cyan]Next steps:[/bold cyan]")
+    console.print("  • Open a connection: [green]cockpit-cli open --connection <alias>[/green]")
+    console.print("  • List datasources:  [green]cockpit-cli datasources[/green]")
+    console.print()
+
+
+def list_datasources(console: Console, *, start: Path | None = None) -> None:
+    """Render configured datasource profiles for CLI output using rich."""
+    from cockpit.bootstrap import build_container
+
+    container = build_container(start=start)
+    try:
+        profiles = container.data_source_service.list_profiles()
+        console.print()
+        if not profiles:
+            console.print("[yellow]No datasource profiles configured.[/yellow]")
+        else:
+            table = Table(title="Configured Datasources", box=box.ROUNDED, header_style="bold cyan")
+            table.add_column("Name", style="bold green")
+            table.add_column("Backend", style="magenta")
+            table.add_column("Target", style="white")
+
+            for profile in profiles:
+                target = profile.connection_url or profile.target_ref or "(unset)"
+                table.add_row(profile.name, profile.backend, target)
+
+            console.print(table)
+            console.print("\n[bold cyan]Next steps:[/bold cyan]")
+            console.print("  • Open workspace: [green]cockpit-cli open .[/green]")
+            console.print("  • Run query:      [dim]Use the 'DB' tab inside the TUI[/dim]")
+            console.print()
+    finally:
+        container.shutdown()
 
 
 def completion_script(shell: str) -> str:
@@ -92,7 +140,7 @@ def completion_script(shell: str) -> str:
             [
                 "#compdef cockpit",
                 "_cockpit_cli() {",
-                "  local -a commands",
+                "  local a commands",
                 "  commands=(",
                 "    'open:Open a workspace'",
                 "    'resume:Resume the latest session'",
@@ -157,15 +205,7 @@ def run_admin_server_task(
     *,
     server: LocalWebAdminServer,
 ) -> None:
-    """Run the local web admin server under heartbeat supervision.
-
-    Notes
-    -----
-    `ThreadingHTTPServer.serve_forever` blocks without exposing a periodic
-    heartbeat surface. This wrapper runs the server in a dedicated daemon
-    thread, emits deterministic heartbeats, and raises when the serving thread
-    dies so the self-healing spine can react.
-    """
+    """Run the local web admin server under heartbeat supervision."""
 
     thread = Thread(
         target=server.serve_forever,
@@ -189,27 +229,18 @@ def main(argv: Sequence[str] | None = None) -> int:
     """Run the Cockpit application."""
     from cockpit.ui.screens.app_shell import CockpitApp
 
+    console = Console()
     parser = build_arg_parser()
-    args = parser.parse_args(list(argv) if argv is not None else None)
-    if getattr(args, "subcommand", None) == "connections":
-        print(list_connections_text(start=Path.cwd()))
-        return 0
-    if getattr(args, "subcommand", None) == "datasources":
-        from cockpit.bootstrap import build_container
+    args = parser.parse_args(list(argv) if argv is not None else sys.argv[1:])
 
-        container = build_container(start=Path.cwd())
-        try:
-            profiles = container.data_source_service.list_profiles()
-            if not profiles:
-                print("No datasource profiles configured.")
-            else:
-                print("Configured datasources:")
-                for profile in profiles:
-                    target = profile.connection_url or profile.target_ref or "(unset)"
-                    print(f"- {profile.name}: {profile.backend} -> {target}")
-        finally:
-            container.shutdown()
+    if getattr(args, "subcommand", None) == "connections":
+        list_connections(console, start=Path.cwd())
         return 0
+
+    if getattr(args, "subcommand", None) == "datasources":
+        list_datasources(console, start=Path.cwd())
+        return 0
+
     if getattr(args, "subcommand", None) == "admin":
         from cockpit.bootstrap import build_container
 
@@ -245,9 +276,12 @@ def main(argv: Sequence[str] | None = None) -> int:
             server.shutdown()
             container.shutdown()
         return 0
+
     if getattr(args, "subcommand", None) == "completion":
         print(completion_script(args.shell))
         return 0
+
+    show_splash(console)
     app = CockpitApp(startup_command_text=startup_command_text_from_args(args))
     app.run()
     return 0
