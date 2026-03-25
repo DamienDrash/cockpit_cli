@@ -1,6 +1,13 @@
 # Changelog
 
-## Unreleased
+## 0.1.4
+
+- fixed `PanelStateChanged` event contract to prevent runtime crashes during UI state updates
+- updated BigQuery dependency from `pybigquery` to `sqlalchemy-bigquery`
+- split `all-datasources` into `pure` and `native` variants to clarify installation requirements
+- added `bin/cockpit-cli-dev` wrapper for local development
+- narrowed Python support range to 3.11-3.13 for improved reliability
+- added automated smoke tests to CI pipeline
 
 ## 0.1.3
 
