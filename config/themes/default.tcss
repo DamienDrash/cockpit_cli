@@ -160,12 +160,83 @@ BasePanel {
   background: #000000;
 }
 
-#docker-detail-tabs {
+/* --- DB PANEL SIDEBAR --- */
+#db-sidebar {
+  border-right: vkey $primary;
+}
+
+#db-catalog-tree {
+  height: 1fr;
+  background: transparent;
+  color: $primary;
+}
+
+#db-main {
+  width: 1fr;
+  height: 1fr;
+  padding: 0;
+}
+
+#db-editor-pane {
+  height: 6;
+  border-bottom: hkey $secondary;
+  padding: 1;
+  background: #16213e;
+}
+
+#db-query-input {
+  border: none;
+  background: $background;
+}
+
+#db-results-pane {
+  height: 1fr;
+  padding: 1;
+}
+
+#db-results-grid {
+  height: 1fr;
+  border: round $primary;
+}
+
+#db-status-msg {
+  height: auto;
+  color: $secondary;
+  padding: 0 1;
+}
+
+/* --- CRON PANEL SIDEBAR --- */
+#cron-sidebar {
+  border-right: vkey $secondary;
+}
+
+#cron-main {
+  width: 1fr;
+  height: 1fr;
+  padding: 0;
+}
+
+#cron-details-container {
+  height: 10;
+  border-bottom: hkey $primary;
+  padding: 1;
+  background: #1a1a3a;
+}
+
+#cron-logs-view {
+  height: 1fr;
+  padding: 1;
+  background: #000000;
+  color: $text;
+}
+
+.sidebar .section-title {
+
   height: 3;
   background: #16213e;
   padding: 0 1;
-  align: middle;
-  border-bottom: thin $primary;
+  align: left middle;
+  border-bottom: solid $primary;
 }
 
 .mini-tab {

@@ -66,9 +66,10 @@ class DockerPanel(BasePanel):
                     yield Button("INSPECT", id="docker-tab-inspect", classes="mini-tab")
                 
                 with ContentSwitcher(initial="logs", id="docker-detail-switcher"):
-                    yield Static("Loading logs...", id="docker-logs-view", classes="detail-view")
-                    yield Static("Loading stats...", id="docker-stats-view", classes="detail-view")
-                    yield Static("Loading config...", id="docker-inspect-view", classes="detail-view")
+                    # IDs must match exactly what current is set to
+                    yield Static("Loading logs...", id="logs", classes="detail-view")
+                    yield Static("Loading stats...", id="stats", classes="detail-view")
+                    yield Static("Loading config...", id="inspect", classes="detail-view")
 
     def on_mount(self) -> None:
         self._event_bus.publish(PanelMounted(panel_id=self.PANEL_ID, panel_type=self.PANEL_TYPE))
@@ -159,7 +160,7 @@ class DockerPanel(BasePanel):
         selected = self._selected_container()
         if not selected:
             for vid in ["logs", "stats", "inspect"]:
-                self.query_one(f"#docker-{vid}-view", Static).update("No container selected.")
+                self.query_one(f"#{vid}", Static).update("No container selected.")
             return
 
         # Fetch logs
@@ -174,16 +175,16 @@ class DockerPanel(BasePanel):
             
             if current_diag:
                 log_text = "\n".join(current_diag.recent_logs) or "No logs available."
-                self.query_one("#docker-logs-view", Static).update(log_text)
+                self.query_one("#logs", Static).update(log_text)
                 
-                # Mock Stats for now (Gold Standard placeholder)
+                # Mock Stats for now
                 stats_text = f"Container: {selected.name}\nID: {selected.container_id}\n\nCPU: 0.5%\nMEM: 120MB / 2GB\nNET I/O: 1KB / 2KB"
-                self.query_one("#docker-stats-view", Static).update(stats_text)
+                self.query_one("#stats", Static).update(stats_text)
                 
-                # For Inspect, we'd normally call docker inspect
-                self.query_one("#docker-inspect-view", Static).update(f"Config for {selected.name} (ID {selected.container_id})")
+                # For Inspect
+                self.query_one("#inspect", Static).update(f"Config for {selected.name} (ID {selected.container_id})")
         except Exception as exc:
-            self.query_one("#docker-logs-view", Static).update(f"Error loading detail: {exc}")
+            self.query_one("#logs", Static).update(f"Error loading detail: {exc}")
 
     def _move_selection(self, delta: int) -> None:
         if not self._containers: return
@@ -192,9 +193,12 @@ class DockerPanel(BasePanel):
 
     def _switch_detail_tab(self, tab_id: str) -> None:
         self._active_detail_tab = tab_id
-        self.query_one("#docker-detail-switcher", ContentSwitcher).current = tab_id
-        for btn in self.query(".mini-tab"):
-            btn.variant = "primary" if btn.id == f"docker-tab-{tab_id}" else "default"
+        try:
+            self.query_one("#docker-detail-switcher", ContentSwitcher).current = tab_id
+            for btn in self.query(".mini-tab"):
+                btn.variant = "primary" if btn.id == f"docker-tab-{tab_id}" else "default"
+        except Exception:
+            pass
 
     def _selected_container(self) -> DockerContainerSummary | None:
         if not self._containers: return None
@@ -215,25 +219,20 @@ class DockerPanel(BasePanel):
     def _start_selected(self) -> None:
         selected = self._selected_container()
         if selected:
-            # Note: start is usually 'docker start'
             self._docker_adapter._run_container_action("start", selected.container_id, target_kind=self._target_kind, target_ref=self._target_ref)
             self.refresh_runtime()
 
     def _exec_selected(self) -> None:
         selected = self._selected_container()
         if selected:
-            from cockpit.shared.utils import make_id
-            from cockpit.shared.enums import CommandSource
-            from cockpit.domain.commands.command import Command
-            
-            # Send exec command to terminal tab
-            cmd_text = f"docker exec -it {selected.container_id} sh"
-            # In a real implementation, we would switch to terminal and send input
-            self.app.notify(f"Exec: {cmd_text}")
+            self.app.notify(f"Exec into {selected.name}")
 
     def resume(self) -> None:
         self.refresh_runtime()
         self.focus()
+
+    def restore_state(self, snapshot: dict[str, object]) -> None:
+        pass
 
     def snapshot_state(self) -> PanelState:
         return PanelState(panel_id=self.PANEL_ID, panel_type=self.PANEL_TYPE)
