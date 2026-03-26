@@ -183,7 +183,12 @@ class WorkPanel(BasePanel):
 
     def _render_context(self) -> None:
         try:
-            level = classify_target_risk(self._target_kind, self._target_ref, self._workspace_name, self._workspace_root)
+            level = classify_target_risk(
+                target_kind=self._target_kind,
+                target_ref=self._target_ref,
+                workspace_name=self._workspace_name,
+                workspace_root=self._workspace_root
+            )
             self.query_one(FileContext).update_context(
                 workspace_name=self._workspace_name,
                 workspace_root=self._workspace_root,
