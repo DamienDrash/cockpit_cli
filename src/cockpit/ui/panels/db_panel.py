@@ -9,7 +9,7 @@ from rich.syntax import Syntax
 from textual import events
 from textual.app import ComposeResult
 from textual.containers import Horizontal, Vertical
-from textual.widgets import Static, Label, Input, DataTable, Tree
+from textual.widgets import Static, Label, Input, DataTable, Tree, Button, ContentSwitcher, Select
 
 from cockpit.application.dispatch.event_bus import EventBus
 from cockpit.application.services.datasource_service import DataSourceService
@@ -22,6 +22,14 @@ from cockpit.infrastructure.db.database_adapter import (
 from cockpit.shared.enums import SessionTargetKind, StatusLevel
 from cockpit.ui.panels.base_panel import BasePanel
 from cockpit.ui.branding import C_PRIMARY, C_SECONDARY
+
+
+@dataclass(slots=True, frozen=True)
+class _CatalogEntry:
+    kind: str
+    entry_id: str
+    label: str
+    detail: str
 
 
 class DBPanel(BasePanel):
@@ -66,7 +74,7 @@ class DBPanel(BasePanel):
                     id="db-legend"
                 )
             
-            # Main: IDE
+            # Main: IDE or Config
             with Vertical(id="db-main"):
                 with ContentSwitcher(initial="ide", id="db-main-switcher"):
                     # 1. SQL IDE View
@@ -80,8 +88,7 @@ class DBPanel(BasePanel):
                             yield DataTable(id="db-results-grid")
                             yield Static("No query executed yet.", id="db-status-msg")
                     
-                    # 2. Config Form (from previous version)
-                    from textual.widgets import Select
+                    # 2. Config Form
                     with Vertical(id="config"):
                         yield Label("CONFIGURE NEW DATASOURCE", classes="pane-title")
                         with Vertical(id="db-config-form"):
@@ -116,22 +123,35 @@ class DBPanel(BasePanel):
 
     def on_key(self, event: events.Key) -> None:
         if self._config_mode:
-            if event.key == "escape": self._toggle_config_mode(False)
+            if event.key == "escape":
+                self._toggle_config_mode(False)
+                event.stop()
             return
-        if event.key == "r": self.refresh_catalog()
-        elif event.key == "e": self.query_one("#db-query-input").focus()
-        elif event.key == "n": self._toggle_config_mode(True)
+        if event.key == "r":
+            self.refresh_catalog()
+            event.stop()
+        elif event.key == "e":
+            self.query_one("#db-query-input").focus()
+            event.stop()
+        elif event.key == "n":
+            self._toggle_config_mode(True)
+            event.stop()
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
-        if event.button.id == "db-btn-new": self._toggle_config_mode(True)
-        elif event.button.id == "db-cfg-cancel": self._toggle_config_mode(False)
-        elif event.button.id == "db-cfg-save": self._handle_save_config()
+        if event.button.id == "db-btn-new":
+            self._toggle_config_mode(True)
+        elif event.button.id == "db-cfg-cancel":
+            self._toggle_config_mode(False)
+        elif event.button.id == "db-cfg-save":
+            self._handle_save_config()
 
     def _toggle_config_mode(self, enabled: bool) -> None:
         self._config_mode = enabled
         self.query_one("#db-main-switcher", ContentSwitcher).current = "config" if enabled else "ide"
-        if enabled: self.query_one("#db-cfg-name").focus()
-        else: self.focus()
+        if enabled:
+            self.query_one("#db-cfg-name").focus()
+        else:
+            self.focus()
 
     def _handle_save_config(self) -> None:
         name = self.query_one("#db-cfg-name", Input).value
@@ -142,11 +162,18 @@ class DBPanel(BasePanel):
             self.app.notify("Required fields missing!", severity="error")
             return
         try:
-            self._datasource_service.create_profile(name=name, backend=backend, connection_url=url, target_kind=SessionTargetKind.LOCAL if target == "local" else SessionTargetKind.SSH, target_ref=None if target == "local" else target)
+            self._datasource_service.create_profile(
+                name=name,
+                backend=backend,
+                connection_url=url,
+                target_kind=SessionTargetKind.LOCAL if target == "local" else SessionTargetKind.SSH,
+                target_ref=None if target == "local" else target
+            )
             self.app.notify(f"Datasource '{name}' saved.")
             self._toggle_config_mode(False)
             self.refresh_catalog()
-        except Exception as exc: self.app.notify(f"Save failed: {exc}", severity="error")
+        except Exception as exc:
+            self.app.notify(f"Save failed: {exc}", severity="error")
 
     def on_input_submitted(self, event: Input.Submitted) -> None:
         if event.input.id == "db-query-input":
@@ -156,9 +183,14 @@ class DBPanel(BasePanel):
     def refresh_catalog(self) -> None:
         try:
             profiles = self._datasource_service.list_profiles()
-            snapshot = self._database_adapter.list_databases(self._workspace_root, target_kind=self._target_kind, target_ref=self._target_ref)
+            snapshot = self._database_adapter.list_databases(
+                self._workspace_root,
+                target_kind=self._target_kind,
+                target_ref=self._target_ref
+            )
             self._update_catalog_tree(snapshot, profiles)
-        except Exception: pass
+        except Exception:
+            pass
 
     def _update_catalog_tree(self, snapshot: DatabaseCatalogSnapshot, profiles: list[object]) -> None:
         tree = self.query_one("#db-catalog-tree", Tree)
@@ -169,7 +201,6 @@ class DBPanel(BasePanel):
             pid = getattr(profile, "id", "unknown")
             name = getattr(profile, "name", "unknown")
             node = ds_root.add(f" {name}", data={"kind": "datasource", "id": pid})
-            # Add placeholders for lazy loading
             node.add("Tables", data={"kind": "tables_root", "pid": pid})
             node.add("Views", data={"kind": "views_root", "pid": pid})
             
@@ -181,26 +212,18 @@ class DBPanel(BasePanel):
     def on_tree_node_expanded(self, event: Tree.NodeExpanded) -> None:
         node = event.node
         if not node.data: return
-        
-        # Lazy load tables/views when node is expanded
         if node.data["kind"] == "tables_root":
             self._load_node_details(node, "tables")
         elif node.data["kind"] == "views_root":
             self._load_node_details(node, "views")
 
     def _load_node_details(self, node: Tree.Node, detail_kind: str) -> None:
-        if node.children: 
-            # If already loaded (beyond the placeholder), skip
-            if len(node.children) > 1 or node.children[0].label != "loading...":
-                return
-        
+        if node.children: return
         pid = node.data.get("pid")
         if not pid: return
-        
         try:
             inspection = self._datasource_service.inspect_profile(pid)
             if inspection.success:
-                node.remove_children()
                 items = inspection.details.get(detail_kind, [])
                 for item in items:
                     node.add_leaf(f" {item}", data={"kind": "table", "name": item, "pid": pid})
@@ -212,7 +235,6 @@ class DBPanel(BasePanel):
     def on_tree_node_selected(self, event: Tree.NodeSelected) -> None:
         data = event.node.data
         if not data: return
-        
         if data["kind"] == "datasource":
             self._selected_profile_id = data["id"]
             self._selected_database_path = None
@@ -220,7 +242,6 @@ class DBPanel(BasePanel):
             self._selected_database_path = data["path"]
             self._selected_profile_id = None
         elif data["kind"] == "table":
-            # Quick Query: Select first 100 rows
             table_name = data["name"]
             self._selected_profile_id = data["pid"]
             query = f"SELECT * FROM {table_name} LIMIT 100;"
@@ -232,12 +253,10 @@ class DBPanel(BasePanel):
         from cockpit.domain.commands.command import Command
         from cockpit.shared.enums import CommandSource
         from cockpit.shared.utils import make_id
-        
         args = {"query": sql}
         if self._selected_profile_id: args["profile_id"] = self._selected_profile_id
         elif self._selected_database_path: args["database_path"] = self._selected_database_path
         else: return
-
         cmd = Command(id=make_id("cmd"), source=CommandSource.KEYBINDING, name="db.run_query", args=args, context=self.command_context())
         self.app._dispatch_command(cmd)
 
@@ -258,14 +277,22 @@ class DBPanel(BasePanel):
             for row in rows:
                 if isinstance(row, list): grid.add_row(*[str(cell) for cell in row])
             status.update(f"Rows: {len(rows)}")
-        else: status.update(self._last_result.get("message", "Success."))
+        else:
+            status.update(self._last_result.get("message", "Success."))
 
     def resume(self) -> None:
         self.refresh_catalog()
         self.focus()
 
     def command_context(self) -> dict[str, object]:
-        return {"panel_id": self.PANEL_ID, "workspace_root": self._workspace_root, "target_kind": self._target_kind.value, "target_ref": self._target_ref, "selected_profile_id": self._selected_profile_id, "selected_database_path": self._selected_database_path}
+        return {
+            "panel_id": self.PANEL_ID,
+            "workspace_root": self._workspace_root,
+            "target_kind": self._target_kind.value,
+            "target_ref": self._target_ref,
+            "selected_profile_id": self._selected_profile_id,
+            "selected_database_path": self._selected_database_path
+        }
 
     def snapshot_state(self) -> PanelState:
         return PanelState(panel_id=self.PANEL_ID, panel_type=self.PANEL_TYPE)
