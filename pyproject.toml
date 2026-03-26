@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "cockpit-cli"
-version = "0.1.32"
+version = "0.1.33"
 description = "Keyboard-first TUI platform for developer workspaces."
 readme = "README.md"
 requires-python = ">=3.11,<3.14"

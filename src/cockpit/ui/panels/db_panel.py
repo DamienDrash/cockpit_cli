@@ -89,7 +89,7 @@ class DBPanel(BasePanel):
                             yield Input(placeholder="my-postgres-db", id="db-cfg-name")
                             yield Label("Backend:")
                             yield Select(
-                                [("sqlite", "SQLite"), ("postgres", "PostgreSQL"), ("mysql", "MySQL"), ("mongodb", "MongoDB"), ("redis", "Redis")],
+                                [("SQLite", "sqlite"), ("PostgreSQL", "postgres"), ("MySQL", "mysql"), ("MongoDB", "mongodb"), ("Redis", "redis")],
                                 value="postgres",
                                 id="db-cfg-backend"
                             )
