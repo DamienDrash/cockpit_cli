@@ -141,11 +141,17 @@ class FileExplorer(Static):
         return 0
 
     def _list_entries(self, directory: Path) -> list[Path]:
-        entries = sorted(
-            directory.iterdir(),
-            key=lambda path: (not path.is_dir(), path.name.lower()),
-        )
-        return entries[:200]
+        import os
+        try:
+            # Use os.scandir for better performance on large directories
+            with os.scandir(directory) as it:
+                entries = sorted(
+                    [Path(entry.path) for entry in it],
+                    key=lambda path: (not path.is_dir(), path.name.lower()),
+                )
+            return entries[:500] # Limit to 500 entries for UI performance
+        except Exception:
+            return []
 
     def _refresh_view(self) -> None:
         if self._browser_path is None:

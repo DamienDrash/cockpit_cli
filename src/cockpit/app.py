@@ -2,18 +2,23 @@
 
 from __future__ import annotations
 
+import sys
+import traceback
 from argparse import ArgumentParser, Namespace
 from collections.abc import Sequence
 from pathlib import Path
 import shlex
-import sys
 from threading import Thread
 from time import sleep
 import webbrowser
 
-from rich.console import Console
-from rich.table import Table
-from rich import box
+try:
+    from rich.console import Console
+    from rich.table import Table
+    from rich import box
+except ImportError:
+    print("Error: 'rich' library is missing. Install with pip install rich.")
+    sys.exit(1)
 
 from cockpit.application.services.connection_service import ConnectionService
 from cockpit.infrastructure.config.config_loader import ConfigLoader
@@ -227,62 +232,82 @@ def run_admin_server_task(
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    """Run the Cockpit application."""
-    from cockpit.ui.screens.app_shell import CockpitApp
+    """Run the Cockpit application with error reporting."""
+    try:
+        from cockpit.ui.screens.app_shell import CockpitApp
 
-    console = Console()
-    parser = build_arg_parser()
-    args = parser.parse_args(list(argv) if argv is not None else sys.argv[1:])
+        console = Console()
+        parser = build_arg_parser()
+        
+        cli_args = list(argv) if argv is not None else sys.argv[1:]
+        args = parser.parse_args(cli_args)
 
-    if getattr(args, "subcommand", None) == "connections":
-        list_connections(console, start=Path.cwd())
-        return 0
-
-    if getattr(args, "subcommand", None) == "datasources":
-        list_datasources(console, start=Path.cwd())
-        return 0
-
-    if getattr(args, "subcommand", None) == "admin":
-        from cockpit.bootstrap import build_container
-
-        container = build_container(start=Path.cwd())
-        server = LocalWebAdminServer(
-            container.web_admin_service,
-            host=args.host,
-            port=args.port,
-        )
-        try:
-            container.task_supervisor.spawn_supervised(
-                "web-admin-server",
-                lambda context: run_admin_server_task(context, server=server),
-                heartbeat_timeout_seconds=3.0,
-                restartable=True,
-                metadata={
-                    "component_id": "web-admin:local",
-                    "component_kind": "web_admin",
-                    "display_name": "Web Admin Server",
-                },
-            )
-            opened_browser = False
-            while True:
-                listen_url = server.listen_url()
-                if listen_url and getattr(args, "open_browser", False) and not opened_browser:
-                    webbrowser.open(listen_url, new=0, autoraise=True)
-                    opened_browser = True
-                sleep(0.25)
-        except KeyboardInterrupt:
+        if getattr(args, "subcommand", None) == "connections":
+            list_connections(console, start=Path.cwd())
             return 0
-        finally:
-            container.task_supervisor.stop("web-admin-server", timeout=2.0)
-            server.shutdown()
-            container.shutdown()
-        return 0
 
-    if getattr(args, "subcommand", None) == "completion":
-        print(completion_script(args.shell))
-        return 0
+        if getattr(args, "subcommand", None) == "datasources":
+            list_datasources(console, start=Path.cwd())
+            return 0
 
-    show_splash(console)
-    app = CockpitApp(startup_command_text=startup_command_text_from_args(args))
-    app.run()
-    return 0
+        if getattr(args, "subcommand", None) == "admin":
+            from cockpit.bootstrap import build_container
+
+            container = build_container(start=Path.cwd())
+            server = LocalWebAdminServer(
+                container.web_admin_service,
+                host=args.host,
+                port=args.port,
+            )
+            try:
+                container.task_supervisor.spawn_supervised(
+                    "web-admin-server",
+                    lambda context: run_admin_server_task(context, server=server),
+                    heartbeat_timeout_seconds=3.0,
+                    restartable=True,
+                    metadata={
+                        "component_id": "web-admin:local",
+                        "component_kind": "web_admin",
+                        "display_name": "Web Admin Server",
+                    },
+                )
+                opened_browser = False
+                while True:
+                    listen_url = server.listen_url()
+                    if listen_url and getattr(args, "open_browser", False) and not opened_browser:
+                        webbrowser.open(listen_url, new=0, autoraise=True)
+                        opened_browser = True
+                    sleep(0.25)
+            except KeyboardInterrupt:
+                return 0
+            finally:
+                container.task_supervisor.stop("web-admin-server", timeout=2.0)
+                server.shutdown()
+                container.shutdown()
+            return 0
+
+        if getattr(args, "subcommand", None) == "completion":
+            print(completion_script(args.shell))
+            return 0
+
+        # Splash Screen
+        try:
+            show_splash(console)
+        except Exception:
+            # Fallback if splash fails
+            console.print("[dim]Booting engine...[/]")
+
+        # Start App
+        startup_cmd = startup_command_text_from_args(args)
+        app = CockpitApp(startup_command_text=startup_cmd)
+        app.run()
+        return 0
+        
+    except Exception:
+        print("\n[CRITICAL SYSTEM ERROR]", file=sys.stderr)
+        traceback.print_exc(file=sys.stderr)
+        return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

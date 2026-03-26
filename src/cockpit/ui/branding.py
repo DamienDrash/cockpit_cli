@@ -1,4 +1,4 @@
-"""Branding and splash screen assets for Cockpit."""
+"""Branding and splash screen assets for Cockpit - Optimized."""
 
 from rich.console import Console
 from rich.panel import Panel
@@ -24,50 +24,46 @@ LOGO = r"""
 """
 
 def show_splash(console: Console) -> None:
-    """Show a cyberpunk splash screen with animation."""
+    """Show a cyberpunk splash screen with snappy animation."""
     
-    # 1. Show Logo with Glow Effect
     logo_text = Text(LOGO, style=C_PRIMARY)
-    console.print(Panel(logo_text, border_style=C_SECONDARY, padding=(1, 2), title="[bold white]v0.1.4[/]", subtitle="[dim]Keyboard-First TUI Platform[/]"))
+    console.print(Panel(logo_text, border_style=C_SECONDARY, padding=(1, 2), title="[bold white]v0.1.11[/]", subtitle="[dim]Keyboard-First TUI Platform[/]"))
     console.print()
 
-    # 2. Initialization Animation
+    # Reduced tasks and faster intervals for "snappier" feel
     tasks = [
-        "Scanning workspace hardware...",
-        "Linking Git adapters...",
-        "Calibrating terminal engines...",
-        "Igniting core platform spine...",
+        "Scanning Neural Links...",
+        "Syncing Data Grids...",
+        "Calibrating...",
         "System READY."
     ]
 
     with Progress(
         SpinnerColumn(spinner_name="dots12", style=C_PRIMARY),
         TextColumn("[progress.description]{task.description}"),
-        BarColumn(bar_width=40, style=C_ACCENT, complete_style=C_PRIMARY),
-        TaskProgressColumn(),
+        BarColumn(bar_width=30, style=C_ACCENT, complete_style=C_PRIMARY),
         console=console,
         transient=True,
     ) as progress:
         
-        boot_task = progress.add_task("[bold white]INITIALIZING COCKPIT...", total=len(tasks))
+        boot_task = progress.add_task("[bold white]BOOTING...", total=len(tasks))
         
         for step in tasks:
             progress.update(boot_task, description=f"[{C_SECONDARY}]{step}[/]")
-            # Simulate variable load times
-            time.sleep(random.uniform(0.2, 0.4))
+            time.sleep(random.uniform(0.05, 0.15)) # Much faster
             progress.advance(boot_task)
             
-    # 3. Small "Matrix Trickle" after-effect (optional, fast)
-    _matrix_trickle(console, 0.5)
+    # Very short trickle or skip if resources are low
+    _matrix_trickle(console, 0.3)
 
 def _matrix_trickle(console: Console, duration: float) -> None:
-    """A very fast matrix-style character trickle for flavor."""
+    """Fast, low-resource matrix-style character trickle."""
     chars = "0123456789ABCDEF@#$%&*"
-    width = console.width
+    width = min(console.width, 80) # Limit width for performance
     start_time = time.time()
     
-    with Live(Text(""), console=console, refresh_per_second=20, transient=True) as live:
+    with Live(Text(""), console=console, refresh_per_second=15, transient=True) as live:
         while time.time() - start_time < duration:
-            line = "".join(random.choice(chars) if random.random() > 0.9 else " " for _ in range(width))
+            line = "".join(random.choice(chars) if random.random() > 0.92 else " " for _ in range(width))
             live.update(Text(line, style="green dim"))
-            time.sleep(0.05)
+            time.sleep(0.04)

@@ -41,6 +41,7 @@ class EventCategory(StrEnum):
 
 class StatusLevel(StrEnum):
     INFO = "info"
+    SUCCESS = "success"
     WARNING = "warning"
     ERROR = "error"
 

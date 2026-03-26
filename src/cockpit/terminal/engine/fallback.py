@@ -1,8 +1,9 @@
-"""Pure-Python fallback terminal engine."""
+"""Pure-Python fallback terminal engine with Gold Standard compliance."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from collections.abc import Callable
 import re
 
 from cockpit.terminal.engine.models import TerminalCell, TerminalCursorState, TerminalEngineSnapshot
@@ -21,11 +22,12 @@ class _ScreenState:
 
 
 class FallbackTerminalEngine:
-    """Maintain a simplified terminal screen with basic CSI support."""
+    """Maintain a simplified terminal screen with robust CSI and DA support."""
 
-    def __init__(self) -> None:
+    def __init__(self, on_input: Callable[[str], None] | None = None) -> None:
         self._rows = 24
         self._cols = 80
+        self._on_input = on_input
         self.reset()
 
     def reset(self) -> None:
@@ -131,6 +133,7 @@ class FallbackTerminalEngine:
             state.lines.append([])
 
     def _handle_csi(self, raw_params: str, final: str) -> None:
+        # 1. Private Mode Set/Reset (Alternate Screen)
         if raw_params.startswith("?1049"):
             if final == "h":
                 self._alternate_active = True
@@ -138,21 +141,36 @@ class FallbackTerminalEngine:
             elif final == "l":
                 self._alternate_active = False
             return
+            
+        # 2. Device Attributes (DA) - Gold Standard Response for Shells like Fish
+        # Primary DA query: \x1b[c or \x1b[0c
+        if (raw_params == "" or raw_params == "0") and final == "c":
+            if self._on_input:
+                self._on_input("\x1b[?6c") # Identify as VT102
+            return
+        
+        # Secondary DA query: \x1b[>c or \x1b[>0c
+        if raw_params.startswith(">") and final == "c":
+            if self._on_input:
+                self._on_input("\x1b[>0;10;0c") # Term type 0, version 10, options 0
+            return
+
+        # 3. Filter out other private/extended sequences we don't handle yet
         if raw_params.startswith("?") or raw_params.startswith(">"):
             return
 
+        # 4. Standard CSI Handling
         params: list[int] = []
         for part in raw_params.split(";"):
             if not part:
                 params.append(0)
                 continue
-            # Extract numeric part to avoid ValueError on sequences like '>0'
-            # though we already check for startswith('>') above, this is more robust
             numeric = "".join(c for c in part if c.isdigit())
             params.append(int(numeric) if numeric else 0)
 
         if not params:
             params = [0]
+            
         state = self._state()
         if final == "A":
             state.row = max(0, state.row - max(1, params[0] or 1))

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from collections.abc import Callable
 
 from rich.text import Text
 from textual import events
@@ -20,10 +21,10 @@ class EmbeddedTerminal(Static):
 
     can_focus = True
 
-    def __init__(self) -> None:
+    def __init__(self, on_input: Callable[[str], None] | None = None) -> None:
         super().__init__("Terminal idle. Focus here and type to send input.", id="embedded-terminal")
-        self._buffer = TerminalBuffer()
-        self._max_chars = 16_000
+        self._buffer = TerminalBuffer(on_input=on_input)
+        self._max_chars = 32_000 # Increased buffer
         self._placeholder = "Terminal idle. Focus here and type to send input."
         self._viewport_offset = 0
         self._search_query: str | None = None
@@ -33,6 +34,8 @@ class EmbeddedTerminal(Static):
         self._selection_focus: Position | None = None
         self._drag_selection_active = False
         self._row_base_offset = 0
+        self._pending_chunks: list[str] = []
+        self._render_scheduled = False
 
     def clear(self, message: str = "Launching terminal...") -> None:
         self._buffer.reset()
@@ -45,14 +48,31 @@ class EmbeddedTerminal(Static):
         self._selection_focus = None
         self._drag_selection_active = False
         self._row_base_offset = 0
+        self._pending_chunks = []
+        self._render_scheduled = False
         self.update(message)
 
     def append_output(self, chunk: str) -> None:
         if not chunk:
             return
+        self._pending_chunks.append(chunk)
+        if not self._render_scheduled:
+            self._render_scheduled = True
+            # Throttled update: bundle all chunks arriving in the next 50ms
+            self.call_later(self._process_pending_output)
+
+    def _process_pending_output(self) -> None:
+        if not self._pending_chunks:
+            self._render_scheduled = False
+            return
+            
+        combined_chunk = "".join(self._pending_chunks)
+        self._pending_chunks = []
+        self._render_scheduled = False
+        
         follow_output = self._viewport_offset == 0
         previous_base_offset = self._row_base_offset
-        self._buffer.feed(chunk)
+        self._buffer.feed(combined_chunk)
         self._refresh_search_matches()
         base_delta = self._row_base_offset - previous_base_offset
         if base_delta > 0:

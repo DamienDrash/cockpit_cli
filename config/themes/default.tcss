@@ -1,173 +1,187 @@
+/* Cyberpunk Neon Theme for Cockpit - ContentSwitcher Edition */
+
+$primary: #00ffff;
+$secondary: #ff00ff;
+$accent: #00ffff;
+$background: #0a0a12;
+$surface: #1a1a2e;
+$panel: #16213e;
+$text: #e1e1e1;
+$success: #00ff00;
+$warning: #ffff00;
+$error: #ff0055;
+
 Screen {
   layout: vertical;
+  background: $background;
+  color: $text;
+}
+
+Header {
+  background: $surface;
+  color: $primary;
+  text-style: bold;
+  border-bottom: hkey $secondary;
+  height: 1;
 }
 
 #app-body {
   height: 1fr;
-  padding: 1 2;
-  background: $surface;
+  padding: 0;
+  background: $background;
 }
 
+/* --- TAB BAR --- */
+#tab-bar {
+  height: 3;
+  padding: 0 1;
+  background: #0f0f1a;
+  color: $primary;
+  border-bottom: solid $secondary;
+  align: left middle;
+}
+
+#tabs-container {
+  width: auto;
+  height: 100%;
+}
+
+.tab-button {
+  min-width: 12;
+  height: 1;
+  margin: 0 1;
+  border: none;
+  background: #1a1a2e;
+  color: $primary;
+}
+
+.tab-button:hover {
+  background: $secondary;
+  color: #000000;
+}
+
+.tab-button.active {
+  background: $primary;
+  color: #000000;
+  text-style: bold;
+}
+
+#tab-workspace-info {
+  width: 1fr;
+  text-align: right;
+  color: $secondary;
+  text-style: italic;
+  padding: 0 2;
+}
+
+/* --- STATUS BAR --- */
 #status-bar {
   height: 1;
   padding: 0 1;
-}
-
-#tab-bar {
-  height: auto;
-  padding: 0 1;
-  background: $boost;
+  background: #0f3460;
   color: $text;
+  border-top: hkey $primary;
 }
 
+/* --- PANELS & SWITCHER --- */
 #panel-host {
   height: 1fr;
-  margin: 1 0;
+  margin: 0;
 }
 
-#panel-surface {
+#panel-switcher {
   height: 1fr;
   width: 1fr;
 }
 
-#panel-parking {
-  display: none;
-}
-
-.tab-root {
-  height: 1fr;
-}
-
-.split-node {
+/* Base Panel Style */
+BasePanel {
   height: 1fr;
   width: 1fr;
-  margin: 0 0 1 0;
+  border: none;
+  padding: 0;
+  background: $background;
 }
 
-#confirmation-bar {
-  margin: 1 0 0 0;
-  padding: 1;
-  background: $warning;
-  color: $text;
-  border: round $error;
-}
-
-#work-panel {
+/* Specific Panel Tweaks */
+#work-panel, #git-panel, #docker-panel, #cron-panel, #db-panel, #curl-panel, #logs-panel, #ops-panel, #response-panel {
   height: 1fr;
-  border: round $accent;
-  padding: 1;
-  background: $panel;
+  width: 1fr;
 }
 
-#git-panel {
+/* --- SIDEBAR LAYOUT (Work Panel) --- */
+#work-sidebar {
+  width: 30;
   height: 1fr;
-  border: round $accent;
+  border-right: vkey $primary;
+  background: #16213e;
   padding: 1;
-  background: $panel;
 }
 
-#docker-panel {
+#work-main {
+  width: 1fr;
   height: 1fr;
-  border: round $accent;
   padding: 1;
-  background: $panel;
-}
-
-#cron-panel {
-  height: 1fr;
-  border: round $accent;
-  padding: 1;
-  background: $panel;
-}
-
-#db-panel {
-  height: 1fr;
-  border: round $accent;
-  padding: 1;
-  background: $panel;
-}
-
-#curl-panel {
-  height: 1fr;
-  border: round $accent;
-  padding: 1;
-  background: $panel;
-}
-
-#logs-panel {
-  height: 1fr;
-  border: round $accent;
-  padding: 1;
-  background: $panel;
+  background: #000000;
 }
 
 #file-context {
   margin: 0 0 1 0;
   padding: 1;
-  background: $boost;
+  background: #0f3460;
+  color: $primary;
+  border: round $primary;
 }
 
 #file-explorer {
-  height: 11;
-  margin: 0 0 1 0;
+  height: 1fr;
+  margin: 0;
   padding: 1;
-  background: $surface-lighten-1;
+  background: $surface;
   border: round $primary;
 }
 
 #file-explorer:focus {
-  border: round $warning;
-}
-
-#work-panel-note {
-  color: $text-muted;
-  margin: 0 0 1 0;
-}
-
-#git-summary,
-#git-files,
-#git-panel-note {
-  margin: 0 0 1 0;
-}
-
-#git-files {
-  height: 1fr;
-  padding: 1;
-  background: $surface-lighten-1;
-  border: round $primary;
-}
-
-#git-panel-note {
-  color: $text-muted;
+  border: round $secondary;
 }
 
 #embedded-terminal {
   height: 1fr;
   padding: 1;
-  background: $surface-darken-1;
-  color: $text;
+  background: #000000;
+  color: #00ff41;
   border: tall $primary;
 }
 
 #embedded-terminal:focus {
-  border: tall $success;
+  border: tall $secondary;
 }
 
+#work-panel-note {
+  color: $secondary;
+  text-style: italic;
+  margin-bottom: 1;
+}
+
+/* --- OTHERS --- */
 #command-palette {
-  margin: 1 0 0 0;
-  padding: 1;
-  border: round $accent;
-  background: $surface-lighten-1;
+  margin: 1 4;
+  padding: 1 2;
+  border: outer $secondary;
+  background: #16213e;
+  height: auto;
+  max-height: 15;
+  layer: top;
 }
 
 #command-palette-input {
   margin: 0 0 1 0;
-}
-
-#command-palette-results {
-  color: $text;
+  border: round $primary;
+  background: $surface;
 }
 
 #slash-input {
-  margin: 1 0 0 0;
+  margin: 0;
+  border: none;
+  background: $surface;
 }

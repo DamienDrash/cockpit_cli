@@ -1,12 +1,15 @@
-"""Command palette widget."""
+"""Cyberpunk-themed command palette widget."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 
+from rich.text import Text
 from textual.app import ComposeResult
 from textual.containers import Vertical
 from textual.widgets import Input, Static
+
+from cockpit.ui.branding import C_PRIMARY, C_SECONDARY
 
 
 @dataclass(slots=True, frozen=True)
@@ -17,7 +20,7 @@ class PaletteItem:
 
 
 class CommandPalette(Vertical):
-    """Minimal filterable command palette bound to the shared dispatcher path."""
+    """Refined filterable command palette with Cyberpunk aesthetics."""
 
     def __init__(self) -> None:
         super().__init__(id="command-palette")
@@ -27,8 +30,8 @@ class CommandPalette(Vertical):
         self._selected_index = 0
 
     def compose(self) -> ComposeResult:
-        yield Input(placeholder="Filter commands", id="command-palette-input")
-        yield Static("No commands available.", id="command-palette-results")
+        yield Input(placeholder=" ❯ Search Matrix...", id="command-palette-input")
+        yield Static("Initializing Neural Link...", id="command-palette-results")
 
     def open(self, items: list[PaletteItem]) -> None:
         self._items = items
@@ -78,11 +81,25 @@ class CommandPalette(Vertical):
     def _render_results(self) -> None:
         results = self.query_one("#command-palette-results", Static)
         if not self._filtered_items:
-            results.update("No matching commands.")
+            results.update(Text("No compatible commands found in local sector.", style="dim red"))
             return
-        lines: list[str] = []
-        for index, item in enumerate(self._filtered_items[:8]):
-            marker = ">" if index == self._selected_index else " "
-            description = f" - {item.description}" if item.description else ""
-            lines.append(f"{marker} {item.label}: {item.command_text}{description}")
-        results.update("\n".join(lines))
+            
+        renderable = Text()
+        for index, item in enumerate(self._filtered_items[:10]):
+            is_selected = index == self._selected_index
+            
+            # Selection marker
+            marker = " ▶ " if is_selected else "   "
+            style = f"{C_SECONDARY} bold" if is_selected else "dim white"
+            
+            renderable.append(marker, style=style)
+            renderable.append(f"{item.label.ljust(35)}", style=style)
+            renderable.append(f" ❯ {item.command_text}", style=f"{C_PRIMARY} italic" if is_selected else "dim cyan")
+            
+            if item.description and is_selected:
+                renderable.append(f" ({item.description})", style="dim white italic")
+                
+            if index < 9:
+                renderable.append("\n")
+                
+        results.update(renderable)
