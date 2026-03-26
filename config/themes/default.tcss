@@ -144,9 +144,17 @@ BasePanel {
 
 #curl-method-select {
   width: 15;
+  height: 3;
   background: $surface;
   color: $primary;
   border: solid $primary;
+}
+
+#curl-body-area {
+  height: 8;
+  border: solid $primary;
+  background: $background;
+  color: $text;
 }
 
 #curl-url-input {

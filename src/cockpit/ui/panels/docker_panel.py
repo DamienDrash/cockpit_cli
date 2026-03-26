@@ -117,20 +117,27 @@ class DockerPanel(BasePanel):
         if not self._containers: return
         container = self._containers[self._selected_index]
         
-        # Load logs for the selected container
         try:
+            # We use collect_diagnostics to get logs and details
+            diags = self._docker_adapter.collect_diagnostics(
+                target_kind=self._target_kind,
+                target_ref=self._target_ref,
+                log_tail=100
+            )
+            # Find the diagnostic for the currently selected container
+            diag = next((d for d in diags if d.container_id == container.container_id), None)
+            
+            if not diag:
+                self.query_one(f"#{self._active_detail_tab}", Static).update("No detail data found.")
+                return
+
             if self._active_detail_tab == "logs":
-                logs = self._docker_adapter.get_container_logs(
-                    container.container_id,
-                    tail=100,
-                    target_kind=self._target_kind,
-                    target_ref=self._target_ref
-                )
-                self.query_one("#logs", Static).update(logs or "No logs available.")
+                log_text = "\n".join(diag.recent_logs) if diag.recent_logs else "No logs available."
+                self.query_one("#logs", Static).update(log_text)
             elif self._active_detail_tab == "stats":
-                self.query_one("#stats", Static).update(f"Stats for {container.name}\n(Live metrics coming in v0.2)")
+                self.query_one("#stats", Static).update(f"Container: {diag.name}\nState: {diag.state}\nHealth: {diag.health or 'N/A'}")
             elif self._active_detail_tab == "inspect":
-                self.query_one("#inspect", Static).update(f"ID: {container.container_id}\nImage: {container.image}\nStatus: {container.status}")
+                self.query_one("#inspect", Static).update(f"ID: {diag.container_id}\nImage: {diag.image}\nStatus: {diag.status}\nPorts: {diag.ports}")
         except Exception as exc:
             self.query_one(f"#{self._active_detail_tab}", Static).update(f"Error: {exc}")
 
