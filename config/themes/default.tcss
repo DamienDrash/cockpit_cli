@@ -1,4 +1,4 @@
-/* Cyberpunk Neon Theme for Cockpit - ContentSwitcher Edition */
+/* Cyberpunk Neon Theme for Cockpit - Professional Sidebar Layout */
 
 $primary: #00ffff;
 $secondary: #ff00ff;
@@ -103,13 +103,7 @@ BasePanel {
   background: $background;
 }
 
-/* Specific Panel Tweaks */
-#work-panel, #git-panel, #docker-panel, #cron-panel, #db-panel, #curl-panel, #logs-panel, #ops-panel, #response-panel {
-  height: 1fr;
-  width: 1fr;
-}
-
-/* --- SIDEBAR LAYOUT (Work Panel) --- */
+/* --- WORK PANEL SIDEBAR --- */
 #work-sidebar {
   width: 30;
   height: 1fr;
@@ -125,6 +119,64 @@ BasePanel {
   background: #000000;
 }
 
+/* --- GIT PANEL SIDEBAR --- */
+#git-sidebar {
+  width: 35;
+  height: 1fr;
+  border-right: vkey $secondary;
+  background: #1a1a2e;
+  padding: 1;
+}
+
+#git-main {
+  width: 1fr;
+  height: 1fr;
+  padding: 1;
+  background: #000000;
+}
+
+.sidebar .section-title {
+  background: $primary;
+  color: #000000;
+  text-style: bold;
+  width: 100%;
+  margin: 1 0;
+  padding: 0 1;
+}
+
+#git-file-list {
+  height: 1fr;
+  padding: 0 1;
+}
+
+#git-legend {
+  height: auto;
+  color: $primary;
+  opacity: 70%;
+  padding: 1;
+}
+
+#git-diff-view {
+  height: 1fr;
+  width: 1fr;
+  padding: 1;
+  background: #000000;
+}
+
+#git-commit-container {
+  height: auto;
+  padding: 1;
+  border: round $primary;
+  background: #16213e;
+  margin-bottom: 1;
+}
+
+#git-commit-input {
+  border: none;
+  background: $background;
+}
+
+/* --- GLOBAL WIDGETS --- */
 #file-context {
   margin: 0 0 1 0;
   padding: 1;
@@ -139,10 +191,6 @@ BasePanel {
   padding: 1;
   background: $surface;
   border: round $primary;
-}
-
-#file-explorer:focus {
-  border: round $secondary;
 }
 
 #embedded-terminal {
@@ -163,7 +211,6 @@ BasePanel {
   margin-bottom: 1;
 }
 
-/* --- OTHERS --- */
 #command-palette {
   margin: 1 4;
   padding: 1 2;

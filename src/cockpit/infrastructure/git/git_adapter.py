@@ -1,4 +1,4 @@
-"""Structured adapter for local and SSH git status inspection."""
+"""Structured adapter for local and SSH git status and operations."""
 
 from __future__ import annotations
 
@@ -30,7 +30,7 @@ class GitRepositoryStatus:
 
 
 class GitAdapter:
-    """Load structured repository status from git executables or SSH targets."""
+    """Load structured repository status and perform git operations."""
 
     def __init__(self, ssh_command_runner: SSHCommandRunner | None = None) -> None:
         self._ssh_command_runner = ssh_command_runner
@@ -46,15 +46,72 @@ class GitAdapter:
             return self._inspect_remote_repository(root_path, target_ref)
         return self._inspect_local_repository(root_path)
 
+    def get_diff(
+        self,
+        repo_root: str,
+        path: str,
+        *,
+        staged: bool = False,
+        target_kind: SessionTargetKind = SessionTargetKind.LOCAL,
+        target_ref: str | None = None,
+    ) -> str:
+        """Get the git diff for a specific file."""
+        args = ["diff"]
+        if staged:
+            args.append("--cached")
+        args.append("--")
+        args.append(path)
+        
+        if target_kind is SessionTargetKind.SSH:
+            return self._run_remote_git(repo_root, target_ref, *args).stdout
+        return self._run_local_git(Path(repo_root), *args).stdout
+
+    def stage_file(
+        self,
+        repo_root: str,
+        path: str,
+        *,
+        target_kind: SessionTargetKind = SessionTargetKind.LOCAL,
+        target_ref: str | None = None,
+    ) -> bool:
+        """Add a file to the git index."""
+        if target_kind is SessionTargetKind.SSH:
+            return self._run_remote_git(repo_root, target_ref, "add", path).returncode == 0
+        return self._run_local_git(Path(repo_root), "add", path).returncode == 0
+
+    def unstage_file(
+        self,
+        repo_root: str,
+        path: str,
+        *,
+        target_kind: SessionTargetKind = SessionTargetKind.LOCAL,
+        target_ref: str | None = None,
+    ) -> bool:
+        """Remove a file from the git index."""
+        if target_kind is SessionTargetKind.SSH:
+            return self._run_remote_git(repo_root, target_ref, "reset", "HEAD", "--", path).returncode == 0
+        return self._run_local_git(Path(repo_root), "reset", "HEAD", "--", path).returncode == 0
+
+    def commit(
+        self,
+        repo_root: str,
+        message: str,
+        *,
+        target_kind: SessionTargetKind = SessionTargetKind.LOCAL,
+        target_ref: str | None = None,
+    ) -> bool:
+        """Commit staged changes."""
+        if target_kind is SessionTargetKind.SSH:
+            return self._run_remote_git(repo_root, target_ref, "commit", "-m", message).returncode == 0
+        return self._run_local_git(Path(repo_root), "commit", "-m", message).returncode == 0
+
     def _inspect_local_repository(self, root_path: str) -> GitRepositoryStatus:
         path = Path(root_path).expanduser().resolve()
         if not path.exists():
             raise FileNotFoundError(f"Git path '{path}' does not exist.")
-        if not path.is_dir():
-            raise NotADirectoryError(f"Git path '{path}' is not a directory.")
-
+        
         try:
-            repo_root_result = self._run_git(path, "rev-parse", "--show-toplevel")
+            repo_root_result = self._run_local_git(path, "rev-parse", "--show-toplevel")
         except FileNotFoundError:
             return GitRepositoryStatus(
                 repo_root=str(path),
@@ -73,7 +130,7 @@ class GitAdapter:
             )
 
         repo_root = Path(repo_root_result.stdout.strip()).resolve()
-        status_result = self._run_git(repo_root, "status", "--porcelain=v1", "--branch")
+        status_result = self._run_local_git(repo_root, "status", "--porcelain=v1", "--branch")
         if status_result.returncode != 0:
             return GitRepositoryStatus(
                 repo_root=str(repo_root),
@@ -89,64 +146,19 @@ class GitAdapter:
         root_path: str,
         target_ref: str | None,
     ) -> GitRepositoryStatus:
-        if not target_ref:
-            return GitRepositoryStatus(
-                repo_root=root_path,
-                branch_summary="ssh target unavailable",
-                is_repository=False,
-                is_available=False,
-                message="No SSH target is configured for this workspace.",
-            )
-        if self._ssh_command_runner is None:
-            return GitRepositoryStatus(
-                repo_root=root_path,
-                branch_summary="ssh inspection unavailable",
-                is_repository=False,
-                is_available=False,
-                message="SSH git inspection is not configured.",
-            )
+        if not target_ref or self._ssh_command_runner is None:
+            return GitRepositoryStatus(repo_root=root_path, branch_summary="ssh unavailable", is_repository=False, is_available=False)
 
-        repo_root_result = self._ssh_command_runner.run(
-            target_ref,
-            f"git -C {shlex.quote(root_path)} rev-parse --show-toplevel",
-        )
-        if not repo_root_result.is_available:
-            return GitRepositoryStatus(
-                repo_root=root_path,
-                branch_summary="ssh unavailable",
-                is_repository=False,
-                is_available=False,
-                message=repo_root_result.message or "SSH is unavailable.",
-            )
-        if repo_root_result.returncode != 0:
-            return GitRepositoryStatus(
-                repo_root=root_path,
-                branch_summary="not a git repository",
-                is_repository=False,
-                message=repo_root_result.stderr.strip()
-                or repo_root_result.message
-                or "The remote workspace is not a git repository.",
-            )
+        repo_root_result = self._run_remote_git(root_path, target_ref, "rev-parse", "--show-toplevel")
+        if not repo_root_result.returncode == 0:
+            return GitRepositoryStatus(repo_root=root_path, branch_summary="not a repo", is_repository=False)
 
         repo_root = repo_root_result.stdout.strip().splitlines()[-1].strip()
-        status_result = self._ssh_command_runner.run(
-            target_ref,
-            f"git -C {shlex.quote(repo_root)} status --porcelain=v1 --branch",
-        )
-        if status_result.returncode != 0:
-            return GitRepositoryStatus(
-                repo_root=repo_root,
-                branch_summary="git status failed",
-                is_repository=True,
-                is_available=True,
-                message=status_result.stderr.strip()
-                or status_result.message
-                or "git status failed.",
-            )
-
+        status_result = self._run_remote_git(repo_root, target_ref, "status", "--porcelain=v1", "--branch")
+        
         return self._parse_status_output(repo_root, status_result.stdout, remote=True)
 
-    def _run_git(self, cwd: Path, *args: str) -> subprocess.CompletedProcess[str]:
+    def _run_local_git(self, cwd: Path, *args: str) -> subprocess.CompletedProcess[str]:
         return subprocess.run(
             ("git", "-C", str(cwd), *args),
             capture_output=True,
@@ -154,6 +166,20 @@ class GitAdapter:
             encoding="utf-8",
             errors="replace",
             check=False,
+        )
+
+    def _run_remote_git(self, repo_root: str, target_ref: str | None, *args: str) -> subprocess.CompletedProcess[str]:
+        if self._ssh_command_runner is None or not target_ref:
+            # Fallback mock-like object
+            return subprocess.CompletedProcess(args=args, returncode=1, stdout="", stderr="SSH unavailable")
+        
+        cmd = f"git -C {shlex.quote(repo_root)} " + " ".join(shlex.quote(a) for a in args)
+        result = self._ssh_command_runner.run(target_ref, cmd)
+        return subprocess.CompletedProcess(
+            args=args,
+            returncode=result.returncode,
+            stdout=result.stdout,
+            stderr=result.stderr
         )
 
     def _parse_status_output(
@@ -172,16 +198,15 @@ class GitAdapter:
             lines = lines[1:]
 
         for line in lines:
-            if len(line) < 4:
-                continue
+            if len(line) < 4: continue
             status_code = line[:2]
-            relative_path = line[3:]
-            if " -> " in relative_path:
-                relative_path = relative_path.split(" -> ", 1)[1]
+            relative_path = line[3:].split(" -> ", 1)[-1]
+            
             if remote:
                 absolute_path = str(PurePosixPath(repo_root) / relative_path)
             else:
                 absolute_path = str((Path(repo_root) / relative_path).resolve())
+                
             files.append(
                 GitFileStatus(
                     path=absolute_path,
