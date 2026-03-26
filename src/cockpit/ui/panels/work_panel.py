@@ -68,6 +68,8 @@ class WorkPanel(BasePanel):
         self._workspace_name = "Workspace"
         self._main_thread_id = get_ident()
         self._subscriptions_registered = False
+        self._restored = False
+        self._recovery_message: str | None = None
 
     def compose(self) -> ComposeResult:
         with Horizontal():
@@ -102,6 +104,8 @@ class WorkPanel(BasePanel):
         self._target_kind = SessionTargetKind(str(context.get("target_kind", "local")))
         self._target_ref = context.get("target_ref")
         self._cwd = str(context.get("cwd", self._workspace_root))
+        self._restored = bool(context.get("restored", False))
+        self._recovery_message = context.get("recovery_message")
         
         self._sync_explorer()
         self._render_context()
@@ -194,8 +198,10 @@ class WorkPanel(BasePanel):
                 workspace_root=self._workspace_root,
                 cwd=self._cwd,
                 selected_path=self._selected_path or self._workspace_root,
+                restored=self._restored,
                 target_label=self._target_kind.value,
-                risk_label=risk_presentation(level).label
+                risk_label=risk_presentation(level).label,
+                recovery_message=self._recovery_message
             )
         except NoMatches: pass
 

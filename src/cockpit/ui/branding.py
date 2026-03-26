@@ -27,7 +27,7 @@ def show_splash(console: Console) -> None:
     """Show a cyberpunk splash screen with snappy animation."""
     
     logo_text = Text(LOGO, style=C_PRIMARY)
-    console.print(Panel(logo_text, border_style=C_SECONDARY, padding=(1, 2), title="[bold white]v0.1.32[/]", subtitle="[dim]Keyboard-First TUI Platform[/]"))
+    console.print(Panel(logo_text, border_style=C_SECONDARY, padding=(1, 2), title="[bold white]v0.1.39[/]", subtitle="[dim]Keyboard-First TUI Platform[/]"))
     console.print()
 
     # Reduced tasks and faster intervals for "snappier" feel
