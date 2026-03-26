@@ -66,7 +66,7 @@ BasePanel {
 }
 
 .sidebar {
-  width: 35;
+  width: 45; /* Increased width for better path display */
   height: 1fr;
   background: #1a1a2e;
   padding: 1;
@@ -85,6 +85,7 @@ BasePanel {
   color: $primary;
   text-style: bold italic;
   margin-bottom: 1;
+  padding: 0 1;
 }
 
 /* --- PANEL ISOLATION --- */
@@ -98,6 +99,34 @@ BasePanel {
 #docker-sidebar { border-right: vkey $primary; }
 #docker-main { width: 1fr; height: 1fr; background: #000000; }
 
+/* FIX: Visible Tab Labels in Docker */
+#docker-detail-tabs {
+  height: 3;
+  background: $surface;
+  border-bottom: solid $primary;
+  padding: 0 1;
+  align: left middle;
+}
+
+.mini-tab {
+  background: #16213e;
+  color: $primary;
+  border: none;
+  margin: 0 1;
+  min-width: 12;
+}
+
+.mini-tab:hover {
+  background: $secondary;
+  color: #000000;
+}
+
+.mini-tab.-active {
+  background: $primary;
+  color: #000000;
+  text-style: bold;
+}
+
 #db-sidebar { border-right: vkey $primary; }
 #db-main { width: 1fr; height: 1fr; }
 
@@ -107,8 +136,22 @@ BasePanel {
 #curl-sidebar { border-right: vkey $primary; }
 #curl-main { width: 1fr; height: 1fr; }
 
-#logs-sidebar { border-right: vkey $secondary; }
-#logs-main { width: 1fr; height: 1fr; }
+/* FIX: Curl Method Selection Visibility */
+#curl-method-url-row {
+  height: 3;
+  margin-bottom: 1;
+}
+
+#curl-method-select {
+  width: 15;
+  background: $surface;
+  color: $primary;
+  border: solid $primary;
+}
+
+#curl-url-input {
+  width: 1fr;
+}
 
 /* --- WIDGET STYLES --- */
 
@@ -127,6 +170,7 @@ BasePanel {
   background: #000000;
   border: round $primary;
   padding: 1;
+  color: $text;
 }
 
 #embedded-terminal {
@@ -140,4 +184,13 @@ BasePanel {
   height: 1;
   background: #0f3460;
   border-top: hkey $primary;
+}
+
+#file-context {
+  height: auto;
+  border: round $primary;
+  margin-bottom: 1;
+  padding: 0 1;
+  background: #0f3460;
+  color: $primary;
 }

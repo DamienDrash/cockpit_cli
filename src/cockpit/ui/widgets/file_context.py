@@ -1,7 +1,8 @@
-"""Workspace and file context widget."""
+"""Workspace and file context widget with intelligent path truncation."""
 
 from __future__ import annotations
 
+from pathlib import Path
 from textual.widgets import Static
 
 
@@ -24,17 +25,22 @@ class FileContext(Static):
         recovery_message: str | None = None,
     ) -> None:
         mode = "restored" if restored else "fresh"
+        
+        # Intelligent path truncation
+        def truncate(p: str, max_len: int = 35) -> str:
+            if len(p) <= max_len: return p
+            return p[:15] + "..." + p[-(max_len-18):]
+
         lines = [
-            f"Workspace: {workspace_name}",
-            f"Root: {workspace_root}",
-            f"CWD: {cwd}",
-            f"Selected: {selected_path}",
-            f"Session: {mode}",
+            f"WS: [bold]{workspace_name}[/]",
+            f"Root: {truncate(workspace_root)}",
+            f"CWD:  {truncate(cwd)}",
+            f"File: {truncate(selected_path)}",
+            f"Mode: [cyan]{mode}[/]",
         ]
         if target_label:
-            lines.append(f"Target: {target_label}")
+            lines.append(f"Tgt:  [yellow]{target_label}[/]")
         if risk_label:
             lines.append(f"Risk: {risk_label}")
-        if recovery_message:
-            lines.append(f"Recovery: {recovery_message}")
+        
         self.update("\n".join(lines))
