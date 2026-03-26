@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from pathlib import Path
 from rich.text import Text
 from rich.syntax import Syntax
 from textual import events
@@ -70,7 +69,6 @@ class DockerPanel(BasePanel):
     def on_mount(self) -> None:
         self._event_bus.publish(PanelMounted(panel_id=self.PANEL_ID, panel_type=self.PANEL_TYPE))
         self.refresh_runtime()
-        self._switch_detail_tab("logs")
 
     def initialize(self, context: dict[str, object]) -> None:
         self._workspace_root = str(context.get("workspace_root", ""))
@@ -89,6 +87,7 @@ class DockerPanel(BasePanel):
             btn.remove_class("-active")
             if btn.id == f"docker-tab-{tab_id}":
                 btn.add_class("-active")
+        self._update_detail()
 
     def refresh_runtime(self) -> None:
         try:
@@ -98,6 +97,7 @@ class DockerPanel(BasePanel):
             )
             self._containers = snapshot.containers
             self._render_list()
+            self._update_detail()
         except Exception: pass
 
     def _render_list(self) -> None:
@@ -113,14 +113,40 @@ class DockerPanel(BasePanel):
                 txt.append(f"{c.name[:25]}\n", style="bold" if i == self._selected_index else "")
         self.query_one("#docker-container-list", Static).update(txt)
 
+    def _update_detail(self) -> None:
+        if not self._containers: return
+        container = self._containers[self._selected_index]
+        
+        # Load logs for the selected container
+        try:
+            if self._active_detail_tab == "logs":
+                logs = self._docker_adapter.get_container_logs(
+                    container.container_id,
+                    tail=100,
+                    target_kind=self._target_kind,
+                    target_ref=self._target_ref
+                )
+                self.query_one("#logs", Static).update(logs or "No logs available.")
+            elif self._active_detail_tab == "stats":
+                self.query_one("#stats", Static).update(f"Stats for {container.name}\n(Live metrics coming in v0.2)")
+            elif self._active_detail_tab == "inspect":
+                self.query_one("#inspect", Static).update(f"ID: {container.container_id}\nImage: {container.image}\nStatus: {container.status}")
+        except Exception as exc:
+            self.query_one(f"#{self._active_detail_tab}", Static).update(f"Error: {exc}")
+
     def on_key(self, event: events.Key) -> None:
         if event.key == "up":
             self._selected_index = max(0, self._selected_index - 1)
             self._render_list()
+            self._update_detail()
             event.stop()
         elif event.key == "down":
             self._selected_index = min(len(self._containers) - 1, self._selected_index + 1)
             self._render_list()
+            self._update_detail()
+            event.stop()
+        elif event.key == "r":
+            self.refresh_runtime()
             event.stop()
 
     def resume(self) -> None:

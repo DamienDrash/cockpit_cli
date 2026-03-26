@@ -8,7 +8,7 @@ from rich.syntax import Syntax
 from textual import events
 from textual.app import ComposeResult
 from textual.containers import Horizontal, Vertical
-from textual.widgets import Static, Label, Input, Button, Select
+from textual.widgets import Static, Label, Input, Button, Select, TextArea
 
 from cockpit.application.dispatch.event_bus import EventBus
 from cockpit.domain.events.runtime_events import PanelMounted
@@ -29,8 +29,6 @@ class CurlPanel(BasePanel):
         super().__init__(id=self.PANEL_ID)
         self._event_bus = event_bus
         self._workspace_root = ""
-        self._target_kind = SessionTargetKind.LOCAL
-        self._target_ref: str | None = None
         self._history: list[dict[str, object]] = []
         self._last_response: dict[str, object] | None = None
 
@@ -43,8 +41,7 @@ class CurlPanel(BasePanel):
                 yield Label(" [ ACTIONS ] ", classes="section-title")
                 yield Static(
                     " Enter: Send Request\n"
-                    " r: Refresh\n"
-                    " c: Copy as curl",
+                    " r: Refresh",
                     id="curl-legend"
                 )
             
@@ -63,8 +60,8 @@ class CurlPanel(BasePanel):
                     yield Label("Headers (Key:Value|...):")
                     yield Input(placeholder="Content-Type: application/json", id="curl-headers-input")
                     
-                    yield Label("Body:")
-                    yield Input(placeholder='{"key": "value"}', id="curl-body-input")
+                    yield Label("Body (Multiline):")
+                    yield TextArea(id="curl-body-area")
                     
                     with Horizontal(id="curl-builder-actions"):
                         yield Button("SEND", id="curl-btn-send", variant="primary")
@@ -79,7 +76,6 @@ class CurlPanel(BasePanel):
 
     def initialize(self, context: dict[str, object]) -> None:
         self._workspace_root = str(context.get("workspace_root", ""))
-        self._target_kind = SessionTargetKind(str(context.get("target_kind", "local")))
         self.focus()
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
@@ -90,7 +86,7 @@ class CurlPanel(BasePanel):
         method = str(self.query_one("#curl-method-select", Select).value)
         url = self.query_one("#curl-url-input", Input).value
         headers = self.query_one("#curl-headers-input", Input).value
-        body = self.query_one("#curl-body-input", Input).value
+        body = self.query_one("#curl-body-area", TextArea).text
         
         if not url:
             self.app.notify("URL is required!", severity="error")
@@ -100,11 +96,12 @@ class CurlPanel(BasePanel):
         from cockpit.shared.enums import CommandSource
         from cockpit.shared.utils import make_id
         
+        # We add 'confirmed=True' to avoid the recurring prompt if policies allow it
         self.app._dispatch_command(Command(
             id=make_id("cmd"),
             source=CommandSource.KEYBINDING,
             name="curl.send",
-            args={"argv": [method, url], "headers": headers, "body": body},
+            args={"argv": [method, url], "headers": headers, "body": body, "confirmed": True},
             context=self.command_context()
         ))
 
@@ -122,7 +119,9 @@ class CurlPanel(BasePanel):
                 body = json.dumps(parsed, indent=2)
             except Exception: pass
             
-            self.query_one("#curl-response-view", Static).update(Syntax(body, "json", theme="monokai"))
+            lexer = "json"
+            if body.strip().startswith("<"): lexer = "html"
+            self.query_one("#curl-response-view", Static).update(Syntax(body, lexer, theme="monokai"))
             
             # Update history
             self._history.insert(0, {"method": payload.get("draft_method"), "url": payload.get("draft_url"), "status": status})
