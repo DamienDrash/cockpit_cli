@@ -24,12 +24,12 @@ class GitPanel(BasePanel):
 
     PANEL_ID = "git-panel"
     PANEL_TYPE = "git"
+    can_focus = True
 
     def __init__(self, *, event_bus: EventBus, git_adapter: GitAdapter) -> None:
         super().__init__(id=self.PANEL_ID)
         self._event_bus = event_bus
         self._git_adapter = git_adapter
-        self._workspace_name = "Workspace"
         self._workspace_root = ""
         self._target_kind = SessionTargetKind.LOCAL
         self._target_ref: str | None = None
@@ -38,6 +38,8 @@ class GitPanel(BasePanel):
         self._files: list[GitFileStatus] = []
         self._selected_index = 0
         self._commit_mode = False
+        self._session_id: str | None = None
+        self._workspace_id: str | None = None
 
     def compose(self) -> ComposeResult:
         with Horizontal():
@@ -70,7 +72,28 @@ class GitPanel(BasePanel):
         self._workspace_root = str(context.get("workspace_root", ""))
         self._target_kind = SessionTargetKind(str(context.get("target_kind", "local")))
         self._target_ref = context.get("target_ref")
+        self._session_id = context.get("session_id")
+        self._workspace_id = context.get("workspace_id")
         self.refresh_status()
+        self.focus()
+
+    def command_context(self) -> dict[str, object]:
+        """Return the context for command execution and state persistence."""
+        return {
+            "panel_id": self.PANEL_ID,
+            "workspace_id": self._workspace_id,
+            "session_id": self._session_id,
+            "target_kind": self._target_kind.value,
+            "target_ref": self._target_ref,
+            "workspace_root": self._workspace_root,
+            "repo_root": self._repo_root or self._workspace_root,
+            "selected_path": self._selected_path() if self._files else self._workspace_root,
+        }
+
+    def _selected_path(self) -> str:
+        if not self._files:
+            return self._workspace_root
+        return self._files[self._selected_index].path
 
     def on_key(self, event: events.Key) -> None:
         if self._commit_mode:
@@ -115,30 +138,39 @@ class GitPanel(BasePanel):
             self._files = status.files
             self._render_all()
         except Exception as exc:
-            self.query_one("#git-branch-info", Static).update(f"[red]Error: {exc}[/red]")
+            try:
+                self.query_one("#git-branch-info", Static).update(f"[red]Error: {exc}[/red]")
+            except Exception:
+                pass
 
     def _render_all(self) -> None:
-        # 1. Branch Info
-        self.query_one("#git-branch-info", Static).update(f" [bold cyan] {self._branch_summary}[/]")
-        
-        # 2. File List
-        file_list = Text()
-        for i, f in enumerate(self._files):
-            is_selected = i == self._selected_index
-            marker = "▶ " if is_selected else "  "
-            style = f"{C_SECONDARY} bold" if is_selected else ""
+        try:
+            # 1. Branch Info
+            self.query_one("#git-branch-info", Static).update(f" [bold cyan] {self._branch_summary}[/]")
             
-            status_style = "green" if f.staged_status != " " else "red"
-            if f.status_code == "??": status_style = "yellow"
+            # 2. File List
+            file_list = Text()
+            if not self._files:
+                file_list.append("  Working tree clean.", style="dim")
+            else:
+                for i, f in enumerate(self._files):
+                    is_selected = i == self._selected_index
+                    marker = "▶ " if is_selected else "  "
+                    style = f"{C_SECONDARY} bold" if is_selected else ""
+                    
+                    status_style = "green" if f.staged_status != " " else "red"
+                    if f.status_code == "??": status_style = "yellow"
+                    
+                    file_list.append(marker, style=C_PRIMARY if is_selected else "dim")
+                    file_list.append(f"{f.status_code} ", style=status_style)
+                    file_list.append(f"{Path(f.path).name}\n", style=style)
             
-            file_list.append(marker, style=C_PRIMARY if is_selected else "dim")
-            file_list.append(f"{f.status_code} ", style=status_style)
-            file_list.append(f"{Path(f.path).name}\n", style=style)
-        
-        self.query_one("#git-file-list", Static).update(file_list)
-        
-        # 3. Diff View
-        self._update_diff()
+            self.query_one("#git-file-list", Static).update(file_list)
+            
+            # 3. Diff View
+            self._update_diff()
+        except Exception:
+            pass
 
     def _update_diff(self) -> None:
         if not self._files:
@@ -198,6 +230,10 @@ class GitPanel(BasePanel):
 
     def resume(self) -> None:
         self.refresh_status()
+        self.focus()
+
+    def restore_state(self, snapshot: dict[str, object]) -> None:
+        pass
 
     def snapshot_state(self) -> PanelState:
         return PanelState(panel_id=self.PANEL_ID, panel_type=self.PANEL_TYPE)

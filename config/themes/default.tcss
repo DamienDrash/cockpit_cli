@@ -94,7 +94,6 @@ Header {
   width: 1fr;
 }
 
-/* Base Panel Style */
 BasePanel {
   height: 1fr;
   width: 1fr;
@@ -103,36 +102,12 @@ BasePanel {
   background: $background;
 }
 
-/* --- WORK PANEL SIDEBAR --- */
-#work-sidebar {
-  width: 30;
-  height: 1fr;
-  border-right: vkey $primary;
-  background: #16213e;
-  padding: 1;
-}
-
-#work-main {
-  width: 1fr;
-  height: 1fr;
-  padding: 1;
-  background: #000000;
-}
-
-/* --- GIT PANEL SIDEBAR --- */
-#git-sidebar {
+/* --- COMMON SIDEBAR STYLES --- */
+.sidebar {
   width: 35;
   height: 1fr;
-  border-right: vkey $secondary;
   background: #1a1a2e;
   padding: 1;
-}
-
-#git-main {
-  width: 1fr;
-  height: 1fr;
-  padding: 1;
-  background: #000000;
 }
 
 .sidebar .section-title {
@@ -144,36 +119,84 @@ BasePanel {
   padding: 0 1;
 }
 
-#git-file-list {
+.list-view {
   height: 1fr;
   padding: 0 1;
 }
 
-#git-legend {
-  height: auto;
-  color: $primary;
-  opacity: 70%;
-  padding: 1;
+/* --- WORK PANEL SIDEBAR --- */
+#work-sidebar {
+  border-right: vkey $primary;
 }
 
-#git-diff-view {
-  height: 1fr;
+#work-main {
   width: 1fr;
+  height: 1fr;
   padding: 1;
   background: #000000;
 }
 
-#git-commit-container {
-  height: auto;
-  padding: 1;
-  border: round $primary;
-  background: #16213e;
-  margin-bottom: 1;
+/* --- GIT PANEL SIDEBAR --- */
+#git-sidebar {
+  border-right: vkey $secondary;
 }
 
-#git-commit-input {
+#git-main {
+  width: 1fr;
+  height: 1fr;
+  padding: 1;
+  background: #000000;
+}
+
+/* --- DOCKER PANEL SIDEBAR --- */
+#docker-sidebar {
+  border-right: vkey $primary;
+}
+
+#docker-main {
+  width: 1fr;
+  height: 1fr;
+  padding: 0;
+  background: #000000;
+}
+
+#docker-detail-tabs {
+  height: 3;
+  background: #16213e;
+  padding: 0 1;
+  align: middle;
+  border-bottom: thin $primary;
+}
+
+.mini-tab {
+  min-width: 10;
+  height: 1;
+  margin: 0 1;
   border: none;
-  background: $background;
+  background: #1a1a2e;
+}
+
+.mini-tab:hover {
+  background: $secondary;
+}
+
+.mini-tab.active {
+  background: $primary;
+  color: #000000;
+}
+
+.detail-view {
+  height: 1fr;
+  padding: 1;
+  background: #000000;
+  color: $text;
+}
+
+#docker-legend {
+  height: auto;
+  color: $primary;
+  opacity: 70%;
+  padding: 1;
 }
 
 /* --- GLOBAL WIDGETS --- */
@@ -201,10 +224,6 @@ BasePanel {
   border: tall $primary;
 }
 
-#embedded-terminal:focus {
-  border: tall $secondary;
-}
-
 #work-panel-note {
   color: $secondary;
   text-style: italic;
@@ -219,16 +238,4 @@ BasePanel {
   height: auto;
   max-height: 15;
   layer: top;
-}
-
-#command-palette-input {
-  margin: 0 0 1 0;
-  border: round $primary;
-  background: $surface;
-}
-
-#slash-input {
-  margin: 0;
-  border: none;
-  background: $surface;
 }
