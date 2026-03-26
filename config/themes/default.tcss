@@ -1,4 +1,4 @@
-/* Cyberpunk Neon Theme for Cockpit - Gold Standard Edition */
+/* Cyberpunk Neon Theme for Cockpit - Professional Gold Standard Edition */
 
 $primary: #00ffff;
 $secondary: #ff00ff;
@@ -25,12 +25,6 @@ Header {
   height: 1;
 }
 
-#app-body {
-  height: 1fr;
-  padding: 0;
-  background: $background;
-}
-
 /* --- TAB BAR --- */
 #tab-bar {
   height: 3;
@@ -39,11 +33,6 @@ Header {
   color: $primary;
   border-bottom: solid $secondary;
   align: left middle;
-}
-
-#tabs-container {
-  width: auto;
-  height: 100%;
 }
 
 .tab-button {
@@ -55,50 +44,24 @@ Header {
   color: $primary;
 }
 
-.tab-button:hover {
-  background: $secondary;
-  color: #000000;
-}
-
 .tab-button.active {
   background: $primary;
   color: #000000;
   text-style: bold;
 }
 
-#tab-workspace-info {
-  width: 1fr;
-  text-align: right;
-  color: $secondary;
-  text-style: italic;
-  padding: 0 2;
-}
-
-/* --- STATUS BAR --- */
-#status-bar {
-  height: 1;
-  padding: 0 1;
-  background: #0f3460;
-  color: $text;
-  border-top: hkey $primary;
-}
-
-/* --- PANELS & SWITCHER --- */
+/* --- PANELS CORE --- */
 #panel-host {
   height: 1fr;
-  margin: 0;
 }
 
 #panel-switcher {
   height: 1fr;
-  width: 1fr;
 }
 
 BasePanel {
   height: 1fr;
   width: 1fr;
-  border: none;
-  padding: 0;
   background: $background;
 }
 
@@ -122,176 +85,50 @@ BasePanel {
   color: $primary;
   text-style: bold italic;
   margin-bottom: 1;
-  padding: 0 1;
 }
 
-.list-view {
-  height: 1fr;
-  padding: 0 1;
-}
+/* --- PANEL ISOLATION --- */
 
-/* --- WORK PANEL --- */
-#work-sidebar {
-  border-right: vkey $primary;
-}
+#work-sidebar { border-right: vkey $primary; }
+#work-main { width: 1fr; height: 1fr; background: #000000; }
 
-#work-main {
-  width: 1fr;
-  height: 1fr;
-  padding: 1;
-  background: #000000;
-}
+#git-sidebar { border-right: vkey $secondary; }
+#git-main { width: 1fr; height: 1fr; background: #000000; }
 
-/* --- GIT PANEL --- */
-#git-sidebar {
-  border-right: vkey $secondary;
-}
+#docker-sidebar { border-right: vkey $primary; }
+#docker-main { width: 1fr; height: 1fr; background: #000000; }
 
-#git-main {
-  width: 1fr;
-  height: 1fr;
-  padding: 1;
-  background: #000000;
-}
+#db-sidebar { border-right: vkey $primary; }
+#db-main { width: 1fr; height: 1fr; }
 
-/* --- DOCKER PANEL --- */
-#docker-sidebar {
-  border-right: vkey $primary;
-}
+#cron-sidebar { border-right: vkey $secondary; }
+#cron-main { width: 1fr; height: 1fr; }
 
-#docker-main {
-  width: 1fr;
-  height: 1fr;
-  padding: 0;
-  background: #000000;
-}
+#curl-sidebar { border-right: vkey $primary; }
+#curl-main { width: 1fr; height: 1fr; }
 
-#docker-detail-tabs {
-  height: 3;
-  background: #16213e;
-  padding: 0 1;
-  align: left middle;
-  border-bottom: solid $primary;
-}
+#logs-sidebar { border-right: vkey $secondary; }
+#logs-main { width: 1fr; height: 1fr; }
 
-.mini-tab {
-  min-width: 10;
-  height: 1;
-  margin: 0 1;
-}
+/* --- WIDGET STYLES --- */
 
-/* --- DB PANEL --- */
-#db-sidebar {
-  border-right: vkey $primary;
-}
-
-#db-catalog-tree {
+#db-catalog-tree, #logs-grid {
   height: 1fr;
   background: transparent;
-  color: $primary;
-  padding: 0 1;
 }
 
-#db-catalog-tree .tree--cursor {
+.tree--cursor, .datatable--cursor {
   background: $secondary;
   color: #000000;
 }
 
-#db-main {
-  width: 1fr;
+.detail-view {
   height: 1fr;
-}
-
-#db-editor-pane {
-  height: 6;
-  border-bottom: hkey $secondary;
-  padding: 1;
-  background: #16213e;
-}
-
-#db-results-pane {
-  height: 1fr;
-  padding: 1;
-}
-
-#db-results-grid {
-  height: 1fr;
-  border: round $primary;
-}
-
-#db-config-form {
-  padding: 1 2;
-  background: #1a1a3a;
-  border: round $primary;
-  margin: 1;
-}
-
-/* --- CRON PANEL --- */
-#cron-sidebar {
-  border-right: vkey $secondary;
-}
-
-#cron-main {
-  width: 1fr;
-  height: 1fr;
-}
-
-#cron-details-container {
-  height: 10;
-  border-bottom: hkey $primary;
-  padding: 1;
-  background: #1a1a3a;
-}
-
-/* --- CURL PANEL --- */
-#curl-sidebar {
-  border-right: vkey $primary;
-}
-
-#curl-main {
-  width: 1fr;
-  height: 1fr;
-}
-
-#curl-builder-pane {
-  height: auto;
-  border-bottom: hkey $secondary;
-  padding: 1;
-  background: #16213e;
-}
-
-#curl-method-url-row {
-  height: 3;
-}
-
-#curl-url-input {
-  width: 1fr;
-  margin-left: 1;
-}
-
-#curl-builder-actions {
-  margin-top: 1;
-  height: 3;
-  align: right middle;
-}
-
-#curl-response-pane {
-  height: 1fr;
-  padding: 1;
-}
-
-#curl-response-view {
-  height: 1fr;
-  border: round $primary;
   background: #000000;
+  border: round $primary;
+  padding: 1;
 }
 
-#curl-response-status {
-  text-align: right;
-  color: $secondary;
-}
-
-/* --- GLOBAL WIDGETS --- */
 #embedded-terminal {
   height: 1fr;
   background: #000000;
@@ -299,10 +136,8 @@ BasePanel {
   border: tall $primary;
 }
 
-#command-palette {
-  margin: 1 4;
-  padding: 1 2;
-  border: outer $secondary;
-  background: #16213e;
-  layer: top;
+#status-bar {
+  height: 1;
+  background: #0f3460;
+  border-top: hkey $primary;
 }
