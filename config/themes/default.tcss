@@ -199,6 +199,35 @@ BasePanel {
   border: round $primary;
 }
 
+#db-config-form {
+  padding: 1 2;
+  background: #1a1a3a;
+  border: round $primary;
+  margin: 1;
+  height: auto;
+}
+
+#db-config-form Label {
+  margin-top: 1;
+  color: $secondary;
+  text-style: bold;
+}
+
+#db-config-form Input {
+  margin-bottom: 1;
+  border: solid $primary;
+}
+
+#db-cfg-actions {
+  margin-top: 2;
+  height: 3;
+  align: center middle;
+}
+
+#db-cfg-actions Button {
+  margin: 0 2;
+}
+
 #db-status-msg {
   height: auto;
   color: $secondary;
