@@ -80,8 +80,7 @@ class WorkPanel(BasePanel):
             with Vertical(id="work-main"):
                 yield Static("Terminal initializing...", id="work-note", classes="pane-title")
                 yield EmbeddedTerminal(
-                    on_input=lambda data: self._pty_manager.send_input(self.PANEL_ID, data),
-                    id="work-terminal"
+                    on_input=lambda data: self._pty_manager.send_input(self.PANEL_ID, data)
                 )
 
     def on_mount(self) -> None:
