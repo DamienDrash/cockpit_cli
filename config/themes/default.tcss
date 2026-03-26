@@ -169,6 +169,22 @@ BasePanel {
   height: 1fr;
   background: transparent;
   color: $primary;
+  padding: 0 1;
+}
+
+#db-catalog-tree Tree--cursor {
+  background: $secondary;
+  color: #000000;
+  text-style: bold;
+}
+
+#db-catalog-tree .tree--label {
+  padding: 0 1;
+}
+
+#db-catalog-tree .tree--guides {
+  color: $primary;
+  opacity: 50%;
 }
 
 #db-main {
