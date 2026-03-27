@@ -226,15 +226,10 @@ SelectOverlay > .select-overlay--filter {
   color: $primary;
 }
 
-/* --- ANIMATIONS --- */
-
-@keyframes pulse {
-  from { opacity: 1.0; }
-  50% { opacity: 0.6; }
-  to { opacity: 1.0; }
-}
+/* --- STATUS COLORS --- */
 
 .risk-prod {
   border: tall #ff0055;
-  animation: pulse 2s infinite;
+  color: #ff0055;
+  text-style: bold;
 }

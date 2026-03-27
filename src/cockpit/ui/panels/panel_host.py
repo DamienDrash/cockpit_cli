@@ -208,11 +208,14 @@ class PanelHost(Vertical):
             panel.styles.border_right = ("tall", border_color)
             panel.styles.border_bottom = ("tall", border_color)
 
-            # Add pulsing animation for PROD
             if risk_level == TargetRiskLevel.PROD:
                 panel.add_class("risk-prod")
+                # Python-driven animation for gold-standard UX
+                panel.styles.animate("border_opacity", value=0.4, duration=1.0, easing="in_out_sine")
+                panel.styles.animate("border_opacity", value=1.0, duration=1.0, easing="in_out_sine", delay=1.0)
             else:
                 panel.remove_class("risk-prod")
+                panel.styles.border_opacity = 1.0
 
     def focus_next_panel(self) -> None:
         visible_panel_ids = self._panel_ids_for_tab(self._active_tab_id)
