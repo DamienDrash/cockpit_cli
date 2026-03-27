@@ -10,6 +10,7 @@ from textual.app import ComposeResult
 from textual.containers import Horizontal, Vertical
 
 from cockpit.bootstrap import ApplicationContainer
+from cockpit.core.enums import TargetRiskLevel
 from cockpit.core.panel_state import PanelState
 from cockpit.ui.panels.registry import PanelContract
 
