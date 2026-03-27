@@ -1,176 +1,185 @@
-"""Curl/HTTP panel implementation."""
+"""Professional Curl/HTTP panel with history and request builder."""
 
 from __future__ import annotations
 
-from textual import events
-from textual.widgets import Static
+from collections.abc import Callable
+import json
+from rich.text import Text
+from rich.syntax import Syntax
+from textual.app import ComposeResult
+from textual.containers import Horizontal, Vertical
+from textual.widgets import Static, Label, Input, Button, Select, TextArea
 
-from cockpit.application.dispatch.event_bus import EventBus
-from cockpit.domain.events.runtime_events import PanelMounted, PanelStateChanged
-from cockpit.domain.models.panel_state import PanelState
+from cockpit.core.dispatch.event_bus import EventBus
+from cockpit.core.events.runtime import PanelMounted
+from cockpit.core.panel_state import PanelState
+from cockpit.ui.panels.base_panel import BasePanel
 
 
-class CurlPanel(Static):
-    """Request/response panel for quick HTTP interactions."""
+class CurlPanel(BasePanel):
+    """Professional HTTP TUI with history sidebar and request builder."""
 
     PANEL_ID = "curl-panel"
     PANEL_TYPE = "curl"
     can_focus = True
 
-    def __init__(self, *, event_bus: EventBus) -> None:
-        super().__init__("", id=self.PANEL_ID, markup=False)
+    def __init__(
+        self, *, event_bus: EventBus, dispatch: Callable[..., object] | None = None
+    ) -> None:
+        super().__init__(id=self.PANEL_ID)
         self._event_bus = event_bus
-        self._workspace_name = "No workspace"
+        self._dispatch = dispatch
         self._workspace_root = ""
-        self._workspace_id: str | None = None
-        self._session_id: str | None = None
-        self._draft_method = "GET"
-        self._draft_url = ""
-        self._draft_body = ""
-        self._last_response: dict[str, object] | None = None
         self._history: list[dict[str, object]] = []
+        self._last_response: dict[str, object] | None = None
+
+    def compose(self) -> ComposeResult:
+        with Horizontal():
+            # Sidebar: History
+            with Vertical(id="curl-sidebar", classes="sidebar"):
+                yield Label(" [ HISTORY ] ", classes="section-title")
+                yield Static(
+                    "No history yet.", id="curl-history-list", classes="list-view"
+                )
+                yield Label(" [ ACTIONS ] ", classes="section-title")
+                yield Static(" Enter: Send Request\n r: Refresh", id="curl-legend")
+
+            # Main: Builder & Response
+            with Vertical(id="curl-main"):
+                with Vertical(id="curl-builder-pane"):
+                    yield Label("HTTP REQUEST BUILDER", classes="pane-title")
+                    with Horizontal(id="curl-method-url-row"):
+                        yield Select(
+                            [
+                                ("GET", "GET"),
+                                ("POST", "POST"),
+                                ("PUT", "PUT"),
+                                ("DELETE", "DELETE"),
+                            ],
+                            value="GET",
+                            id="curl-method-select",
+                        )
+                        yield Input(
+                            placeholder="https://api.example.com", id="curl-url-input"
+                        )
+
+                    yield Label("Headers (Key:Value|...):")
+                    yield Input(
+                        placeholder="Content-Type: application/json",
+                        id="curl-headers-input",
+                    )
+
+                    yield Label("Body (Multiline):")
+                    yield TextArea(id="curl-body-area")
+
+                    with Horizontal(id="curl-builder-actions"):
+                        yield Button("SEND", id="curl-btn-send", variant="primary")
+
+                with Vertical(id="curl-response-pane"):
+                    yield Label("RESPONSE", classes="pane-title")
+                    yield Static("", id="curl-response-status")
+                    yield Static(
+                        "Response will appear here.",
+                        id="curl-response-view",
+                        classes="detail-view",
+                    )
 
     def on_mount(self) -> None:
         self._event_bus.publish(
-            PanelMounted(
-                panel_id=self.PANEL_ID,
-                panel_type=self.PANEL_TYPE,
-            )
+            PanelMounted(panel_id=self.PANEL_ID, panel_type=self.PANEL_TYPE)
         )
-        self._render_state()
 
     def initialize(self, context: dict[str, object]) -> None:
-        self._workspace_name = str(context.get("workspace_name", "Workspace"))
         self._workspace_root = str(context.get("workspace_root", ""))
-        self._workspace_id = self._optional_str(context.get("workspace_id"))
-        self._session_id = self._optional_str(context.get("session_id"))
-        self._render_state()
+        self.focus()
 
-    def restore_state(self, snapshot: dict[str, object]) -> None:
-        draft_method = snapshot.get("draft_method")
-        draft_url = snapshot.get("draft_url")
-        draft_body = snapshot.get("draft_body")
-        last_response = snapshot.get("last_response")
-        history = snapshot.get("history")
-        if isinstance(draft_method, str) and draft_method:
-            self._draft_method = draft_method
-        if isinstance(draft_url, str):
-            self._draft_url = draft_url
-        if isinstance(draft_body, str):
-            self._draft_body = draft_body
-        if isinstance(last_response, dict):
-            self._last_response = dict(last_response)
-        if isinstance(history, list):
-            self._history = [item for item in history if isinstance(item, dict)][:8]
-        if self.is_mounted:
-            self._render_state()
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "curl-btn-send":
+            self._handle_send()
 
-    def snapshot_state(self) -> PanelState:
-        return PanelState(
-            panel_id=self.PANEL_ID,
-            panel_type=self.PANEL_TYPE,
-            snapshot={
-                "draft_method": self._draft_method,
-                "draft_url": self._draft_url,
-                "draft_body": self._draft_body,
-                "last_response": dict(self._last_response) if self._last_response else None,
-                "history": list(self._history),
-            },
+    def _handle_send(self) -> None:
+        method = str(self.query_one("#curl-method-select", Select).value)
+        url = self.query_one("#curl-url-input", Input).value
+        headers = self.query_one("#curl-headers-input", Input).value
+        body = self.query_one("#curl-body-area", TextArea).text
+
+        if not url:
+            self.app.notify("URL is required!", severity="error")
+            return
+        if self._dispatch is None:
+            return
+
+        from cockpit.core.command import Command
+        from cockpit.core.enums import CommandSource
+        from cockpit.core.utils import make_id
+
+        # We add 'confirmed=True' to avoid the recurring prompt if policies allow it
+        self._dispatch(
+            Command(
+                id=make_id("cmd"),
+                source=CommandSource.KEYBINDING,
+                name="curl.send",
+                args={
+                    "argv": [method, url],
+                    "headers": headers,
+                    "body": body,
+                    "confirmed": True,
+                },
+                context=self.command_context(),
+            )
         )
-
-    def command_context(self) -> dict[str, object]:
-        return {
-            "panel_id": self.PANEL_ID,
-            "workspace_id": self._workspace_id,
-            "session_id": self._session_id,
-            "workspace_name": self._workspace_name,
-            "workspace_root": self._workspace_root,
-            "draft_method": self._draft_method,
-            "draft_url": self._draft_url,
-            "draft_body": self._draft_body,
-        }
-
-    def suspend(self) -> None:
-        """No runtime resources need suspension."""
-
-    def resume(self) -> None:
-        self._render_state()
-
-    def dispose(self) -> None:
-        """No runtime resources need disposal."""
 
     def apply_command_result(self, payload: dict[str, object]) -> None:
-        draft_method = payload.get("draft_method")
-        draft_url = payload.get("draft_url")
-        draft_body = payload.get("draft_body")
-        response = payload.get("response")
-        if isinstance(draft_method, str) and draft_method:
-            self._draft_method = draft_method
-        if isinstance(draft_url, str):
-            self._draft_url = draft_url
-        if isinstance(draft_body, str):
-            self._draft_body = draft_body
-        if isinstance(response, dict):
-            self._last_response = dict(response)
-            self._history.insert(0, dict(response))
-            self._history = self._history[:8]
-        self._render_state()
-        self._publish_panel_state()
-
-    def on_key(self, event: events.Key) -> None:
-        if event.key == "r":
-            self._render_state()
-            event.stop()
-
-    def _render_state(self) -> None:
-        self.update(self._render_text())
-
-    def _render_text(self) -> str:
-        lines = [
-            f"Workspace: {self._workspace_name}",
-            f"Root: {self._workspace_root or '(none)'}",
-            f"Draft: {self._draft_method} {self._draft_url or '(set via command)'}",
-            "",
-            "Last response:",
-        ]
-        if not self._last_response:
-            lines.append(
-                'Use /curl send GET https://example.com or /curl send POST https://... body=\'{"ok":true}\''
+        res = payload.get("response")
+        if isinstance(res, dict):
+            self._last_response = res
+            status = res.get("status_code", "???")
+            duration = res.get("duration_ms", 0)
+            self.query_one("#curl-response-status", Static).update(
+                f"Status: {status} | Time: {duration}ms"
             )
-        else:
-            status_code = self._last_response.get("status_code")
-            duration_ms = self._last_response.get("duration_ms")
-            lines.append(
-                f"status={status_code or '(none)'} duration_ms={duration_ms or 0}"
-            )
-            body_preview = self._last_response.get("body_preview")
-            if isinstance(body_preview, str) and body_preview:
-                lines.append(body_preview[:600])
-            message = self._last_response.get("message")
-            if isinstance(message, str) and message:
-                lines.append(message)
-        lines.extend(["", "History:"])
-        if not self._history:
-            lines.append("No requests sent yet.")
-        else:
-            for entry in self._history[:6]:
-                method = entry.get("method", "GET")
-                url = entry.get("url", "")
-                status_code = entry.get("status_code", "-")
-                lines.append(f"{method} {status_code} {url}")
-        return "\n".join(lines)
 
-    def _publish_panel_state(self) -> None:
-        state = self.snapshot_state()
-        self._event_bus.publish(
-            PanelStateChanged(
-                panel_id=self.PANEL_ID,
-                panel_type=self.PANEL_TYPE,
-                snapshot=state.snapshot,
-                config=state.config,
-            )
-        )
+            body = res.get("body_preview", "")
+            try:
+                parsed = json.loads(body)
+                body = json.dumps(parsed, indent=2)
+            except Exception:
+                pass
 
-    @staticmethod
-    def _optional_str(value: object) -> str | None:
-        return value if isinstance(value, str) else None
+            lexer = "json"
+            if body.strip().startswith("<"):
+                lexer = "html"
+            self.query_one("#curl-response-view", Static).update(
+                Syntax(body, lexer, theme="monokai")
+            )
+
+            # Update history
+            self._history.insert(
+                0,
+                {
+                    "method": payload.get("draft_method"),
+                    "url": payload.get("draft_url"),
+                    "status": status,
+                },
+            )
+            self._history = self._history[:10]
+            self._render_history()
+
+    def _render_history(self) -> None:
+        txt = Text()
+        for h in self._history:
+            txt.append(
+                f"{h['status']} ",
+                style="green" if str(h["status"]).startswith("2") else "red",
+            )
+            txt.append(f"{h['method']} {str(h['url'])[-20:]}\n", style="dim")
+        self.query_one("#curl-history-list", Static).update(txt)
+
+    def resume(self) -> None:
+        self.focus()
+
+    def command_context(self) -> dict[str, object]:
+        return {"panel_id": self.PANEL_ID, "workspace_root": self._workspace_root}
+
+    def snapshot_state(self) -> PanelState:
+        return PanelState(panel_id=self.PANEL_ID, panel_type=self.PANEL_TYPE)

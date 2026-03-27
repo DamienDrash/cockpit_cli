@@ -7,7 +7,11 @@ import re
 from cockpit.terminal.bindings.libvterm_ffi import load_libvterm
 from cockpit.terminal.engine.base import TerminalEngine
 from cockpit.terminal.engine.fallback import FallbackTerminalEngine
-from cockpit.terminal.engine.models import TerminalCell, TerminalCursorState, TerminalEngineSnapshot
+from cockpit.terminal.engine.models import (
+    TerminalCell,
+    TerminalCursorState,
+    TerminalEngineSnapshot,
+)
 
 
 ALTSCREEN_SEQUENCE_RE = re.compile(r"(\x1b\[\?1049[hl])")
@@ -40,7 +44,12 @@ class LibVTermTerminalEngine(TerminalEngine):
         term = getattr(self, "_term", None)
         ffi = getattr(self, "_ffi", None)
         lib = getattr(self, "_lib", None)
-        if term is not None and ffi is not None and lib is not None and term != ffi.NULL:
+        if (
+            term is not None
+            and ffi is not None
+            and lib is not None
+            and term != ffi.NULL
+        ):
             lib.vterm_free(term)
             self._term = ffi.NULL
 
@@ -79,7 +88,11 @@ class LibVTermTerminalEngine(TerminalEngine):
                 scrollback = tuple(transcript_lines)
             else:
                 cutoff = min(len(trimmed_lines), len(transcript_lines))
-                scrollback = tuple(transcript_lines[:-cutoff]) if cutoff else tuple(transcript_lines)
+                scrollback = (
+                    tuple(transcript_lines[:-cutoff])
+                    if cutoff
+                    else tuple(transcript_lines)
+                )
         return TerminalEngineSnapshot(
             rows=self._rows,
             cols=self._cols,
@@ -115,7 +128,12 @@ class LibVTermTerminalEngine(TerminalEngine):
     def _visible_cell_rows(self) -> tuple[tuple[TerminalCell, ...], ...]:
         rows: list[tuple[TerminalCell, ...]] = []
         for row_index in range(self._rows):
-            rows.append(tuple(self._cell_at(row_index, col_index) for col_index in range(self._cols)))
+            rows.append(
+                tuple(
+                    self._cell_at(row_index, col_index)
+                    for col_index in range(self._cols)
+                )
+            )
         return tuple(rows)
 
     def _cell_at(self, row: int, col: int) -> TerminalCell:
@@ -138,7 +156,11 @@ class LibVTermTerminalEngine(TerminalEngine):
         )
 
     def _decode_cell_text(self, raw_cell) -> str:
-        codepoints = [int(raw_cell.chars[index]) for index in range(6) if int(raw_cell.chars[index])]
+        codepoints = [
+            int(raw_cell.chars[index])
+            for index in range(6)
+            if int(raw_cell.chars[index])
+        ]
         if not codepoints:
             return "" if self._byte_to_int(raw_cell.width) == 0 else " "
         return "".join(chr(codepoint) for codepoint in codepoints)

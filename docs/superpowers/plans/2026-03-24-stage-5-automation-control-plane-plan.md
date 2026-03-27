@@ -98,7 +98,7 @@ indexes and repository APIs.
 ```text
 src/cockpit/infrastructure/persistence/schema.py
 src/cockpit/infrastructure/persistence/migrations.py
-src/cockpit/infrastructure/persistence/ops_repositories.py
+src/cockpit.ops.repositories.py
 tests/integration/test_stage5_ops_repositories.py
 ```
 

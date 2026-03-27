@@ -1,11 +1,11 @@
 import json
 import unittest
 
-from cockpit.infrastructure.persistence.snapshot_codec import (
+from cockpit.core.persistence.snapshot_codec import (
     decode_snapshot,
     encode_snapshot,
 )
-from cockpit.shared.enums import SnapshotKind
+from cockpit.core.enums import SnapshotKind
 
 
 class SnapshotCodecTests(unittest.TestCase):

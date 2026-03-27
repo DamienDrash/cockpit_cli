@@ -7,14 +7,14 @@ from threading import get_ident
 from textual import events
 from textual.widgets import Static
 
-from cockpit.application.dispatch.event_bus import EventBus
-from cockpit.application.services.component_watch_service import ComponentWatchService
-from cockpit.application.services.escalation_service import EscalationService
-from cockpit.application.services.incident_service import IncidentService
-from cockpit.application.services.notification_service import NotificationService
-from cockpit.application.services.self_healing_service import SelfHealingService
-from cockpit.domain.events.base import BaseEvent
-from cockpit.domain.events.escalation_events import (
+from cockpit.core.dispatch.event_bus import EventBus
+from cockpit.ops.services.component_watch_service import ComponentWatchService
+from cockpit.ops.services.escalation_service import EscalationService
+from cockpit.ops.services.incident_service import IncidentService
+from cockpit.notifications.services.notification_service import NotificationService
+from cockpit.ops.services.self_healing_service import SelfHealingService
+from cockpit.core.events.base import BaseEvent
+from cockpit.ops.events.escalation import (
     EngagementAcknowledged,
     EngagementEscalated,
     EngagementExhausted,
@@ -23,23 +23,23 @@ from cockpit.domain.events.escalation_events import (
     EngagementStatusChanged,
     IncidentEngagementCreated,
 )
-from cockpit.domain.events.health_events import (
+from cockpit.ops.events.health import (
     ComponentHealthChanged,
     ComponentQuarantined,
     ComponentWatchObserved,
     IncidentOpened,
     IncidentStatusChanged,
 )
-from cockpit.domain.events.notification_events import (
+from cockpit.notifications.events import (
     NotificationDelivered,
     NotificationDeliveryFailed,
     NotificationQueued,
     NotificationStatusChanged,
-        NotificationSuppressed,
-    )
-from cockpit.domain.events.runtime_events import PanelMounted, PanelStateChanged
-from cockpit.domain.models.panel_state import PanelState
-from cockpit.shared.enums import IncidentStatus
+    NotificationSuppressed,
+)
+from cockpit.core.events.runtime import PanelMounted, PanelStateChanged
+from cockpit.core.panel_state import PanelState
+from cockpit.core.enums import IncidentStatus
 
 
 class OpsPanel(Static):
@@ -120,11 +120,15 @@ class OpsPanel(Static):
         self._workspace_root = str(context.get("workspace_root", ""))
         self._workspace_id = self._optional_str(context.get("workspace_id"))
         self._session_id = self._optional_str(context.get("session_id"))
-        self._selected_engagement_id = self._optional_str(context.get("selected_engagement_id"))
+        self._selected_engagement_id = self._optional_str(
+            context.get("selected_engagement_id")
+        )
         self.refresh_summary()
 
     def restore_state(self, snapshot: dict[str, object]) -> None:
-        self._selected_engagement_id = self._optional_str(snapshot.get("selected_engagement_id"))
+        self._selected_engagement_id = self._optional_str(
+            snapshot.get("selected_engagement_id")
+        )
 
     def snapshot_state(self) -> PanelState:
         return PanelState(
@@ -152,8 +156,12 @@ class OpsPanel(Static):
             "session_id": self._session_id,
             "workspace_root": self._workspace_root,
             "selected_engagement_id": self._selected_engagement_id,
-            "selected_incident_id": selected.get("incident_id") if isinstance(selected, dict) else None,
-            "selected_engagement_status": selected.get("status") if isinstance(selected, dict) else None,
+            "selected_incident_id": selected.get("incident_id")
+            if isinstance(selected, dict)
+            else None,
+            "selected_engagement_status": selected.get("status")
+            if isinstance(selected, dict)
+            else None,
         }
 
     def on_key(self, event: events.Key) -> None:
@@ -258,7 +266,9 @@ class OpsPanel(Static):
                         f"target={engagement.get('current_target_ref', '')}"
                     )
                 )
-                next_action = engagement.get("next_action_at") or engagement.get("ack_deadline_at")
+                next_action = engagement.get("next_action_at") or engagement.get(
+                    "ack_deadline_at"
+                )
                 if next_action:
                     lines.append(f"  next={next_action}")
         lines.extend(
@@ -335,9 +345,9 @@ class OpsPanel(Static):
     def _move_selection(self, delta: int) -> None:
         if not self._engagements:
             return
-        self._selected_engagement_index = (self._selected_engagement_index + delta) % len(
-            self._engagements
-        )
+        self._selected_engagement_index = (
+            self._selected_engagement_index + delta
+        ) % len(self._engagements)
         self._selected_engagement_id = self._optional_str(
             self._engagements[self._selected_engagement_index].get("id")
         )
@@ -357,7 +367,9 @@ class OpsPanel(Static):
                     self._selected_engagement_id = selected_id
                     return
         self._selected_engagement_index = 0
-        self._selected_engagement_id = self._optional_str(self._engagements[0].get("id"))
+        self._selected_engagement_id = self._optional_str(
+            self._engagements[0].get("id")
+        )
 
     def _selected_engagement(self) -> dict[str, object] | None:
         if not self._engagements:

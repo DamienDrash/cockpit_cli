@@ -1,9 +1,9 @@
 import unittest
 from datetime import UTC, datetime, timedelta
 
-from cockpit.application.services.recovery_policy_service import RecoveryPolicyService
-from cockpit.domain.models.health import ComponentHealthState, RecoveryAttempt
-from cockpit.shared.enums import (
+from cockpit.ops.services.recovery_policy_service import RecoveryPolicyService
+from cockpit.ops.models.health import ComponentHealthState, RecoveryAttempt
+from cockpit.core.enums import (
     ComponentKind,
     HealthStatus,
     RecoveryAttemptStatus,

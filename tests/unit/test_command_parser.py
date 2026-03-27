@@ -1,7 +1,7 @@
 import unittest
 
-from cockpit.application.dispatch.command_parser import CommandParseError, CommandParser
-from cockpit.shared.enums import CommandSource
+from cockpit.core.dispatch.command_parser import CommandParseError, CommandParser
+from cockpit.core.enums import CommandSource
 
 
 class CommandParserTests(unittest.TestCase):

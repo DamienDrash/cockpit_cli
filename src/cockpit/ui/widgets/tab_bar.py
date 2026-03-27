@@ -1,32 +1,44 @@
-"""Tab bar widget."""
+"""Interactive Cyberpunk Tab Bar with robust dispatch."""
 
 from __future__ import annotations
 
-from textual.widgets import Static
+from textual.app import ComposeResult
+from textual.containers import Horizontal
+from textual.widgets import Static, Button
+from textual import work
 
-from cockpit.shared.enums import TargetRiskLevel
-from cockpit.shared.risk import RiskPresentation, risk_presentation
+from cockpit.core.enums import TargetRiskLevel
 
 
-class TabBar(Static):
-    """Simple stateful tab bar for the first multi-tab slice."""
+class TabBar(Horizontal):
+    """Stateful tab bar with clickable buttons."""
 
     def __init__(self) -> None:
         self._workspace_name = "none"
-        self._restored = False
         self._active_tab_id = "work"
-        self._target_label = "local"
-        self._risk_level = TargetRiskLevel.DEV
         self._tabs: list[tuple[str, str]] = [("work", "Work")]
-        super().__init__("", id="tab-bar", markup=False)
-        self._apply_risk_style()
-        self._render_state()
+        super().__init__(id="tab-bar")
+
+    def compose(self) -> ComposeResult:
+        with Horizontal(id="tabs-container"):
+            for tab_id, name in self._tabs:
+                is_active = tab_id == self._active_tab_id
+                yield Button(
+                    name.upper(),
+                    id=f"tab-btn-{tab_id}",
+                    variant="primary" if is_active else "default",
+                    classes="tab-button" + (" active" if is_active else ""),
+                )
+        yield Static(f" [ {self._workspace_name} ] ", id="tab-workspace-info")
+
+    @work
+    async def _safe_recompose(self) -> None:
+        await self.recompose()
 
     def set_tabs(self, tabs: list[tuple[str, str]]) -> None:
         self._tabs = tabs or [("work", "Work")]
-        if self._active_tab_id not in {tab_id for tab_id, _name in self._tabs}:
-            self._active_tab_id = self._tabs[0][0]
-        self._render_state()
+        # Only recompose if tabs actually changed to avoid flicker
+        self._safe_recompose()
 
     def set_workspace(
         self,
@@ -38,37 +50,42 @@ class TabBar(Static):
         risk_level: TargetRiskLevel = TargetRiskLevel.DEV,
     ) -> None:
         self._workspace_name = workspace_name
-        self._restored = restored
         self._active_tab_id = active_tab_id
-        self._target_label = target_label
-        self._risk_level = risk_level
-        self._apply_risk_style()
-        self._render_state()
+        self._safe_recompose()
 
     def set_active_tab(self, tab_id: str) -> None:
         self._active_tab_id = tab_id
-        self._render_state()
+        # Update button styles without full recompose for performance
+        for btn in self.query(".tab-button"):
+            btn_tab_id = btn.id.replace("tab-btn-", "") if btn.id else ""
+            if btn_tab_id == tab_id:
+                btn.add_class("active")
+                btn.variant = "primary"
+            else:
+                btn.remove_class("active")
+                btn.variant = "default"
 
-    def _render_state(self) -> None:
-        tabs = " ".join(
-            f"[{name}]" if tab_id == self._active_tab_id else name
-            for tab_id, name in self._tabs
-        )
-        state = "restored" if self._restored else "fresh"
-        presentation = risk_presentation(self._risk_level)
-        self.update(
-            " | ".join(
-                (
-                    f"Tabs: {tabs}",
-                    f"Workspace: {self._workspace_name}",
-                    f"Target: {self._target_label}",
-                    f"Risk: {presentation.label}",
-                    f"Session: {state}",
-                )
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id and event.button.id.startswith("tab-btn-"):
+            tab_id = event.button.id.replace("tab-btn-", "")
+
+            from cockpit.core.command import Command
+            from cockpit.core.enums import CommandSource
+            from cockpit.core.utils import make_id
+
+            # Use the app's internal command context
+            try:
+                context = self.app._command_context()
+            except Exception:
+                context = {}
+
+            # Execute the focus command
+            cmd = Command(
+                id=make_id("cmd"),
+                source=CommandSource.KEYBINDING,  # Must be enum!
+                name="tab.focus",
+                args={"argv": [tab_id]},
+                context=context,
             )
-        )
-
-    def _apply_risk_style(self) -> None:
-        presentation: RiskPresentation = risk_presentation(self._risk_level)
-        self.styles.background = presentation.background
-        self.styles.color = presentation.color
+            self.app._dispatch_command(cmd)
+            event.stop()

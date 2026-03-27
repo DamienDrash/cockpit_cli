@@ -12,14 +12,14 @@ import sys
 from types import SimpleNamespace
 from typing import Any, TextIO
 
-from cockpit.application.handlers.base import DispatchResult
-from cockpit.domain.commands.command import Command
-from cockpit.domain.models.panel_state import PanelState
-from cockpit.domain.models.plugin import PluginManifest
+from cockpit.core.dispatch.handler_base import DispatchResult
+from cockpit.core.command import Command
+from cockpit.core.panel_state import PanelState
+from cockpit.plugins.models import PluginManifest
 from cockpit.plugins.loader import PluginLoader
 from cockpit.plugins.runtime.contracts import HostedCommandExport, HostedPanelExport
-from cockpit.shared.enums import CommandSource
-from cockpit.shared.utils import serialize_value
+from cockpit.core.enums import CommandSource
+from cockpit.core.utils import serialize_value
 
 
 class HostedPluginContext:
@@ -127,7 +127,9 @@ class HostedPluginRuntime:
             if isinstance(permission, str) and permission.strip()
         }
         if self._context.panel_specs and "ui.read" not in declared:
-            raise RuntimeError("Hosted plugins that export panels must declare ui.read.")
+            raise RuntimeError(
+                "Hosted plugins that export panels must declare ui.read."
+            )
         if self._context.command_handlers and "commands.execute" not in declared:
             raise RuntimeError(
                 "Hosted plugins that export commands must declare commands.execute."
@@ -143,17 +145,25 @@ class HostedPluginRuntime:
             raise TypeError("Plugin command payload must be a JSON object.")
         command = Command(
             id=str(command_payload.get("id", "")),
-            source=CommandSource(str(command_payload.get("source", CommandSource.PALETTE.value))),
+            source=CommandSource(
+                str(command_payload.get("source", CommandSource.PALETTE.value))
+            ),
             name=str(command_payload.get("name", command_name)),
-            args=dict(command_payload.get("args", {})) if isinstance(command_payload.get("args"), dict) else {},
-            context=dict(command_payload.get("context", {})) if isinstance(command_payload.get("context"), dict) else {},
+            args=dict(command_payload.get("args", {}))
+            if isinstance(command_payload.get("args"), dict)
+            else {},
+            context=dict(command_payload.get("context", {}))
+            if isinstance(command_payload.get("context"), dict)
+            else {},
         )
         result = handler(command)
         if not isinstance(result, DispatchResult):
             raise TypeError("Plugin command handlers must return DispatchResult.")
         return {"dispatch_result": serialize_value(result)}
 
-    def _handle_panel_action(self, action: str, params: dict[str, object]) -> dict[str, object]:
+    def _handle_panel_action(
+        self, action: str, params: dict[str, object]
+    ) -> dict[str, object]:
         panel_id = str(params.get("panel_id", ""))
         panel = self._panel_instance(panel_id)
         payload = params.get("payload", {})
@@ -203,7 +213,9 @@ class HostedPluginRuntime:
         spec = self._context.panel_specs.get(panel_id)
         if spec is None:
             raise LookupError(f"Plugin panel '{panel_id}' is not registered.")
-        container = SimpleNamespace(project_root=self._project_root, plugin_id=self._plugin_id)
+        container = SimpleNamespace(
+            project_root=self._project_root, plugin_id=self._plugin_id
+        )
         panel = spec.factory(container)
         self._panel_instances[panel_id] = panel
         return panel
@@ -314,7 +326,9 @@ def main() -> int:
                     writer,
                     {
                         "type": "response",
-                        "request_id": payload.get("request_id") if isinstance(payload, dict) else None,
+                        "request_id": payload.get("request_id")
+                        if isinstance(payload, dict)
+                        else None,
                         "ok": False,
                         "error": str(exc),
                     },

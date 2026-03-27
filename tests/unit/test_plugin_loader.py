@@ -4,8 +4,8 @@ import sys
 import textwrap
 import unittest
 
-from cockpit.application.dispatch.command_dispatcher import CommandDispatcher
-from cockpit.application.dispatch.event_bus import EventBus
+from cockpit.core.dispatch.command_dispatcher import CommandDispatcher
+from cockpit.core.dispatch.event_bus import EventBus
 from cockpit.plugins.loader import PluginBootstrapContext, PluginLoader
 from cockpit.ui.panels.registry import PanelRegistry
 
@@ -18,8 +18,8 @@ class PluginLoaderTests(unittest.TestCase):
             module_path.write_text(
                 textwrap.dedent(
                     """
-                    from cockpit.application.handlers.base import DispatchResult
-                    from cockpit.domain.models.panel_state import PanelState
+                    from cockpit.core.dispatch.handler_base import DispatchResult
+                    from cockpit.core.panel_state import PanelState
                     from cockpit.ui.panels.registry import PanelSpec
 
                     class FakePanel:

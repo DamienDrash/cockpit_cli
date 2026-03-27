@@ -1,8 +1,8 @@
 import unittest
 
 from cockpit.infrastructure.git.git_adapter import GitAdapter
-from cockpit.infrastructure.ssh.command_runner import SSHCommandResult
-from cockpit.shared.enums import SessionTargetKind
+from cockpit.datasources.adapters.ssh_command_runner import SSHCommandResult
+from cockpit.core.enums import SessionTargetKind
 
 
 class FakeSSHCommandRunner:

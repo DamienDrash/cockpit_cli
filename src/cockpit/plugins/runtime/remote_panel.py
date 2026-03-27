@@ -5,10 +5,13 @@ from __future__ import annotations
 try:  # pragma: no cover - exercised in integration environments with textual
     from textual.widgets import Static
 except Exception:  # pragma: no cover - test fallback when textual is unavailable
+
     class Static:  # type: ignore[override]
         can_focus = True
 
-        def __init__(self, value: str = "", *, id: str | None = None, markup: bool = False) -> None:
+        def __init__(
+            self, value: str = "", *, id: str | None = None, markup: bool = False
+        ) -> None:
             del markup
             self.id = id
             self.display = True
@@ -20,7 +23,8 @@ except Exception:  # pragma: no cover - test fallback when textual is unavailabl
         def focus(self) -> None:
             return None
 
-from cockpit.domain.models.panel_state import PanelState
+
+from cockpit.core.panel_state import PanelState
 
 
 class RemotePluginPanel(Static):
@@ -63,8 +67,12 @@ class RemotePluginPanel(Static):
         return PanelState(
             panel_id=str(payload.get("panel_id", self.PANEL_ID)),
             panel_type=str(payload.get("panel_type", self.PANEL_TYPE)),
-            snapshot=dict(payload.get("snapshot", {})) if isinstance(payload.get("snapshot"), dict) else {},
-            config=dict(payload.get("config", {})) if isinstance(payload.get("config"), dict) else {},
+            snapshot=dict(payload.get("snapshot", {}))
+            if isinstance(payload.get("snapshot"), dict)
+            else {},
+            config=dict(payload.get("config", {}))
+            if isinstance(payload.get("config"), dict)
+            else {},
             persist_policy=str(payload.get("persist_policy", "session")),
         )
 
@@ -105,8 +113,7 @@ class RemotePluginPanel(Static):
             )
         except Exception as exc:
             self._render_text = (
-                f"{self._display_name}\n\n"
-                f"Plugin host unavailable.\n{exc}"
+                f"{self._display_name}\n\nPlugin host unavailable.\n{exc}"
             )
             self.update(self._render_text)
             if action == "snapshot_state":

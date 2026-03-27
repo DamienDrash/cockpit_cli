@@ -3,7 +3,7 @@ import unittest
 from cockpit.infrastructure.filesystem.remote_filesystem_adapter import (
     RemoteFilesystemAdapter,
 )
-from cockpit.infrastructure.ssh.command_runner import SSHCommandResult
+from cockpit.datasources.adapters.ssh_command_runner import SSHCommandResult
 
 
 class FakeSSHCommandRunner:
@@ -51,7 +51,9 @@ class RemoteFilesystemAdapterTests(unittest.TestCase):
         )
 
         self.assertEqual(snapshot.browser_path, "/srv/app")
-        self.assertEqual([entry.name for entry in snapshot.entries], ["current", "README.md"])
+        self.assertEqual(
+            [entry.name for entry in snapshot.entries], ["current", "README.md"]
+        )
         self.assertTrue(snapshot.entries[0].is_dir)
 
     def test_reports_remote_listing_failures_cleanly(self) -> None:

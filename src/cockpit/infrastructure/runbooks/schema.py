@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
-from cockpit.domain.models.response import (
+from cockpit.ops.models.response import (
     RunbookArtifactDefinition,
     RunbookCompensationDefinition,
     RunbookDefinition,
     RunbookStepDefinition,
 )
-from cockpit.shared.enums import RunbookExecutorKind, RunbookRiskClass
+from cockpit.core.enums import RunbookExecutorKind, RunbookRiskClass
 
 
 class RunbookValidationError(ValueError):
@@ -37,7 +37,9 @@ def validate_runbook_payload(
     version = _required_str(payload, "version")
     title = _required_str(payload, "title")
     description = _optional_str(payload.get("description"))
-    risk_class = RunbookRiskClass(str(payload.get("risk_class", RunbookRiskClass.GUARDED.value)))
+    risk_class = RunbookRiskClass(
+        str(payload.get("risk_class", RunbookRiskClass.GUARDED.value))
+    )
     tags = _string_list(payload.get("tags", []))
     scope = _mapping(payload.get("scope", {}), key="scope")
 
@@ -52,7 +54,9 @@ def validate_runbook_payload(
             raise RunbookValidationError(f"Step {index} must be an object.")
         step = _validate_step(raw_step, step_index=index)
         if step.key in seen_keys:
-            raise RunbookValidationError(f"Runbook step key '{step.key}' is duplicated.")
+            raise RunbookValidationError(
+                f"Runbook step key '{step.key}' is duplicated."
+            )
         seen_keys.add(step.key)
         steps.append(step)
 
@@ -70,7 +74,9 @@ def validate_runbook_payload(
     )
 
 
-def _validate_step(payload: dict[str, object], *, step_index: int) -> RunbookStepDefinition:
+def _validate_step(
+    payload: dict[str, object], *, step_index: int
+) -> RunbookStepDefinition:
     key = _required_str(payload, "key")
     title = _required_str(payload, "title")
     executor_kind = RunbookExecutorKind(_required_str(payload, "executor_kind"))
@@ -85,7 +91,9 @@ def _validate_step(payload: dict[str, object], *, step_index: int) -> RunbookSte
     approval_expires_after_seconds = payload.get("approval_expires_after_seconds")
     max_retries = int(payload.get("max_retries", 0) or 0)
     continue_on_failure = bool(payload.get("continue_on_failure", False))
-    step_config = _mapping(payload.get("step_config", {}), key=f"steps[{step_index}].step_config")
+    step_config = _mapping(
+        payload.get("step_config", {}), key=f"steps[{step_index}].step_config"
+    )
     artifacts = _validate_artifacts(payload.get("artifacts", []), step_index=step_index)
     compensation = _validate_compensation(
         payload.get("compensation"),
@@ -98,12 +106,17 @@ def _validate_step(payload: dict[str, object], *, step_index: int) -> RunbookSte
         )
     if required_approver_count > 0:
         approval_required = True
-    if approval_expires_after_seconds is not None and int(approval_expires_after_seconds) <= 0:
+    if (
+        approval_expires_after_seconds is not None
+        and int(approval_expires_after_seconds) <= 0
+    ):
         raise RunbookValidationError(
             f"Step '{key}' must use a positive approval_expires_after_seconds."
         )
     if max_retries < 0:
-        raise RunbookValidationError(f"Step '{key}' must not use a negative max_retries.")
+        raise RunbookValidationError(
+            f"Step '{key}' must not use a negative max_retries."
+        )
 
     _validate_executor_config(
         executor_kind=executor_kind,
@@ -136,7 +149,9 @@ def _validate_step(payload: dict[str, object], *, step_index: int) -> RunbookSte
     )
 
 
-def _validate_artifacts(payload: object, *, step_index: int) -> tuple[RunbookArtifactDefinition, ...]:
+def _validate_artifacts(
+    payload: object, *, step_index: int
+) -> tuple[RunbookArtifactDefinition, ...]:
     if payload in (None, []):
         return ()
     if not isinstance(payload, list):
@@ -165,7 +180,9 @@ def _validate_compensation(
     if payload is None:
         return None
     if not isinstance(payload, dict):
-        raise RunbookValidationError(f"Step {step_index} compensation must be an object.")
+        raise RunbookValidationError(
+            f"Step {step_index} compensation must be an object."
+        )
     step_config = _mapping(
         payload.get("step_config", {}),
         key=f"steps[{step_index}].compensation.step_config",
@@ -185,7 +202,9 @@ def _validate_compensation(
         step_config=step_config,
         requires_confirmation=bool(payload.get("requires_confirmation", False)),
         requires_elevated_mode=bool(payload.get("requires_elevated_mode", False)),
-        approval_required=bool(payload.get("approval_required", False) or required_approver_count > 0),
+        approval_required=bool(
+            payload.get("approval_required", False) or required_approver_count > 0
+        ),
         required_approver_count=required_approver_count,
         required_roles=tuple(_string_list(payload.get("required_roles", []))),
     )
@@ -268,4 +287,3 @@ def _mapping(value: object, *, key: str) -> dict[str, object]:
     if not isinstance(value, dict):
         raise RunbookValidationError(f"Field '{key}' must be an object.")
     return {str(map_key): map_value for map_key, map_value in value.items()}
-

@@ -16,7 +16,9 @@ class HostedPanelExport:
         return cls(
             panel_id=str(payload.get("panel_id", "")),
             panel_type=str(payload.get("panel_type", "")),
-            display_name=str(payload.get("display_name", payload.get("panel_type", ""))),
+            display_name=str(
+                payload.get("display_name", payload.get("panel_type", ""))
+            ),
         )
 
     def to_dict(self) -> dict[str, object]:
@@ -75,11 +77,7 @@ class PluginHostStartup:
             admin_pages=tuple(
                 str(item) for item in raw_admin_pages if isinstance(item, str)
             ),
-            pid=(
-                int(payload["pid"])
-                if isinstance(payload.get("pid"), int)
-                else None
-            ),
+            pid=(int(payload["pid"]) if isinstance(payload.get("pid"), int) else None),
         )
 
     def to_dict(self) -> dict[str, object]:

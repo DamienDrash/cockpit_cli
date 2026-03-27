@@ -19,4 +19,3 @@ __all__ = [
     "TerminalSelection",
     "create_terminal_engine",
 ]
-

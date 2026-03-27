@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from textual.containers import Vertical
 
-from cockpit.domain.models.panel_state import PanelState
+from cockpit.core.panel_state import PanelState
 
 
 class BasePanel(Vertical):
@@ -15,15 +15,15 @@ class BasePanel(Vertical):
 
     def initialize(self, context: dict[str, object]) -> None:
         """Load panel state from application context."""
-        raise NotImplementedError
+        pass
 
     def restore_state(self, snapshot: dict[str, object]) -> None:
         """Apply the persisted panel snapshot."""
-        raise NotImplementedError
+        pass
 
     def snapshot_state(self) -> PanelState:
         """Return the persistable state for the panel."""
-        raise NotImplementedError
+        return PanelState(panel_id=self.PANEL_ID, panel_type=self.PANEL_TYPE)
 
     def apply_command_result(self, payload: dict[str, object]) -> None:
         """Apply command-result data routed back into the panel."""

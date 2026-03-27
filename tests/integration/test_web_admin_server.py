@@ -7,7 +7,7 @@ from urllib.request import Request, urlopen
 import time
 import unittest
 
-from cockpit.shared.enums import (
+from cockpit.core.enums import (
     ActionItemStatus,
     ApprovalRequestStatus,
     ClosureQuality,
@@ -25,7 +25,7 @@ from cockpit.shared.enums import (
     TeamMembershipRole,
     WatchSubjectKind,
 )
-from cockpit.infrastructure.web.admin_server import LocalWebAdminServer
+from cockpit.admin.http_server import LocalWebAdminServer
 
 
 @dataclass
@@ -332,7 +332,11 @@ class FakeWebAdminService:
     def rotate_secret(self, name: str, *, secret_value: str):
         del secret_value
         self.rotated_secrets.append(name)
-        return _SecretObject(name=name, provider="keyring", reference={"provider": "keyring", "service": "cockpit", "username": name})
+        return _SecretObject(
+            name=name,
+            provider="keyring",
+            reference={"provider": "keyring", "service": "cockpit", "username": name},
+        )
 
     def list_vault_profiles(self):
         return [
@@ -564,7 +568,9 @@ class FakeWebAdminService:
             ],
         )
 
-    def clone_layout(self, source_layout_id: str, target_layout_id: str, name: str | None = None):
+    def clone_layout(
+        self, source_layout_id: str, target_layout_id: str, name: str | None = None
+    ):
         del source_layout_id, target_layout_id, name
         return _NamedObject(name="Layout")
 
@@ -576,7 +582,9 @@ class FakeWebAdminService:
         del layout_id, tab_id, ratio
         return _NamedObject(name="Layout")
 
-    def add_panel_to_layout(self, layout_id: str, tab_id: str, panel_id: str, panel_type: str):
+    def add_panel_to_layout(
+        self, layout_id: str, tab_id: str, panel_id: str, panel_type: str
+    ):
         del layout_id, tab_id, panel_id, panel_type
         return _NamedObject(name="Layout")
 
@@ -592,7 +600,13 @@ class FakeWebAdminService:
         replacement_panel_id: str,
         replacement_panel_type: str,
     ):
-        del layout_id, tab_id, existing_panel_id, replacement_panel_id, replacement_panel_type
+        del (
+            layout_id,
+            tab_id,
+            existing_panel_id,
+            replacement_panel_id,
+            replacement_panel_type,
+        )
         return _NamedObject(name="Layout")
 
     def move_panel_in_layout(
@@ -619,7 +633,9 @@ class FakeWebAdminService:
     def reconnect_tunnel(self, profile_id: str) -> None:
         self.reconnected_tunnels.append(profile_id)
 
-    def list_incidents(self, *, status=None, severity=None, component_kind=None, search=None):
+    def list_incidents(
+        self, *, status=None, severity=None, component_kind=None, search=None
+    ):
         del status, severity, component_kind, search
         return [
             _IncidentObject(),
@@ -666,7 +682,8 @@ class FakeWebAdminService:
         return _OperatorTeamObject(
             id=str(payload.get("team_id", "team-1") or "team-1"),
             name=str(payload.get("name", "Platform Ops")),
-            default_escalation_policy_id=payload.get("default_escalation_policy_id") or None,
+            default_escalation_policy_id=payload.get("default_escalation_policy_id")
+            or None,
         )
 
     def delete_operator_team(self, team_id: str) -> None:
@@ -681,7 +698,9 @@ class FakeWebAdminService:
             id=str(payload.get("membership_id", "mem-1") or "mem-1"),
             team_id=str(payload.get("team_id", "team-1")),
             person_id=str(payload.get("person_id", "opr-1")),
-            role=TeamMembershipRole(str(payload.get("role", TeamMembershipRole.MEMBER.value))),
+            role=TeamMembershipRole(
+                str(payload.get("role", TeamMembershipRole.MEMBER.value))
+            ),
         )
 
     def delete_team_membership(self, membership_id: str) -> None:
@@ -815,7 +834,9 @@ class FakeWebAdminService:
         return [_ResponseRunObject().to_dict()]
 
     def response_run_detail(self, run_id: str):
-        return _ResponseDetailObject(response_run=_ResponseRunObject(id=run_id or "rrn-1"))
+        return _ResponseDetailObject(
+            response_run=_ResponseRunObject(id=run_id or "rrn-1")
+        )
 
     def start_response_run(
         self,
@@ -882,9 +903,15 @@ class FakeWebAdminService:
         )
         return _ResponseRunObject(id=run_id, summary="Retrying current response step.")
 
-    def abort_response_run(self, run_id: str, *, actor: str = "web-admin", reason: str = "web-admin abort"):
-        self.aborted_responses.append({"run_id": run_id, "actor": actor, "reason": reason})
-        return _ResponseRunObject(id=run_id, status=ResponseRunStatus.ABORTED, summary="Response run aborted.")
+    def abort_response_run(
+        self, run_id: str, *, actor: str = "web-admin", reason: str = "web-admin abort"
+    ):
+        self.aborted_responses.append(
+            {"run_id": run_id, "actor": actor, "reason": reason}
+        )
+        return _ResponseRunObject(
+            id=run_id, status=ResponseRunStatus.ABORTED, summary="Response run aborted."
+        )
 
     def compensate_response_run(
         self,
@@ -928,7 +955,11 @@ class FakeWebAdminService:
                 "comment": comment,
             }
         )
-        return _ResponseRunObject(id="rrn-1", status=ResponseRunStatus.READY, summary=f"Approval request {request_id} handled.")
+        return _ResponseRunObject(
+            id="rrn-1",
+            status=ResponseRunStatus.READY,
+            summary=f"Approval request {request_id} handled.",
+        )
 
     def list_reviews(self):
         return [_ReviewObject()]
@@ -950,7 +981,12 @@ class FakeWebAdminService:
                 "owner_ref": owner_ref,
             }
         )
-        return _ReviewObject(id="rvw-opened", incident_id=incident_id, response_run_id=response_run_id, owner_ref=owner_ref)
+        return _ReviewObject(
+            id="rvw-opened",
+            incident_id=incident_id,
+            response_run_id=response_run_id,
+            owner_ref=owner_ref,
+        )
 
     def add_review_finding(
         self,
@@ -970,7 +1006,9 @@ class FakeWebAdminService:
                 "detail": detail,
             }
         )
-        return _ReviewFindingObject(id="rfn-added", review_id=review_id, title=title, detail=detail)
+        return _ReviewFindingObject(
+            id="rfn-added", review_id=review_id, title=title, detail=detail
+        )
 
     def add_review_action_item(
         self,
@@ -990,10 +1028,18 @@ class FakeWebAdminService:
                 "due_at": due_at.isoformat() if due_at is not None else None,
             }
         )
-        return _ActionItemObject(id="act-added", review_id=review_id, owner_ref=owner_ref, title=title, detail=detail)
+        return _ActionItemObject(
+            id="act-added",
+            review_id=review_id,
+            owner_ref=owner_ref,
+            title=title,
+            detail=detail,
+        )
 
     def set_review_action_item_status(self, action_item_id: str, *, status: str):
-        self.updated_action_items.append({"action_item_id": action_item_id, "status": status})
+        self.updated_action_items.append(
+            {"action_item_id": action_item_id, "status": status}
+        )
         return _ActionItemObject(id=action_item_id, status=ActionItemStatus(status))
 
     def complete_review(
@@ -1302,7 +1348,9 @@ class _EscalationStepObject:
 @dataclass
 class _EscalationPolicyDetailObject:
     policy: _EscalationPolicyObject = field(default_factory=_EscalationPolicyObject)
-    steps: list[_EscalationStepObject] = field(default_factory=lambda: [_EscalationStepObject()])
+    steps: list[_EscalationStepObject] = field(
+        default_factory=lambda: [_EscalationStepObject()]
+    )
 
 
 @dataclass
@@ -1388,8 +1436,12 @@ class _IncidentDetailIncident:
     component_id: str = "ssh-tunnel:pg-main"
     title: str = "Tunnel unhealthy"
     summary: str = "tunnel exited"
-    status: _IncidentStatusValue = field(default_factory=lambda: _IncidentStatusValue("open"))
-    severity: _IncidentStatusValue = field(default_factory=lambda: _IncidentStatusValue("high"))
+    status: _IncidentStatusValue = field(
+        default_factory=lambda: _IncidentStatusValue("open")
+    )
+    severity: _IncidentStatusValue = field(
+        default_factory=lambda: _IncidentStatusValue("high")
+    )
 
 
 @dataclass
@@ -1485,7 +1537,10 @@ class _RunbookObject:
 
     @property
     def steps(self) -> tuple[object, ...]:
-        return (_ResponseStepRunObject(step_key="restart"), _ResponseStepRunObject(step_key="verify"))
+        return (
+            _ResponseStepRunObject(step_key="restart"),
+            _ResponseStepRunObject(step_key="verify"),
+        )
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -1590,7 +1645,11 @@ class _ResponseArtifactObject:
     label: str = "docker-inspect"
 
     def to_dict(self) -> dict[str, object]:
-        return {"id": self.id, "response_run_id": self.response_run_id, "label": self.label}
+        return {
+            "id": self.id,
+            "response_run_id": self.response_run_id,
+            "label": self.label,
+        }
 
 
 @dataclass
@@ -1600,7 +1659,11 @@ class _CompensationRunObject:
     status: str = "completed"
 
     def to_dict(self) -> dict[str, object]:
-        return {"id": self.id, "response_run_id": self.response_run_id, "status": self.status}
+        return {
+            "id": self.id,
+            "response_run_id": self.response_run_id,
+            "status": self.status,
+        }
 
 
 @dataclass
@@ -1670,8 +1733,19 @@ class _ResponseDetailObject:
     runbook: _RunbookObject = field(default_factory=_RunbookObject)
     step_runs: tuple[_ResponseStepRunObject, ...] = field(
         default_factory=lambda: (
-            _ResponseStepRunObject(id="rsp-1", step_key="restart", status=ResponseStepStatus.SUCCEEDED, attempt_count=1, output_summary="Container restarted."),
-            _ResponseStepRunObject(id="rsp-2", step_key="verify", status=ResponseStepStatus.READY, attempt_count=0),
+            _ResponseStepRunObject(
+                id="rsp-1",
+                step_key="restart",
+                status=ResponseStepStatus.SUCCEEDED,
+                attempt_count=1,
+                output_summary="Container restarted.",
+            ),
+            _ResponseStepRunObject(
+                id="rsp-2",
+                step_key="verify",
+                status=ResponseStepStatus.READY,
+                attempt_count=0,
+            ),
         )
     )
     approvals: tuple[dict[str, object], ...] = field(
@@ -1682,8 +1756,12 @@ class _ResponseDetailObject:
             },
         )
     )
-    artifacts: tuple[_ResponseArtifactObject, ...] = field(default_factory=lambda: (_ResponseArtifactObject(),))
-    compensations: tuple[_CompensationRunObject, ...] = field(default_factory=lambda: (_CompensationRunObject(),))
+    artifacts: tuple[_ResponseArtifactObject, ...] = field(
+        default_factory=lambda: (_ResponseArtifactObject(),)
+    )
+    compensations: tuple[_CompensationRunObject, ...] = field(
+        default_factory=lambda: (_CompensationRunObject(),)
+    )
     timeline: tuple[dict[str, object], ...] = field(
         default_factory=lambda: (
             {"event_type": "run_started", "message": "Response run started."},
@@ -1696,8 +1774,12 @@ class _ResponseDetailObject:
 @dataclass
 class _ReviewDetailObject:
     review: _ReviewObject = field(default_factory=_ReviewObject)
-    findings: tuple[_ReviewFindingObject, ...] = field(default_factory=lambda: (_ReviewFindingObject(),))
-    action_items: tuple[_ActionItemObject, ...] = field(default_factory=lambda: (_ActionItemObject(),))
+    findings: tuple[_ReviewFindingObject, ...] = field(
+        default_factory=lambda: (_ReviewFindingObject(),)
+    )
+    action_items: tuple[_ActionItemObject, ...] = field(
+        default_factory=lambda: (_ActionItemObject(),)
+    )
 
 
 class LocalWebAdminServerTests(unittest.TestCase):
@@ -1822,7 +1904,12 @@ class LocalWebAdminServerTests(unittest.TestCase):
                                     "root_split": {
                                         "orientation": "vertical",
                                         "ratio": 1.0,
-                                        "children": [{"panel_id": "work-panel", "panel_type": "work"}],
+                                        "children": [
+                                            {
+                                                "panel_id": "work-panel",
+                                                "panel_type": "work",
+                                            }
+                                        ],
                                     },
                                 }
                             ],
@@ -1897,7 +1984,9 @@ class LocalWebAdminServerTests(unittest.TestCase):
             with urlopen(watch_request) as response:
                 watch_body = response.read().decode("utf-8")
             self.assertIn("Saved datasource watch Primary DB Reachability.", watch_body)
-            self.assertEqual(service.saved_datasource_watches[0]["profile_id"], "pg-main")
+            self.assertEqual(
+                service.saved_datasource_watches[0]["profile_id"], "pg-main"
+            )
 
             rotate_request = Request(
                 f"{base_url}/secrets/rotate",
@@ -2020,7 +2109,9 @@ class LocalWebAdminServerTests(unittest.TestCase):
             with urlopen(response_start_request) as response:
                 response_start_body = response.read().decode("utf-8")
             self.assertIn("Started response run rrn-started.", response_start_body)
-            self.assertEqual(service.started_responses[0]["runbook_id"], "docker-container-unhealthy")
+            self.assertEqual(
+                service.started_responses[0]["runbook_id"], "docker-container-unhealthy"
+            )
 
             response_execute_request = Request(
                 f"{base_url}/responses/execute",
@@ -2137,7 +2228,9 @@ class LocalWebAdminServerTests(unittest.TestCase):
             with urlopen(complete_review_request) as response:
                 complete_review_body = response.read().decode("utf-8")
             self.assertIn("Completed review rvw-1.", complete_review_body)
-            self.assertEqual(service.completed_reviews[0]["closure_quality"], "complete")
+            self.assertEqual(
+                service.completed_reviews[0]["closure_quality"], "complete"
+            )
 
             self.assertIn("/diagnostics", service.saved_pages)
             self.assertIn("/plugins", service.saved_pages)

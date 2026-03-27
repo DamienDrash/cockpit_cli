@@ -3,7 +3,7 @@ from urllib.error import HTTPError
 from urllib.request import Request
 import unittest
 
-from cockpit.infrastructure.secrets.vault_client import VaultHttpClient, VaultHttpError
+from cockpit.datasources.adapters.vault_client import VaultHttpClient, VaultHttpError
 
 
 class _FakeResponse:
@@ -24,7 +24,9 @@ class VaultHttpClientTests(unittest.TestCase):
         def requester(request: Request, *, context=None, timeout: float = 10.0):
             del context, timeout
             body = request.data.decode("utf-8") if request.data else None
-            requests.append((request.method, request.full_url, dict(request.header_items()), body))
+            requests.append(
+                (request.method, request.full_url, dict(request.header_items()), body)
+            )
             if request.full_url.endswith("/v1/auth/approle/login"):
                 return _FakeResponse(
                     {
@@ -51,7 +53,9 @@ class VaultHttpClientTests(unittest.TestCase):
             requester=requester,
         )
 
-        auth = client.login_approle(mount="approle", role_id="role-id", secret_id="secret-id")
+        auth = client.login_approle(
+            mount="approle", role_id="role-id", secret_id="secret-id"
+        )
         payload = client.kv_read(mount="kv", path="apps/api", token=auth.token)
 
         self.assertEqual(auth.token, "s.token")
@@ -73,7 +77,9 @@ class VaultHttpClientTests(unittest.TestCase):
                 fp=_FakeResponse({"errors": ["permission denied"]}),
             )
 
-        client = VaultHttpClient(address="https://vault.internal:8200", requester=requester)
+        client = VaultHttpClient(
+            address="https://vault.internal:8200", requester=requester
+        )
 
         with self.assertRaisesRegex(VaultHttpError, "permission denied"):
             client.health()

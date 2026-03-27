@@ -30,6 +30,16 @@ jobs:
           python -m pip install --upgrade pip
           pip install -e .[dev,all-datasources-pure]
 
+      - name: Lint (Ruff)
+        run: |
+          ruff check src/ tests/
+          ruff format --check src/ tests/
+
+      - name: Type check (Mypy)
+        run: |
+          mypy --strict src/
+        continue-on-error: true
+
       - name: Compile
         run: python -m compileall src tests
 

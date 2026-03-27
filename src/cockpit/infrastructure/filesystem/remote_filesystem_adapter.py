@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 from pathlib import PurePosixPath
 import shlex
 
-from cockpit.infrastructure.ssh.command_runner import SSHCommandRunner
+from cockpit.datasources.adapters.ssh_command_runner import SSHCommandRunner
 
 
 @dataclass(slots=True, frozen=True)
@@ -50,7 +50,9 @@ class RemoteFilesystemAdapter:
             )
 
         browse_target = browser_path or root_path or "."
-        command = self._directory_command(root_path=root_path or ".", browser_path=browse_target)
+        command = self._directory_command(
+            root_path=root_path or ".", browser_path=browse_target
+        )
         result = self._ssh_command_runner.run(target_ref, command)
         if not result.is_available:
             return RemoteDirectorySnapshot(

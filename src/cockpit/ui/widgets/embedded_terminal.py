@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from collections.abc import Callable
 
 from rich.text import Text
 from textual import events
@@ -20,10 +21,12 @@ class EmbeddedTerminal(Static):
 
     can_focus = True
 
-    def __init__(self) -> None:
-        super().__init__("Terminal idle. Focus here and type to send input.", id="embedded-terminal")
-        self._buffer = TerminalBuffer()
-        self._max_chars = 16_000
+    def __init__(self, on_input: Callable[[str], None] | None = None) -> None:
+        super().__init__(
+            "Terminal idle. Focus here and type to send input.", id="embedded-terminal"
+        )
+        self._buffer = TerminalBuffer(on_input=on_input)
+        self._max_chars = 32_000  # Increased buffer
         self._placeholder = "Terminal idle. Focus here and type to send input."
         self._viewport_offset = 0
         self._search_query: str | None = None
@@ -33,6 +36,8 @@ class EmbeddedTerminal(Static):
         self._selection_focus: Position | None = None
         self._drag_selection_active = False
         self._row_base_offset = 0
+        self._pending_chunks: list[str] = []
+        self._render_scheduled = False
 
     def clear(self, message: str = "Launching terminal...") -> None:
         self._buffer.reset()
@@ -45,19 +50,40 @@ class EmbeddedTerminal(Static):
         self._selection_focus = None
         self._drag_selection_active = False
         self._row_base_offset = 0
+        self._pending_chunks = []
+        self._render_scheduled = False
         self.update(message)
 
     def append_output(self, chunk: str) -> None:
         if not chunk:
             return
+        self._pending_chunks.append(chunk)
+        if not self._render_scheduled:
+            self._render_scheduled = True
+            # Throttled update: bundle all chunks arriving in the next 50ms
+            self.call_later(self._process_pending_output)
+
+    def _process_pending_output(self) -> None:
+        if not self._pending_chunks:
+            self._render_scheduled = False
+            return
+
+        combined_chunk = "".join(self._pending_chunks)
+        self._pending_chunks = []
+        self._render_scheduled = False
+
         follow_output = self._viewport_offset == 0
         previous_base_offset = self._row_base_offset
-        self._buffer.feed(chunk)
+        self._buffer.feed(combined_chunk)
         self._refresh_search_matches()
         base_delta = self._row_base_offset - previous_base_offset
         if base_delta > 0:
-            self._selection_anchor = self._shift_position(self._selection_anchor, -base_delta)
-            self._selection_focus = self._shift_position(self._selection_focus, -base_delta)
+            self._selection_anchor = self._shift_position(
+                self._selection_anchor, -base_delta
+            )
+            self._selection_focus = self._shift_position(
+                self._selection_focus, -base_delta
+            )
         self._clamp_selection()
         if follow_output:
             self._viewport_offset = 0
@@ -120,7 +146,9 @@ class EmbeddedTerminal(Static):
     def search_next(self) -> bool:
         if not self._search_matches:
             return False
-        self._active_match_index = (self._active_match_index + 1) % len(self._search_matches)
+        self._active_match_index = (self._active_match_index + 1) % len(
+            self._search_matches
+        )
         self._scroll_to_match(self._search_matches[self._active_match_index].row)
         self._refresh_view()
         return True
@@ -128,7 +156,9 @@ class EmbeddedTerminal(Static):
     def search_previous(self) -> bool:
         if not self._search_matches:
             return False
-        self._active_match_index = (self._active_match_index - 1) % len(self._search_matches)
+        self._active_match_index = (self._active_match_index - 1) % len(
+            self._search_matches
+        )
         self._scroll_to_match(self._search_matches[self._active_match_index].row)
         self._refresh_view()
         return True
@@ -192,7 +222,9 @@ class EmbeddedTerminal(Static):
         if not rows:
             return
         max_offset = max(0, len(rows) - self._viewport_step())
-        self._viewport_offset = min(max_offset, self._viewport_offset + max(1, int(count)))
+        self._viewport_offset = min(
+            max_offset, self._viewport_offset + max(1, int(count))
+        )
         self._refresh_view()
 
     def scroll_down_lines(self, count: int = 1) -> None:
@@ -285,10 +317,14 @@ class EmbeddedTerminal(Static):
         height = getattr(size, "height", 0) if size is not None else 0
         if height <= 0:
             content_size = getattr(self, "content_size", None)
-            height = getattr(content_size, "height", 0) if content_size is not None else 0
+            height = (
+                getattr(content_size, "height", 0) if content_size is not None else 0
+            )
         return max(1, int(height) if height else 10)
 
-    def _visible_window(self, rows: list[tuple[TerminalCell, ...]] | None = None) -> tuple[int, int]:
+    def _visible_window(
+        self, rows: list[tuple[TerminalCell, ...]] | None = None
+    ) -> tuple[int, int]:
         if rows is None:
             rows = self._rows()
         end = len(rows) - self._viewport_offset if self._viewport_offset else len(rows)
@@ -326,10 +362,14 @@ class EmbeddedTerminal(Static):
         if self._active_match_index < 0:
             self._active_match_index = 0
             return
-        self._active_match_index = min(self._active_match_index, len(self._search_matches) - 1)
+        self._active_match_index = min(
+            self._active_match_index, len(self._search_matches) - 1
+        )
 
     def _active_match(self) -> TerminalSearchMatch | None:
-        if self._active_match_index < 0 or self._active_match_index >= len(self._search_matches):
+        if self._active_match_index < 0 or self._active_match_index >= len(
+            self._search_matches
+        ):
             return None
         return self._search_matches[self._active_match_index]
 
@@ -378,8 +418,12 @@ class EmbeddedTerminal(Static):
             self._selection_focus = None
             return
         row_limit = len(rows) - 1
-        self._selection_anchor = self._clamp_position(self._selection_anchor, rows, row_limit)
-        self._selection_focus = self._clamp_position(self._selection_focus, rows, row_limit)
+        self._selection_anchor = self._clamp_position(
+            self._selection_anchor, rows, row_limit
+        )
+        self._selection_focus = self._clamp_position(
+            self._selection_focus, rows, row_limit
+        )
 
     def _clamp_position(
         self,
@@ -486,7 +530,11 @@ class EmbeddedTerminal(Static):
             row_start, row = row_offsets[local_row]
             start = row_start + self._text_offset_for_col(row, match.start_col)
             end = row_start + self._text_offset_for_col(row, match.end_col)
-            style = "bold #071219 on #ffcf8c" if active_match == match else "#071219 on #f5aa67"
+            style = (
+                "bold #071219 on #ffcf8c"
+                if active_match == match
+                else "#071219 on #f5aa67"
+            )
             if end > start:
                 renderable.stylize(style, start, end)
 
@@ -525,7 +573,9 @@ class EmbeddedTerminal(Static):
         if not snapshot.cursor.visible:
             return
         absolute_cursor_row = (
-            len(snapshot.scrollback_cells) + max(0, snapshot.cursor.row) - self._row_base_offset
+            len(snapshot.scrollback_cells)
+            + max(0, snapshot.cursor.row)
+            - self._row_base_offset
         )
         local_row = absolute_cursor_row - start_row
         if local_row < 0 or local_row >= len(row_offsets):

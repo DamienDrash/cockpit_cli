@@ -2,20 +2,24 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
 
-from cockpit.application.services.operations_diagnostics_service import OperationsDiagnosticsService
-from cockpit.domain.models.datasource import DataSourceProfile
-from cockpit.domain.models.policy import GuardDecision
-from cockpit.infrastructure.db.database_adapter import DatabaseAdapter
-from cockpit.infrastructure.docker.docker_adapter import DockerContainerDiagnosticsSnapshot
+from cockpit.ops.services.diagnostics_service import (
+    OperationsDiagnosticsService,
+)
+from cockpit.datasources.models.datasource import DataSourceProfile
+from cockpit.ops.models.policy import GuardDecision
+from cockpit.datasources.adapters.database_adapter import DatabaseAdapter
+from cockpit.infrastructure.docker.docker_adapter import (
+    DockerContainerDiagnosticsSnapshot,
+)
 from cockpit.infrastructure.http.http_adapter import HttpAdapter
-from cockpit.infrastructure.persistence.ops_repositories import (
+from cockpit.ops.repositories import (
     ComponentHealthRepository,
     GuardDecisionRepository,
     IncidentRepository,
     OperationDiagnosticsRepository,
 )
-from cockpit.infrastructure.persistence.sqlite_store import SQLiteStore
-from cockpit.shared.enums import (
+from cockpit.core.persistence.sqlite_store import SQLiteStore
+from cockpit.core.enums import (
     ComponentKind,
     GuardActionKind,
     GuardDecisionOutcome,
@@ -98,7 +102,11 @@ class OperationsDiagnosticsServiceTests(unittest.TestCase):
                 success=False,
                 severity="high",
                 summary="500 error",
-                payload={"method": "POST", "risk_level": "prod", "placeholder_names": ["TOKEN"]},
+                payload={
+                    "method": "POST",
+                    "risk_level": "prod",
+                    "placeholder_names": ["TOKEN"],
+                },
             )
             ops_repo.record(
                 operation_family=OperationFamily.ENGAGEMENT,

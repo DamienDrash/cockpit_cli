@@ -1,13 +1,13 @@
 import unittest
 
-from cockpit.application.handlers.base import CommandContextError
-from cockpit.application.handlers.response_handlers import (
+from cockpit.core.dispatch.handler_base import CommandContextError
+from cockpit.ops.handlers.response_handlers import (
     DecideApprovalHandler,
     ExecuteResponseStepHandler,
     StartResponseRunHandler,
 )
-from cockpit.domain.commands.command import Command
-from cockpit.shared.enums import ApprovalDecisionKind, CommandSource
+from cockpit.core.command import Command
+from cockpit.core.enums import ApprovalDecisionKind, CommandSource
 
 
 class _FakeResponseRunService:

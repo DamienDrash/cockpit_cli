@@ -31,9 +31,7 @@ class ShellStepExecutor:
         stdout = result.stdout[-4000:]
         stderr = result.stderr[-4000:]
         success = result.returncode == 0
-        summary = (
-            f"Shell step '{context.step_definition.title}' exited with {result.returncode}."
-        )
+        summary = f"Shell step '{context.step_definition.title}' exited with {result.returncode}."
         return ExecutorResult(
             success=success,
             summary=summary,
@@ -54,4 +52,3 @@ class ShellStepExecutor:
             ),
             error_message=None if success else (stderr or summary),
         )
-

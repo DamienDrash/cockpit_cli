@@ -2,17 +2,21 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
 
-from cockpit.domain.models.health import ComponentHealthState, IncidentRecord, RecoveryAttempt
-from cockpit.domain.models.notifications import (
+from cockpit.ops.models.health import (
+    ComponentHealthState,
+    IncidentRecord,
+    RecoveryAttempt,
+)
+from cockpit.notifications.models import (
     NotificationChannel,
     NotificationDeliveryAttempt,
     NotificationRecord,
     NotificationRule,
     NotificationSuppressionRule,
 )
-from cockpit.domain.models.policy import GuardDecision
-from cockpit.domain.models.watch import ComponentWatchConfig, ComponentWatchState
-from cockpit.infrastructure.persistence.ops_repositories import (
+from cockpit.ops.models.policy import GuardDecision
+from cockpit.ops.models.watch import ComponentWatchConfig, ComponentWatchState
+from cockpit.ops.repositories import (
     ComponentHealthRepository,
     ComponentWatchRepository,
     GuardDecisionRepository,
@@ -25,8 +29,8 @@ from cockpit.infrastructure.persistence.ops_repositories import (
     OperationDiagnosticsRepository,
     RecoveryAttemptRepository,
 )
-from cockpit.infrastructure.persistence.sqlite_store import SQLiteStore
-from cockpit.shared.enums import (
+from cockpit.core.persistence.sqlite_store import SQLiteStore
+from cockpit.core.enums import (
     ComponentKind,
     GuardActionKind,
     GuardDecisionOutcome,
@@ -203,7 +207,10 @@ class OpsRepositoriesTests(unittest.TestCase):
             )
             watch_repo.save_state(watch_state)
             self.assertEqual(watch_repo.get_config("wch-1").subject_ref, "analytics")
-            self.assertEqual(watch_repo.get_state("watch:datasource:analytics").last_status, "unreachable")
+            self.assertEqual(
+                watch_repo.get_state("watch:datasource:analytics").last_status,
+                "unreachable",
+            )
 
 
 if __name__ == "__main__":

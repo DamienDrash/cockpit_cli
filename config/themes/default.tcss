@@ -1,173 +1,227 @@
+/* Cyberpunk Neon Theme for Cockpit - Professional Gold Standard Edition */
+
+$primary: #00ffff;
+$secondary: #ff00ff;
+$accent: #00ffff;
+$background: #0a0a12;
+$surface: #1a1a2e;
+$panel: #16213e;
+$text: #e1e1e1;
+$success: #00ff00;
+$warning: #ffff00;
+$error: #ff0055;
+
 Screen {
   layout: vertical;
-}
-
-#app-body {
-  height: 1fr;
-  padding: 1 2;
-  background: $surface;
-}
-
-#status-bar {
-  height: 1;
-  padding: 0 1;
-}
-
-#tab-bar {
-  height: auto;
-  padding: 0 1;
-  background: $boost;
+  background: $background;
   color: $text;
 }
 
+Header {
+  background: $surface;
+  color: $primary;
+  text-style: bold;
+  border-bottom: hkey $secondary;
+  height: 1;
+}
+
+/* --- TAB BAR --- */
+#tab-bar {
+  height: 3;
+  padding: 0 1;
+  background: #0f0f1a;
+  color: $primary;
+  border-bottom: solid $secondary;
+  align: left middle;
+}
+
+.tab-button {
+  min-width: 12;
+  height: 1;
+  margin: 0 1;
+  border: none;
+  background: #1a1a2e;
+  color: $primary;
+}
+
+.tab-button.active {
+  background: $primary;
+  color: #000000;
+  text-style: bold;
+}
+
+/* --- PANELS CORE --- */
 #panel-host {
   height: 1fr;
+}
+
+#panel-switcher {
+  height: 1fr;
+}
+
+BasePanel {
+  height: 1fr;
+  width: 1fr;
+  background: $background;
+}
+
+.sidebar {
+  width: 45; /* Increased width for better path display */
+  height: 1fr;
+  background: #1a1a2e;
+  padding: 1;
+}
+
+.sidebar .section-title {
+  background: $primary;
+  color: #000000;
+  text-style: bold;
+  width: 100%;
   margin: 1 0;
+  padding: 0 1;
 }
 
-#panel-surface {
-  height: 1fr;
-  width: 1fr;
+.pane-title {
+  color: $primary;
+  text-style: bold italic;
+  margin-bottom: 1;
+  padding: 0 1;
 }
 
-#panel-parking {
-  display: none;
+/* --- PANEL ISOLATION --- */
+
+#work-sidebar { border-right: vkey $primary; }
+#work-main { width: 1fr; height: 1fr; background: #000000; }
+
+#git-sidebar { border-right: vkey $secondary; }
+#git-main { width: 1fr; height: 1fr; background: #000000; }
+
+#docker-sidebar { border-right: vkey $primary; }
+#docker-main { width: 1fr; height: 1fr; background: #000000; }
+
+/* FIX: Visible Tab Labels in Docker */
+#docker-detail-tabs {
+  height: 3;
+  background: $surface;
+  border-bottom: solid $primary;
+  padding: 0 1;
+  align: left middle;
 }
 
-.tab-root {
-  height: 1fr;
+.mini-tab {
+  background: #16213e;
+  color: $primary;
+  border: none;
+  margin: 0 1;
+  min-width: 12;
 }
 
-.split-node {
-  height: 1fr;
-  width: 1fr;
-  margin: 0 0 1 0;
+.mini-tab:hover {
+  background: $secondary;
+  color: #000000;
 }
 
-#confirmation-bar {
-  margin: 1 0 0 0;
-  padding: 1;
-  background: $warning;
+.mini-tab.-active {
+  background: $primary;
+  color: #000000;
+  text-style: bold;
+}
+
+#db-sidebar { border-right: vkey $primary; }
+#db-main { width: 1fr; height: 1fr; }
+
+#cron-sidebar { border-right: vkey $secondary; }
+#cron-main { width: 1fr; height: 1fr; }
+
+#curl-sidebar { border-right: vkey $primary; }
+#curl-main { width: 1fr; height: 1fr; }
+
+/* FIX: Curl Method Selection Visibility and Alignment */
+#curl-method-url-row {
+  height: auto;
+  min-height: 3;
+  margin-bottom: 1;
+  align: left middle;
+}
+
+#curl-method-select {
+  width: 15;
+  height: 3;
+  background: $surface;
+  color: $primary;
+  border: tall $primary;
+}
+
+#curl-body-area {
+  height: 8;
+  border: solid $primary;
+  background: $background;
   color: $text;
-  border: round $error;
 }
 
-#work-panel {
-  height: 1fr;
-  border: round $accent;
-  padding: 1;
-  background: $panel;
+#curl-url-input {
+  width: 1fr;
 }
 
-#git-panel {
-  height: 1fr;
-  border: round $accent;
-  padding: 1;
-  background: $panel;
+/* --- WIDGET ENHANCEMENTS --- */
+
+SelectCurrent {
+  background: $surface;
+  color: $primary;
+  border: none;
+  height: 1;
 }
 
-#docker-panel {
-  height: 1fr;
-  border: round $accent;
-  padding: 1;
-  background: $panel;
-}
-
-#cron-panel {
-  height: 1fr;
-  border: round $accent;
-  padding: 1;
-  background: $panel;
-}
-
-#db-panel {
-  height: 1fr;
-  border: round $accent;
-  padding: 1;
-  background: $panel;
-}
-
-#curl-panel {
-  height: 1fr;
-  border: round $accent;
-  padding: 1;
-  background: $panel;
-}
-
-#logs-panel {
-  height: 1fr;
-  border: round $accent;
-  padding: 1;
-  background: $panel;
-}
-
-#file-context {
-  margin: 0 0 1 0;
-  padding: 1;
-  background: $boost;
-}
-
-#file-explorer {
-  height: 11;
-  margin: 0 0 1 0;
-  padding: 1;
-  background: $surface-lighten-1;
-  border: round $primary;
-}
-
-#file-explorer:focus {
-  border: round $warning;
-}
-
-#work-panel-note {
-  color: $text-muted;
-  margin: 0 0 1 0;
-}
-
-#git-summary,
-#git-files,
-#git-panel-note {
-  margin: 0 0 1 0;
-}
-
-#git-files {
-  height: 1fr;
-  padding: 1;
-  background: $surface-lighten-1;
-  border: round $primary;
-}
-
-#git-panel-note {
-  color: $text-muted;
-}
-
-#embedded-terminal {
-  height: 1fr;
-  padding: 1;
-  background: $surface-darken-1;
+SelectOverlay {
+  background: $surface;
   color: $text;
   border: tall $primary;
 }
 
-#embedded-terminal:focus {
-  border: tall $success;
+SelectOverlay > .select-overlay--filter {
+  background: $background;
+  color: $primary;
+  border: none;
 }
 
-#command-palette {
-  margin: 1 0 0 0;
+/* --- WIDGET STYLES --- */
+
+#db-catalog-tree, #logs-grid {
+  height: 1fr;
+  background: transparent;
+}
+
+.tree--cursor, .datatable--cursor {
+  background: $secondary;
+  color: #000000;
+}
+
+.detail-view {
+  height: 1fr;
+  background: #000000;
+  border: round $primary;
   padding: 1;
-  border: round $accent;
-  background: $surface-lighten-1;
-}
-
-#command-palette-input {
-  margin: 0 0 1 0;
-}
-
-#command-palette-results {
   color: $text;
 }
 
-#slash-input {
-  margin: 1 0 0 0;
+#embedded-terminal {
+  height: 1fr;
+  background: #000000;
+  color: #00ff41;
+  border: tall $primary;
+}
+
+#status-bar {
+  height: 1;
+  background: #0f3460;
+  border-top: hkey $primary;
+}
+
+#file-context {
+  height: auto;
+  border: round $primary;
+  margin-bottom: 1;
+  padding: 0 1;
+  background: #0f3460;
+  color: $primary;
 }

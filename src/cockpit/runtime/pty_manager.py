@@ -14,8 +14,8 @@ import struct
 import termios
 from threading import Lock
 
-from cockpit.application.dispatch.event_bus import EventBus
-from cockpit.domain.events.runtime_events import (
+from cockpit.core.dispatch.event_bus import EventBus
+from cockpit.core.events.runtime import (
     PTYStarted,
     PTYStartupFailed,
     ProcessOutputReceived,
@@ -24,8 +24,12 @@ from cockpit.domain.events.runtime_events import (
 )
 from cockpit.infrastructure.shell.base import ShellAdapter
 from cockpit.runtime.stream_router import StreamRouter
-from cockpit.runtime.task_supervisor import BackgroundTask, SupervisedTaskContext, TaskSupervisor
-from cockpit.shared.enums import SessionTargetKind, StatusLevel
+from cockpit.runtime.task_supervisor import (
+    BackgroundTask,
+    SupervisedTaskContext,
+    TaskSupervisor,
+)
+from cockpit.core.enums import SessionTargetKind, StatusLevel
 
 
 @dataclass(slots=True)
@@ -81,6 +85,12 @@ class PTYManager:
                 target_ref=target_ref,
             )
             master_fd, slave_fd = pty.openpty()
+
+            def preexec() -> None:
+                os.setsid()
+                # Set the slave FD as the controlling terminal
+                fcntl.ioctl(0, termios.TIOCSCTTY, 0)
+
             process = subprocess.Popen(
                 launch.command,
                 stdin=slave_fd,
@@ -89,6 +99,7 @@ class PTYManager:
                 cwd=launch.cwd,
                 env=launch.env,
                 close_fds=True,
+                preexec_fn=preexec,
             )
             os.close(slave_fd)
             slave_fd = -1
@@ -276,7 +287,9 @@ class PTYManager:
             current = self._sessions.get(panel_id)
             cwd = current.cwd if current is not None else ""
             command = current.launch_command if current is not None else ()
-            target_kind = current.target_kind if current is not None else SessionTargetKind.LOCAL
+            target_kind = (
+                current.target_kind if current is not None else SessionTargetKind.LOCAL
+            )
             target_ref = current.target_ref if current is not None else None
         self._event_bus.publish(
             TerminalExited(

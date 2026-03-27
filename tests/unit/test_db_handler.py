@@ -1,16 +1,18 @@
 import unittest
 
-from cockpit.application.handlers.base import ConfirmationRequiredError
-from cockpit.application.handlers.db_handlers import RunDatabaseQueryHandler
-from cockpit.domain.commands.command import Command
-from cockpit.domain.models.datasource import DataSourceOperationResult, DataSourceProfile
-from cockpit.domain.models.policy import GuardDecision
-from cockpit.infrastructure.db.database_adapter import DatabaseQueryResult
-from cockpit.shared.enums import (
+from cockpit.core.dispatch.handler_base import ConfirmationRequiredError
+from cockpit.datasources.handlers.db_handlers import RunDatabaseQueryHandler
+from cockpit.core.command import Command
+from cockpit.datasources.models.datasource import (
+    DataSourceOperationResult,
+    DataSourceProfile,
+)
+from cockpit.ops.models.policy import GuardDecision
+from cockpit.datasources.adapters.database_adapter import DatabaseQueryResult
+from cockpit.core.enums import (
     CommandSource,
     GuardDecisionOutcome,
     SessionTargetKind,
-    TargetRiskLevel,
 )
 
 

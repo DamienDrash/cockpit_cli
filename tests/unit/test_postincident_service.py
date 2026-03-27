@@ -2,19 +2,19 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
 
-from cockpit.application.dispatch.event_bus import EventBus
-from cockpit.application.services.postincident_service import PostIncidentService
-from cockpit.domain.models.health import IncidentRecord
-from cockpit.domain.models.response import ResponseRun
-from cockpit.infrastructure.persistence.ops_repositories import (
+from cockpit.core.dispatch.event_bus import EventBus
+from cockpit.ops.services.postincident_service import PostIncidentService
+from cockpit.ops.models.health import IncidentRecord
+from cockpit.ops.models.response import ResponseRun
+from cockpit.ops.repositories import (
     ActionItemRepository,
     IncidentRepository,
     PostIncidentReviewRepository,
     ResponseRunRepository,
     ReviewFindingRepository,
 )
-from cockpit.infrastructure.persistence.sqlite_store import SQLiteStore
-from cockpit.shared.enums import (
+from cockpit.core.persistence.sqlite_store import SQLiteStore
+from cockpit.core.enums import (
     ActionItemStatus,
     ComponentKind,
     ClosureQuality,

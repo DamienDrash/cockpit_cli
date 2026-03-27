@@ -2,13 +2,15 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
 
-from cockpit.application.dispatch.event_bus import EventBus
-from cockpit.application.services.notification_policy_service import NotificationPolicyService
-from cockpit.application.services.notification_service import NotificationService
-from cockpit.application.services.suppression_service import SuppressionService
-from cockpit.domain.events.health_events import ComponentQuarantined, IncidentOpened
-from cockpit.infrastructure.notifications.base import NotificationDeliveryResult
-from cockpit.infrastructure.persistence.ops_repositories import (
+from cockpit.core.dispatch.event_bus import EventBus
+from cockpit.notifications.services.policy_service import (
+    NotificationPolicyService,
+)
+from cockpit.notifications.services.notification_service import NotificationService
+from cockpit.notifications.services.suppression_service import SuppressionService
+from cockpit.ops.events.health import ComponentQuarantined, IncidentOpened
+from cockpit.notifications.adapters.base import NotificationDeliveryResult
+from cockpit.ops.repositories import (
     NotificationChannelRepository,
     NotificationDeliveryRepository,
     NotificationRepository,
@@ -16,8 +18,8 @@ from cockpit.infrastructure.persistence.ops_repositories import (
     NotificationSuppressionRepository,
     OperationDiagnosticsRepository,
 )
-from cockpit.infrastructure.persistence.sqlite_store import SQLiteStore
-from cockpit.shared.enums import (
+from cockpit.core.persistence.sqlite_store import SQLiteStore
+from cockpit.core.enums import (
     ComponentKind,
     IncidentSeverity,
     NotificationChannelKind,
@@ -189,10 +191,16 @@ class NotificationServiceTests(unittest.TestCase):
             self.assertEqual(notifications[0].status.value, "delivering")
             attempts = delivery_repository.list_for_notification(notifications[0].id)
             self.assertEqual(len(attempts), 3)
-            webhook_attempts = [attempt for attempt in attempts if attempt.channel_id == webhook.id]
+            webhook_attempts = [
+                attempt for attempt in attempts if attempt.channel_id == webhook.id
+            ]
             self.assertEqual(len(webhook_attempts), 2)
-            self.assertEqual(webhook_attempts[0].status, NotificationDeliveryStatus.FAILED)
-            self.assertEqual(webhook_attempts[1].status, NotificationDeliveryStatus.SCHEDULED)
+            self.assertEqual(
+                webhook_attempts[0].status, NotificationDeliveryStatus.FAILED
+            )
+            self.assertEqual(
+                webhook_attempts[1].status, NotificationDeliveryStatus.SCHEDULED
+            )
             self.assertEqual(adapter.calls, 1)
 
 

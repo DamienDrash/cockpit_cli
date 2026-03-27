@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from threading import Event, Lock, Thread
 
-from cockpit.shared.utils import utc_now
+from cockpit.core.utils import utc_now
 
 TaskTarget = Callable[[Event], None]
 SupervisedTaskTarget = Callable[["SupervisedTaskContext"], None]
@@ -54,7 +54,9 @@ class TaskSnapshot:
 class SupervisedTaskContext:
     """Mutable control surface exposed to supervised task workers."""
 
-    def __init__(self, supervisor: "TaskSupervisor", task_name: str, stop_event: Event) -> None:
+    def __init__(
+        self, supervisor: "TaskSupervisor", task_name: str, stop_event: Event
+    ) -> None:
         self._supervisor = supervisor
         self._task_name = task_name
         self.stop_event = stop_event
@@ -193,7 +195,9 @@ class TaskSupervisor:
         context = SupervisedTaskContext(self, task.name, task.stop_event)
         try:
             task.target(context)
-        except Exception as exc:  # pragma: no cover - intentionally captured for diagnostics
+        except (
+            Exception
+        ) as exc:  # pragma: no cover - intentionally captured for diagnostics
             with self._lock:
                 active = self._tasks.get(task.name)
                 if active is not None:

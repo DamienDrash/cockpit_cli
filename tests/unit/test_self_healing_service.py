@@ -2,24 +2,24 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
 
-from cockpit.application.dispatch.event_bus import EventBus
-from cockpit.application.services.recovery_policy_service import RecoveryPolicyService
-from cockpit.application.services.self_healing_service import SelfHealingService
-from cockpit.domain.events.health_events import (
+from cockpit.core.dispatch.event_bus import EventBus
+from cockpit.ops.services.recovery_policy_service import RecoveryPolicyService
+from cockpit.ops.services.self_healing_service import SelfHealingService
+from cockpit.ops.events.health import (
     ComponentWatchObserved,
     TaskHeartbeatMissed,
     TunnelFailureDetected,
 )
-from cockpit.domain.events.runtime_events import PTYStarted, PTYStartupFailed, TerminalExited
-from cockpit.infrastructure.persistence.ops_repositories import (
+from cockpit.core.events.runtime import PTYStarted, PTYStartupFailed
+from cockpit.ops.repositories import (
     ComponentHealthRepository,
     IncidentRepository,
     RecoveryAttemptRepository,
 )
-from cockpit.infrastructure.persistence.sqlite_store import SQLiteStore
+from cockpit.core.persistence.sqlite_store import SQLiteStore
 from cockpit.runtime.task_supervisor import TaskSupervisor
-from cockpit.shared.enums import ComponentKind, HealthStatus, SessionTargetKind
-from cockpit.shared.enums import WatchProbeOutcome
+from cockpit.core.enums import ComponentKind, HealthStatus, SessionTargetKind
+from cockpit.core.enums import WatchProbeOutcome
 
 
 class _FakePTYManager:
@@ -28,7 +28,9 @@ class _FakePTYManager:
         self.return_session = object()
 
     def restart_session(self, panel_id, cwd, *, command=None, target_kind, target_ref):
-        self.calls.append((panel_id, cwd, tuple(command or ()), target_kind, target_ref))
+        self.calls.append(
+            (panel_id, cwd, tuple(command or ()), target_kind, target_ref)
+        )
         return self.return_session
 
 
@@ -38,12 +40,14 @@ class _FakeTunnelManager:
 
     def reconnect_tunnel(self, profile_id):
         self.calls.append(profile_id)
+
         class Tunnel:
             profile_id = profile_id
             target_ref = "ops@example.com"
             remote_host = "db.internal"
             remote_port = 5432
             reconnect_count = 1
+
         return Tunnel()
 
 

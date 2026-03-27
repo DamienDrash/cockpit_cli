@@ -3,13 +3,13 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
 
-from cockpit.domain.commands.command import CommandAuditEntry, CommandHistoryEntry
-from cockpit.domain.models.datasource import DataSourceProfile
-from cockpit.domain.models.layout import Layout, PanelRef, SplitNode, TabLayout
-from cockpit.domain.models.plugin import InstalledPlugin
-from cockpit.domain.models.session import Session
-from cockpit.domain.models.workspace import SessionTarget, Workspace
-from cockpit.infrastructure.persistence.repositories import (
+from cockpit.core.command import CommandAuditEntry, CommandHistoryEntry
+from cockpit.datasources.models.datasource import DataSourceProfile
+from cockpit.workspace.models.layout import Layout, PanelRef, SplitNode, TabLayout
+from cockpit.plugins.models import InstalledPlugin
+from cockpit.workspace.models.session import Session
+from cockpit.workspace.models.workspace import SessionTarget, Workspace
+from cockpit.workspace.repositories import (
     AuditLogRepository,
     CommandHistoryRepository,
     DataSourceProfileRepository,
@@ -20,8 +20,8 @@ from cockpit.infrastructure.persistence.repositories import (
     WebAdminStateRepository,
     WorkspaceRepository,
 )
-from cockpit.infrastructure.persistence.sqlite_store import SQLiteStore
-from cockpit.shared.enums import (
+from cockpit.core.persistence.sqlite_store import SQLiteStore
+from cockpit.core.enums import (
     CommandSource,
     SessionStatus,
     SessionTargetKind,
@@ -54,7 +54,9 @@ class SQLiteRepositoryTests(unittest.TestCase):
                         root_split=SplitNode(
                             orientation="vertical",
                             ratio=0.7,
-                            children=[PanelRef(panel_id="work-panel", panel_type="work")],
+                            children=[
+                                PanelRef(panel_id="work-panel", panel_type="work")
+                            ],
                         ),
                     )
                 ],
@@ -255,7 +257,14 @@ class SQLiteRepositoryTests(unittest.TestCase):
             datasource = datasource_repo.get("pg-main")
             plugins = plugin_repo.list_all()
             state = web_admin_repo.get("web_admin:last_page")
-            web_admin_repo.save("secret:analytics-pass", {"name": "analytics-pass", "provider": "env", "reference": {"provider": "env", "name": "ANALYTICS_DB_PASS"}})
+            web_admin_repo.save(
+                "secret:analytics-pass",
+                {
+                    "name": "analytics-pass",
+                    "provider": "env",
+                    "reference": {"provider": "env", "name": "ANALYTICS_DB_PASS"},
+                },
+            )
             prefixed = web_admin_repo.list_prefix("secret:")
             web_admin_repo.delete("secret:analytics-pass")
             removed = web_admin_repo.get("secret:analytics-pass")

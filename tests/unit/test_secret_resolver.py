@@ -3,7 +3,7 @@ from tempfile import TemporaryDirectory
 import unittest
 from unittest.mock import patch
 
-from cockpit.infrastructure.secrets.secret_resolver import SecretResolver
+from cockpit.datasources.adapters.secret_resolver import SecretResolver
 
 
 class SecretResolverTests(unittest.TestCase):
@@ -47,17 +47,28 @@ class SecretResolverTests(unittest.TestCase):
 
     def test_resolves_managed_secret_references(self) -> None:
         resolver = SecretResolver(
-            named_reference_lookup=lambda name: {"provider": "literal", "value": f"value-for-{name}"},
+            named_reference_lookup=lambda name: {
+                "provider": "literal",
+                "value": f"value-for-{name}",
+            },
         )
 
-        value = resolver.resolve_text("postgres://${TOKEN}", {"TOKEN": "stored:analytics-pass"})
+        value = resolver.resolve_text(
+            "postgres://${TOKEN}", {"TOKEN": "stored:analytics-pass"}
+        )
 
         self.assertEqual(value, "postgres://value-for-analytics-pass")
 
-    def test_dispatches_vault_refs_and_reuses_dynamic_results_per_resolution(self) -> None:
+    def test_dispatches_vault_refs_and_reuses_dynamic_results_per_resolution(
+        self,
+    ) -> None:
         calls: list[tuple[str, str, str]] = []
 
-        def lookup(reference: dict[str, object], *, resolution_cache: dict[str, object] | None = None) -> str:
+        def lookup(
+            reference: dict[str, object],
+            *,
+            resolution_cache: dict[str, object] | None = None,
+        ) -> str:
             del resolution_cache
             calls.append(
                 (
@@ -67,7 +78,9 @@ class SecretResolverTests(unittest.TestCase):
                 )
             )
             if reference.get("kind") == "dynamic":
-                return "dyn-user" if reference.get("field") == "username" else "dyn-pass"
+                return (
+                    "dyn-user" if reference.get("field") == "username" else "dyn-pass"
+                )
             return "vault-secret"
 
         resolver = SecretResolver(vault_reference_lookup=lookup)
@@ -90,7 +103,9 @@ class SecretResolverTests(unittest.TestCase):
         )
 
     def test_rejects_vault_transit_interpolation(self) -> None:
-        resolver = SecretResolver(vault_reference_lookup=lambda reference, *, resolution_cache=None: "ignored")
+        resolver = SecretResolver(
+            vault_reference_lookup=lambda reference, *, resolution_cache=None: "ignored"
+        )
 
         with self.assertRaisesRegex(ValueError, "transit"):
             resolver.resolve_ref("vault+transit://ops-vault/app-key")

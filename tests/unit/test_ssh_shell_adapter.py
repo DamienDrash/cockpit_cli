@@ -1,7 +1,7 @@
 import unittest
 
 from cockpit.infrastructure.ssh.ssh_shell_adapter import SSHShellAdapter
-from cockpit.shared.enums import SessionTargetKind
+from cockpit.core.enums import SessionTargetKind
 
 
 class SSHShellAdapterTests(unittest.TestCase):

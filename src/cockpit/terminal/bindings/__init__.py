@@ -1,2 +1,1 @@
 """libvterm binding helpers."""
-

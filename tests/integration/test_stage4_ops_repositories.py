@@ -3,7 +3,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
 
-from cockpit.domain.models.response import (
+from cockpit.ops.models.response import (
     ApprovalDecision,
     ApprovalRequest,
     CompensationRun,
@@ -13,9 +13,9 @@ from cockpit.domain.models.response import (
     RunbookDefinition,
     RunbookStepDefinition,
 )
-from cockpit.domain.models.health import IncidentRecord
-from cockpit.domain.models.review import ActionItem, PostIncidentReview, ReviewFinding
-from cockpit.infrastructure.persistence.ops_repositories import (
+from cockpit.ops.models.health import IncidentRecord
+from cockpit.ops.models.review import ActionItem, PostIncidentReview, ReviewFinding
+from cockpit.ops.repositories import (
     ActionItemRepository,
     ApprovalDecisionRepository,
     ApprovalRequestRepository,
@@ -29,8 +29,8 @@ from cockpit.infrastructure.persistence.ops_repositories import (
     ReviewFindingRepository,
     RunbookCatalogRepository,
 )
-from cockpit.infrastructure.persistence.sqlite_store import SQLiteStore
-from cockpit.shared.enums import (
+from cockpit.core.persistence.sqlite_store import SQLiteStore
+from cockpit.core.enums import (
     ActionItemStatus,
     ApprovalDecisionKind,
     ApprovalRequestStatus,
@@ -202,15 +202,19 @@ class Stage4OpsRepositoriesTests(unittest.TestCase):
                 )
             )
 
-            self.assertEqual(runbook_repo.get("docker-restart").title, "Restart Docker container")
-            self.assertEqual(run_repo.get_active_for_incident("inc-1").id, "rrn-1")
-            self.assertEqual(step_repo.get_by_run_and_index("rrn-1", 0).step_key, "restart")
+            self.assertEqual(
+                runbook_repo.get("docker-restart").title, "Restart Docker container"
+            )
+            self.assertEqual(run_repo.find_active_for_incident("inc-1").id, "rrn-1")
+            self.assertEqual(
+                step_repo.get_by_run_and_index("rrn-1", 0).step_key, "restart"
+            )
             self.assertEqual(approval_repo.get_active_for_step("rsp-1").id, "apr-1")
             self.assertEqual(len(decision_repo.list_for_request("apr-1")), 1)
             self.assertEqual(len(artifact_repo.list_for_run("rrn-1")), 1)
             self.assertEqual(compensation_repo.latest_for_step("rsp-1").id, "cmp-1")
             self.assertEqual(len(timeline_repo.list_for_run("rrn-1")), 1)
-            self.assertEqual(review_repo.get_for_incident("inc-1").id, "rvw-1")
+            self.assertEqual(review_repo.find_for_incident("inc-1").id, "rvw-1")
             self.assertEqual(len(finding_repo.list_for_review("rvw-1")), 1)
             self.assertEqual(len(action_item_repo.list_for_review("rvw-1")), 1)
 

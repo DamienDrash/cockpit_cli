@@ -1,11 +1,11 @@
 import unittest
 
-from cockpit.application.handlers.base import ConfirmationRequiredError
-from cockpit.application.handlers.curl_handlers import SendHttpRequestHandler
-from cockpit.domain.commands.command import Command
-from cockpit.domain.models.policy import GuardDecision
+from cockpit.core.dispatch.handler_base import ConfirmationRequiredError
+from cockpit.datasources.handlers.curl_handlers import SendHttpRequestHandler
+from cockpit.core.command import Command
+from cockpit.ops.models.policy import GuardDecision
 from cockpit.infrastructure.http.http_adapter import HttpResponseSummary
-from cockpit.shared.enums import CommandSource, GuardDecisionOutcome
+from cockpit.core.enums import CommandSource, GuardDecisionOutcome
 
 
 class FakeHttpAdapter:
@@ -89,7 +89,10 @@ class SendHttpRequestHandlerTests(unittest.TestCase):
             source=CommandSource.SLASH,
             name="curl.send",
             args={"argv": ["POST", "https://prod.example.com/api", "{}"]},
-            context={"workspace_name": "payments-prod", "workspace_root": "/srv/payments"},
+            context={
+                "workspace_name": "payments-prod",
+                "workspace_root": "/srv/payments",
+            },
         )
 
         with self.assertRaises(ConfirmationRequiredError):
@@ -122,7 +125,14 @@ class SendHttpRequestHandlerTests(unittest.TestCase):
         self.assertTrue(result.success)
         self.assertEqual(
             adapter.calls,
-            [("GET", "https://example.com/health", {"Accept": "application/json"}, None)],
+            [
+                (
+                    "GET",
+                    "https://example.com/health",
+                    {"Accept": "application/json"},
+                    None,
+                )
+            ],
         )
         self.assertEqual(result.data["result_panel_id"], "curl-panel")
         self.assertEqual(len(diagnostics.calls), 1)

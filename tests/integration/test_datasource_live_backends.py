@@ -6,10 +6,12 @@ import os
 import time
 import unittest
 
-from cockpit.domain.models.datasource import DataSourceProfile
-from cockpit.infrastructure.datasources.mongodb_adapter import MongoDatasourceAdapter
-from cockpit.infrastructure.datasources.redis_adapter import RedisDatasourceAdapter
-from cockpit.infrastructure.datasources.sqlalchemy_adapter import SQLAlchemyDatasourceAdapter
+from cockpit.datasources.models.datasource import DataSourceProfile
+from cockpit.datasources.adapters.backends.mongodb_adapter import MongoDatasourceAdapter
+from cockpit.datasources.adapters.backends.redis_adapter import RedisDatasourceAdapter
+from cockpit.datasources.adapters.backends.sqlalchemy_adapter import (
+    SQLAlchemyDatasourceAdapter,
+)
 
 
 LIVE_SERVICES_ENABLED = os.environ.get("COCKPIT_LIVE_SERVICES") == "1"

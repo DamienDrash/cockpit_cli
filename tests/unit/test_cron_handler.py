@@ -1,10 +1,10 @@
 import unittest
 
-from cockpit.application.handlers.base import ConfirmationRequiredError
-from cockpit.application.handlers.cron_handlers import SetCronJobEnabledHandler
-from cockpit.domain.commands.command import Command
+from cockpit.core.dispatch.handler_base import ConfirmationRequiredError
+from cockpit.infrastructure.cron.cron_handlers import SetCronJobEnabledHandler
+from cockpit.core.command import Command
 from cockpit.infrastructure.cron.cron_adapter import CronWriteResult
-from cockpit.shared.enums import CommandSource, SessionTargetKind
+from cockpit.core.enums import CommandSource, SessionTargetKind
 
 
 class FakeCronAdapter:
@@ -65,6 +65,13 @@ class SetCronJobEnabledHandlerTests(unittest.TestCase):
         self.assertTrue(result.success)
         self.assertEqual(
             adapter.calls,
-            [("/usr/local/bin/backup", False, SessionTargetKind.SSH, "dev@example.com")],
+            [
+                (
+                    "/usr/local/bin/backup",
+                    False,
+                    SessionTargetKind.SSH,
+                    "dev@example.com",
+                )
+            ],
         )
         self.assertEqual(result.data["refresh_panel_id"], "cron-panel")

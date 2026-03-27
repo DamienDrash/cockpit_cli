@@ -7,7 +7,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol
 
-from cockpit.domain.models.panel_state import PanelState
+from cockpit.core.panel_state import PanelState
 
 if TYPE_CHECKING:
     from cockpit.bootstrap import ApplicationContainer
@@ -63,7 +63,9 @@ class PanelRegistry:
         self._specs_by_type[spec.panel_type] = spec
         self._specs_by_id[spec.panel_id] = spec
 
-    def create_panels(self, container: "ApplicationContainer") -> dict[str, PanelContract]:
+    def create_panels(
+        self, container: "ApplicationContainer"
+    ) -> dict[str, PanelContract]:
         return {
             spec.panel_id: spec.factory(container)
             for spec in self._specs_by_type.values()

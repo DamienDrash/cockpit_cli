@@ -1,6 +1,6 @@
 import unittest
 
-from cockpit.application.dispatch.event_bus import EventBus
+from cockpit.core.dispatch.event_bus import EventBus
 
 try:
     from cockpit.ui.panels.ops_panel import OpsPanel

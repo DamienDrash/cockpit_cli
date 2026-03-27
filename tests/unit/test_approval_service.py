@@ -1,21 +1,22 @@
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
 
-from cockpit.application.dispatch.event_bus import EventBus
-from cockpit.application.services.approval_service import ApprovalService
-from cockpit.domain.models.health import IncidentRecord
-from cockpit.domain.models.response import ResponseRun, ResponseStepRun
-from cockpit.infrastructure.persistence.ops_repositories import (
+from cockpit.core.dispatch.event_bus import EventBus
+from cockpit.ops.services.approval_service import ApprovalService
+from cockpit.ops.models.health import IncidentRecord
+from cockpit.ops.models.response import ResponseRun, ResponseStepRun
+from cockpit.ops.repositories import (
     ApprovalDecisionRepository,
     ApprovalRequestRepository,
     IncidentRepository,
     ResponseRunRepository,
     ResponseStepRunRepository,
 )
-from cockpit.infrastructure.persistence.sqlite_store import SQLiteStore
-from cockpit.shared.enums import (
+from cockpit.core.persistence.sqlite_store import SQLiteStore
+from cockpit.core.utils import make_id, utc_now
+from cockpit.core.enums import (
     ApprovalDecisionKind,
     ApprovalRequestStatus,
     ComponentKind,
@@ -202,7 +203,7 @@ class ApprovalServiceTests(unittest.TestCase):
             )
 
             expired = service.expire_pending(
-                now=datetime(2026, 3, 24, 12, 0, tzinfo=UTC),
+                now=utc_now() + timedelta(seconds=2),
             )
             self.assertIn(expiring.id, {item.id for item in expired})
             self.assertEqual(

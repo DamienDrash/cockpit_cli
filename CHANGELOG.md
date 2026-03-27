@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.1.43
+
+- **Phase 3 Modular Monolith Restructuring**: Complete transition to DDD and Hexagonal architecture.
+- **Top-level context packages**: Consolidated logic into `core`, `workspace`, `ops`, `datasources`, `notifications`, `plugins`, and `admin`.
+- **Import Migration**: Updated all internal imports to reflect the new package structure.
+- **Repository Standardization**: Unified repository query naming conventions (e.g., `get_*` to `find_*`).
+- **Data Integrity**: Added `payload_json` to all `ops` repositories to ensure full model persistence and fix SQL `IntegrityError`s.
+- **Schema Alignment**: Synchronized repository implementations with `schema.py` table and column names.
+- **Panel Isolation**: Implemented base panel state management and error boundary defaults.
+- **Test Hardening**: Fixed timing and dependency issues in unit and integration test suites.
+
+## 0.1.5
+
+- added Cyberpunk-inspired splash screen and system boot animation using `rich`
+- refactored CLI command output (`connections`, `datasources`) with DevEx principles
+- integrated semantic colors and "Next Steps" guidance for better CLI UX
+
 ## 0.1.4
 
 - fixed `PanelStateChanged` event contract to prevent runtime crashes during UI state updates

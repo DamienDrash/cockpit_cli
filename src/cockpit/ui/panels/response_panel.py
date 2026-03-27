@@ -7,11 +7,11 @@ from threading import get_ident
 from textual import events
 from textual.widgets import Static
 
-from cockpit.application.dispatch.event_bus import EventBus
-from cockpit.application.services.postincident_service import PostIncidentService
-from cockpit.application.services.response_run_service import ResponseRunService
-from cockpit.domain.events.health_events import IncidentStatusChanged
-from cockpit.domain.events.response_events import (
+from cockpit.core.dispatch.event_bus import EventBus
+from cockpit.ops.services.postincident_service import PostIncidentService
+from cockpit.ops.services.response_run_service import ResponseRunService
+from cockpit.ops.events.health import IncidentStatusChanged
+from cockpit.ops.events.response import (
     ActionItemStatusChanged,
     ApprovalRequested,
     ApprovalResolved,
@@ -21,8 +21,8 @@ from cockpit.domain.events.response_events import (
     ResponseRunStatusChanged,
     ResponseStepStatusChanged,
 )
-from cockpit.domain.models.panel_state import PanelState
-from cockpit.domain.events.runtime_events import PanelMounted, PanelStateChanged
+from cockpit.core.panel_state import PanelState
+from cockpit.core.events.runtime import PanelMounted, PanelStateChanged
 
 
 class ResponsePanel(Static):
@@ -108,17 +108,27 @@ class ResponsePanel(Static):
         detail = self._selected_run_detail()
         selected_step = None
         if detail is not None and detail.step_runs:
-            selected_step = detail.step_runs[min(selected.current_step_index, len(detail.step_runs) - 1)] if selected is not None else None
+            selected_step = (
+                detail.step_runs[
+                    min(selected.current_step_index, len(detail.step_runs) - 1)
+                ]
+                if selected is not None
+                else None
+            )
         return {
             "panel_id": self.PANEL_ID,
             "workspace_id": self._workspace_id,
             "session_id": self._session_id,
             "workspace_root": self._workspace_root,
             "selected_response_run_id": self._selected_run_id,
-            "selected_response_step_run_id": selected_step.id if selected_step is not None else None,
+            "selected_response_step_run_id": selected_step.id
+            if selected_step is not None
+            else None,
             "selected_approval_request_id": self._selected_approval_request_id,
             "selected_review_id": self._selected_review_id,
-            "selected_incident_id": selected.incident_id if selected is not None else None,
+            "selected_incident_id": selected.incident_id
+            if selected is not None
+            else None,
         }
 
     def on_key(self, event: events.Key) -> None:
@@ -189,7 +199,9 @@ class ResponsePanel(Static):
             lines.append("None.")
         else:
             for item in pending_requests:
-                marker = ">" if item.get("id") == self._selected_approval_request_id else " "
+                marker = (
+                    ">" if item.get("id") == self._selected_approval_request_id else " "
+                )
                 lines.append(
                     f"{marker} {item.get('id', '')} approvers={item.get('required_approver_count', 0)} reason={item.get('reason', '')}"
                 )
@@ -226,8 +238,12 @@ class ResponsePanel(Static):
                 self._selected_run_index = 0
                 self._selected_run_id = str(self._runs[0].get("id", ""))
         else:
-            self._selected_run_index = min(self._selected_run_index, len(self._runs) - 1)
-            self._selected_run_id = str(self._runs[self._selected_run_index].get("id", ""))
+            self._selected_run_index = min(
+                self._selected_run_index, len(self._runs) - 1
+            )
+            self._selected_run_id = str(
+                self._runs[self._selected_run_index].get("id", "")
+            )
         detail = self._selected_run_detail()
         if detail is None:
             self._selected_approval_request_id = None
@@ -243,12 +259,16 @@ class ResponsePanel(Static):
         self._selected_approval_request_id = (
             str(pending_requests[0].get("id", "")) if pending_requests else None
         )
-        self._selected_review_id = detail.review.id if detail.review is not None else None
+        self._selected_review_id = (
+            detail.review.id if detail.review is not None else None
+        )
 
     def _move_selection(self, delta: int) -> None:
         if not self._runs:
             return
-        self._selected_run_index = max(0, min(len(self._runs) - 1, self._selected_run_index + delta))
+        self._selected_run_index = max(
+            0, min(len(self._runs) - 1, self._selected_run_index + delta)
+        )
         self._selected_run_id = str(self._runs[self._selected_run_index].get("id", ""))
         self.refresh_state()
 
@@ -288,4 +308,3 @@ def _optional_str(raw_value: object) -> str | None:
         return None
     value = str(raw_value).strip()
     return value or None
-

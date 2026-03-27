@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from textual.widgets import Static
 
-from cockpit.domain.models.panel_state import PanelState
-from cockpit.domain.models.plugin import PluginManifest
+from cockpit.core.panel_state import PanelState
+from cockpit.plugins.models import PluginManifest
 from cockpit.plugins.loader import PluginBootstrapContext
 from cockpit.ui.panels.registry import PanelSpec
 
@@ -69,7 +69,7 @@ class AppendNoteHandler:
         note = " ".join(str(token) for token in argv if isinstance(token, str)).strip()
         if not note:
             note = "plugin note"
-        from cockpit.application.handlers.base import DispatchResult
+        from cockpit.core.dispatch.handler_base import DispatchResult
 
         return DispatchResult(
             success=True,

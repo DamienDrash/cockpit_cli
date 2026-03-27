@@ -15,7 +15,11 @@ class ManualStepExecutor:
     def execute(self, context: ExecutorContext) -> ExecutorResult:
         instructions = str(context.resolved_config.get("instructions", "")).strip()
         note = str(context.resolved_config.get("note", "")).strip()
-        summary = note or instructions or f"Manual step '{context.step_definition.title}' completed."
+        summary = (
+            note
+            or instructions
+            or f"Manual step '{context.step_definition.title}' completed."
+        )
         artifacts = (
             ExecutorArtifact(
                 kind="manual_note",
@@ -34,4 +38,3 @@ class ManualStepExecutor:
             },
             artifacts=artifacts,
         )
-

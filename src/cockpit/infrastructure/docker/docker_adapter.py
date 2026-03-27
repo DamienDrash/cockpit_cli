@@ -7,8 +7,8 @@ import json
 import shlex
 import subprocess
 
-from cockpit.infrastructure.ssh.command_runner import SSHCommandRunner
-from cockpit.shared.enums import SessionTargetKind
+from cockpit.datasources.adapters.ssh_command_runner import SSHCommandRunner
+from cockpit.core.enums import SessionTargetKind
 
 
 @dataclass(slots=True, frozen=True)
@@ -128,7 +128,9 @@ class DockerAdapter:
         if returncode != 0:
             message = stderr.strip() or "docker ps failed."
             lowered = message.lower()
-            daemon_reachable = "daemon" not in lowered and "cannot connect" not in lowered
+            daemon_reachable = (
+                "daemon" not in lowered and "cannot connect" not in lowered
+            )
             return DockerRuntimeSnapshot(
                 is_available=is_available,
                 daemon_reachable=daemon_reachable,
@@ -189,11 +191,13 @@ class DockerAdapter:
         if result.returncode != 0:
             return DockerActionResult(
                 success=False,
-                message=result.stderr.strip() or f"Docker restart failed for {container_id}.",
+                message=result.stderr.strip()
+                or f"Docker restart failed for {container_id}.",
             )
         return DockerActionResult(
             success=True,
-            message=result.stdout.strip() or f"Restarted docker container {container_id}.",
+            message=result.stdout.strip()
+            or f"Restarted docker container {container_id}.",
         )
 
     def stop_container(
@@ -251,11 +255,13 @@ class DockerAdapter:
         if result.returncode != 0:
             return DockerActionResult(
                 success=False,
-                message=result.stderr.strip() or f"Docker restart failed for {container_id}.",
+                message=result.stderr.strip()
+                or f"Docker restart failed for {container_id}.",
             )
         return DockerActionResult(
             success=True,
-            message=result.stdout.strip() or f"Restarted docker container {container_id}.",
+            message=result.stdout.strip()
+            or f"Restarted docker container {container_id}.",
         )
 
     def _run_container_action(
@@ -271,7 +277,9 @@ class DockerAdapter:
             "rm": "Removed",
         }.get(action, action.title())
         if target_kind is SessionTargetKind.SSH:
-            return self._run_remote_container_action(action, container_id, target_ref, verb=verb)
+            return self._run_remote_container_action(
+                action, container_id, target_ref, verb=verb
+            )
 
         try:
             result = self._run_docker(action, container_id)
@@ -283,7 +291,8 @@ class DockerAdapter:
         if result.returncode != 0:
             return DockerActionResult(
                 success=False,
-                message=result.stderr.strip() or f"Docker {action} failed for {container_id}.",
+                message=result.stderr.strip()
+                or f"Docker {action} failed for {container_id}.",
             )
         return DockerActionResult(
             success=True,
@@ -334,7 +343,9 @@ class DockerAdapter:
         log_tail: int,
     ) -> dict[str, object]:
         if target_kind is SessionTargetKind.SSH:
-            return self._inspect_remote_container(container_id, target_ref, log_tail=log_tail)
+            return self._inspect_remote_container(
+                container_id, target_ref, log_tail=log_tail
+            )
         return self._inspect_local_container(container_id, log_tail=log_tail)
 
     def _inspect_local_container(
@@ -353,7 +364,9 @@ class DockerAdapter:
                 "last_error": inspect_result.stderr.strip()
                 or f"docker inspect failed for {container_id}",
             }
-        logs_result = self._run_docker("logs", "--tail", str(max(1, log_tail)), container_id)
+        logs_result = self._run_docker(
+            "logs", "--tail", str(max(1, log_tail)), container_id
+        )
         return self._detail_from_inspect_payload(
             inspect_result.stdout,
             logs_output=(logs_result.stdout or logs_result.stderr),
@@ -367,7 +380,10 @@ class DockerAdapter:
         log_tail: int,
     ) -> dict[str, object]:
         if not target_ref or self._ssh_command_runner is None:
-            return {"recent_logs": [], "last_error": "SSH docker inspection is not configured."}
+            return {
+                "recent_logs": [],
+                "last_error": "SSH docker inspection is not configured.",
+            }
         inspect_result = self._ssh_command_runner.run(
             target_ref,
             f"docker inspect {shlex.quote(container_id)}",
@@ -383,14 +399,18 @@ class DockerAdapter:
             target_ref,
             f"docker logs --tail {max(1, int(log_tail))} {shlex.quote(container_id)}",
         )
-        logs_output = logs_result.stdout or logs_result.stderr or logs_result.message or ""
+        logs_output = (
+            logs_result.stdout or logs_result.stderr or logs_result.message or ""
+        )
         return self._detail_from_inspect_payload(
             inspect_result.stdout,
             logs_output=logs_output,
         )
 
     @staticmethod
-    def _detail_from_inspect_payload(raw_inspect: str, *, logs_output: str) -> dict[str, object]:
+    def _detail_from_inspect_payload(
+        raw_inspect: str, *, logs_output: str
+    ) -> dict[str, object]:
         try:
             payload = json.loads(raw_inspect)
         except json.JSONDecodeError:
@@ -427,7 +447,9 @@ class DockerAdapter:
             "last_finished_at": state.get("FinishedAt") or None,
             "recent_logs": [
                 line
-                for line in logs_output.splitlines()[-max(1, min(50, len(logs_output.splitlines()) or 0)) :]
+                for line in logs_output.splitlines()[
+                    -max(1, min(50, len(logs_output.splitlines()) or 0)) :
+                ]
                 if line.strip()
             ],
         }
@@ -462,7 +484,8 @@ class DockerAdapter:
         if result.returncode != 0:
             return DockerActionResult(
                 success=False,
-                message=result.stderr.strip() or f"Docker {action} failed for {container_id}.",
+                message=result.stderr.strip()
+                or f"Docker {action} failed for {container_id}.",
             )
         return DockerActionResult(
             success=True,

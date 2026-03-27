@@ -3,16 +3,21 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
 
-from cockpit.domain.models.escalation import (
+from cockpit.ops.models.escalation import (
     EngagementDeliveryLink,
     EscalationPolicy,
     EscalationStep,
     IncidentEngagement,
 )
-from cockpit.domain.models.health import IncidentRecord
-from cockpit.domain.models.notifications import NotificationRecord
-from cockpit.domain.models.oncall import OperatorPerson, OperatorTeam, OwnershipBinding, TeamMembership
-from cockpit.infrastructure.persistence.ops_repositories import (
+from cockpit.ops.models.health import IncidentRecord
+from cockpit.notifications.models import NotificationRecord
+from cockpit.ops.models.oncall import (
+    OperatorPerson,
+    OperatorTeam,
+    OwnershipBinding,
+    TeamMembership,
+)
+from cockpit.ops.repositories import (
     EngagementDeliveryLinkRepository,
     EngagementTimelineRepository,
     EscalationPolicyRepository,
@@ -25,8 +30,8 @@ from cockpit.infrastructure.persistence.ops_repositories import (
     OwnershipBindingRepository,
     TeamMembershipRepository,
 )
-from cockpit.infrastructure.persistence.sqlite_store import SQLiteStore
-from cockpit.shared.enums import (
+from cockpit.core.persistence.sqlite_store import SQLiteStore
+from cockpit.core.enums import (
     ComponentKind,
     EngagementDeliveryPurpose,
     EngagementStatus,
@@ -155,16 +160,24 @@ class Stage3OpsRepositoriesTests(unittest.TestCase):
                 )
             )
 
-            self.assertEqual(OperatorPersonRepository(store).get("opr-1").handle, "alice")
+            self.assertEqual(
+                OperatorPersonRepository(store).get("opr-1").handle, "alice"
+            )
             self.assertEqual(len(OperatorTeamRepository(store).list_all()), 1)
             self.assertEqual(len(TeamMembershipRepository(store).list_all()), 1)
             self.assertEqual(
                 OwnershipBindingRepository(store).get("own-1").component_id,
                 "docker:web",
             )
-            self.assertEqual(len(EscalationStepRepository(store).list_for_policy("epc-1")), 1)
-            self.assertEqual(engagement_repo.get_active_for_incident("inc-1").id, "eng-1")
-            due = engagement_repo.list_due_actions(datetime(2026, 3, 24, 10, 5, tzinfo=UTC))
+            self.assertEqual(
+                len(EscalationStepRepository(store).list_for_policy("epc-1")), 1
+            )
+            self.assertEqual(
+                engagement_repo.find_active_for_incident("inc-1").id, "eng-1"
+            )
+            due = engagement_repo.list_due_actions(
+                datetime(2026, 3, 24, 10, 5, tzinfo=UTC)
+            )
             self.assertEqual([item.id for item in due], ["eng-1"])
             self.assertEqual(len(timeline_repo.list_for_engagement("eng-1")), 1)
             self.assertEqual(len(link_repo.list_for_engagement("eng-1")), 1)

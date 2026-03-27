@@ -1,7 +1,6 @@
-from types import SimpleNamespace
 import unittest
 
-from cockpit.infrastructure.ssh.tunnel_manager import SSHTunnelManager
+from cockpit.datasources.adapters.tunnel_manager import SSHTunnelManager
 
 
 class FakeProcess:

@@ -1,11 +1,11 @@
 import unittest
 
-from cockpit.application.dispatch.event_bus import EventBus
-from cockpit.application.handlers.workspace_handlers import OpenWorkspaceHandler
-from cockpit.domain.commands.command import Command
-from cockpit.domain.events.domain_events import WorkspaceOpened
-from cockpit.domain.models.workspace import SessionTarget, Workspace
-from cockpit.shared.enums import CommandSource, SessionTargetKind
+from cockpit.core.dispatch.event_bus import EventBus
+from cockpit.workspace.handlers.workspace_handlers import OpenWorkspaceHandler
+from cockpit.core.command import Command
+from cockpit.workspace.events import WorkspaceOpened
+from cockpit.workspace.models.workspace import SessionTarget, Workspace
+from cockpit.core.enums import CommandSource, SessionTargetKind
 
 
 class WorkspaceHandlerTests(unittest.TestCase):
@@ -27,7 +27,9 @@ class WorkspaceHandlerTests(unittest.TestCase):
         )
 
         self.assertTrue(result.success)
-        self.assertTrue(any(isinstance(event, WorkspaceOpened) for event in bus.published))
+        self.assertTrue(
+            any(isinstance(event, WorkspaceOpened) for event in bus.published)
+        )
 
 
 if __name__ == "__main__":

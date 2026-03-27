@@ -2,11 +2,11 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
 
-from cockpit.application.services.guard_policy_service import GuardPolicyService
-from cockpit.domain.models.policy import GuardContext
-from cockpit.infrastructure.persistence.ops_repositories import GuardDecisionRepository
-from cockpit.infrastructure.persistence.sqlite_store import SQLiteStore
-from cockpit.shared.enums import (
+from cockpit.ops.services.guard_policy_service import GuardPolicyService
+from cockpit.ops.models.policy import GuardContext
+from cockpit.ops.repositories import GuardDecisionRepository
+from cockpit.core.persistence.sqlite_store import SQLiteStore
+from cockpit.core.enums import (
     ComponentKind,
     GuardActionKind,
     GuardDecisionOutcome,
@@ -30,7 +30,9 @@ class GuardPolicyServiceTests(unittest.TestCase):
                 )
             )
 
-            self.assertEqual(decision.outcome, GuardDecisionOutcome.REQUIRE_CONFIRMATION)
+            self.assertEqual(
+                decision.outcome, GuardDecisionOutcome.REQUIRE_CONFIRMATION
+            )
             self.assertTrue(decision.requires_confirmation)
             self.assertEqual(len(GuardDecisionRepository(store).list_recent()), 1)
 

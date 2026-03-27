@@ -2,35 +2,34 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
 
-from cockpit.application.dispatch.event_bus import EventBus
-from cockpit.application.dispatch.command_dispatcher import CommandDispatcher
-from cockpit.application.handlers.session_handlers import RestoreSessionHandler
-from cockpit.application.handlers.workspace_handlers import OpenWorkspaceHandler
-from cockpit.application.handlers.base import DispatchResult
-from cockpit.domain.commands.command import Command
-from cockpit.application.services.connection_service import ConnectionService
-from cockpit.application.services.layout_service import LayoutService
-from cockpit.application.services.navigation_controller import NavigationController
-from cockpit.application.services.session_service import SessionService
-from cockpit.application.services.workspace_service import WorkspaceService
-from cockpit.domain.events.domain_events import (
+from cockpit.core.dispatch.event_bus import EventBus
+from cockpit.core.dispatch.command_dispatcher import CommandDispatcher
+from cockpit.workspace.handlers.session_handlers import RestoreSessionHandler
+from cockpit.workspace.handlers.workspace_handlers import OpenWorkspaceHandler
+from cockpit.core.command import Command
+from cockpit.workspace.services.connection_service import ConnectionService
+from cockpit.workspace.services.layout_service import LayoutService
+from cockpit.workspace.services.navigation_controller import NavigationController
+from cockpit.workspace.services.session_service import SessionService
+from cockpit.workspace.services.workspace_service import WorkspaceService
+from cockpit.workspace.events import (
     LayoutApplied,
     SessionCreated,
     SessionRestored,
     SnapshotSaved,
     WorkspaceOpened,
 )
-from cockpit.domain.events.runtime_events import StatusMessagePublished
-from cockpit.infrastructure.config.config_loader import ConfigLoader
-from cockpit.infrastructure.persistence.repositories import (
+from cockpit.core.events.runtime import StatusMessagePublished
+from cockpit.workspace.config_loader import ConfigLoader
+from cockpit.workspace.repositories import (
     LayoutRepository,
     SessionRepository,
     SnapshotRepository,
     WorkspaceRepository,
 )
-from cockpit.infrastructure.persistence.sqlite_store import SQLiteStore
-from cockpit.shared.enums import SnapshotKind, StatusLevel
-from cockpit.shared.enums import CommandSource
+from cockpit.core.persistence.sqlite_store import SQLiteStore
+from cockpit.core.enums import SnapshotKind, StatusLevel
+from cockpit.core.enums import CommandSource
 
 
 class NavigationControllerTests(unittest.TestCase):
@@ -38,15 +37,17 @@ class NavigationControllerTests(unittest.TestCase):
         with TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             workspace_dir = self._write_project_fixture(root)
-            controller, store, bus, session_repo, _snapshot_repo = self._build_controller(
-                root
+            controller, store, bus, session_repo, _snapshot_repo = (
+                self._build_controller(root)
             )
 
             state = controller.open_workspace(str(workspace_dir))
 
             self.assertEqual(state.cwd, str(workspace_dir.resolve()))
             self.assertFalse(state.restored)
-            self.assertIsNotNone(session_repo.get_latest_for_workspace(state.workspace.id))
+            self.assertIsNotNone(
+                session_repo.get_latest_for_workspace(state.workspace.id)
+            )
             published_types = {type(event) for event in bus.published}
             self.assertIn(WorkspaceOpened, published_types)
             self.assertIn(SessionCreated, published_types)
@@ -58,8 +59,8 @@ class NavigationControllerTests(unittest.TestCase):
         with TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             workspace_dir = self._write_project_fixture(root)
-            controller, store, bus, session_repo, snapshot_repo = self._build_controller(
-                root
+            controller, store, bus, session_repo, snapshot_repo = (
+                self._build_controller(root)
             )
 
             created = controller.open_workspace(str(workspace_dir))
@@ -76,9 +77,13 @@ class NavigationControllerTests(unittest.TestCase):
 
             self.assertTrue(restored.restored)
             self.assertEqual(restored.cwd, str(workspace_dir.resolve()))
-            self.assertIn("Falling back to workspace root", restored.recovery_message or "")
+            self.assertIn(
+                "Falling back to workspace root", restored.recovery_message or ""
+            )
             new_events = bus.published[event_count:]
-            self.assertTrue(any(isinstance(event, SessionRestored) for event in new_events))
+            self.assertTrue(
+                any(isinstance(event, SessionRestored) for event in new_events)
+            )
             self.assertTrue(
                 any(
                     isinstance(event, StatusMessagePublished)
@@ -97,8 +102,8 @@ class NavigationControllerTests(unittest.TestCase):
             selected_file = nested_dir / "notes.txt"
             selected_file.write_text("resume me\n", encoding="utf-8")
 
-            controller, store, _bus, _session_repo, _snapshot_repo = self._build_controller(
-                root
+            controller, store, _bus, _session_repo, _snapshot_repo = (
+                self._build_controller(root)
             )
             created = controller.open_workspace(str(workspace_dir))
             first_service = SessionService(
@@ -117,9 +122,13 @@ class NavigationControllerTests(unittest.TestCase):
             )
             store.close()
 
-            reopened_controller, reopened_store, _bus2, _session_repo2, _snapshot_repo2 = (
-                self._build_controller(root)
-            )
+            (
+                reopened_controller,
+                reopened_store,
+                _bus2,
+                _session_repo2,
+                _snapshot_repo2,
+            ) = self._build_controller(root)
             reopened = reopened_controller.reopen_last_workspace()
 
             self.assertTrue(reopened.restored)
@@ -143,8 +152,8 @@ class NavigationControllerTests(unittest.TestCase):
             selected_file = nested_dir / "notes.txt"
             selected_file.write_text("handler restore\n", encoding="utf-8")
 
-            controller, store, bus, _session_repo, _snapshot_repo = self._build_controller(
-                root
+            controller, store, bus, _session_repo, _snapshot_repo = (
+                self._build_controller(root)
             )
             created = controller.open_workspace(str(workspace_dir))
             SessionService(
@@ -184,12 +193,14 @@ class NavigationControllerTests(unittest.TestCase):
             self.assertEqual(result.data["selected_path"], str(selected_file.resolve()))
             store.close()
 
-    def test_open_remote_workspace_creates_ssh_target_and_preserves_remote_cwd(self) -> None:
+    def test_open_remote_workspace_creates_ssh_target_and_preserves_remote_cwd(
+        self,
+    ) -> None:
         with TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             self._write_project_fixture(root)
-            controller, store, _bus, session_repo, snapshot_repo = self._build_controller(
-                root
+            controller, store, _bus, session_repo, snapshot_repo = (
+                self._build_controller(root)
             )
 
             remote_uri = "ssh://dev@example.com/srv/app"
@@ -226,8 +237,8 @@ class NavigationControllerTests(unittest.TestCase):
                 + "\n",
                 encoding="utf-8",
             )
-            controller, store, _bus, _session_repo, _snapshot_repo = self._build_controller(
-                root
+            controller, store, _bus, _session_repo, _snapshot_repo = (
+                self._build_controller(root)
             )
 
             created = controller.open_workspace("@prod")
@@ -242,8 +253,8 @@ class NavigationControllerTests(unittest.TestCase):
         with TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             self._write_project_fixture(root)
-            controller, store, bus, _session_repo, _snapshot_repo = self._build_controller(
-                root
+            controller, store, bus, _session_repo, _snapshot_repo = (
+                self._build_controller(root)
             )
             dispatcher = CommandDispatcher(event_bus=bus)
             dispatcher.register(

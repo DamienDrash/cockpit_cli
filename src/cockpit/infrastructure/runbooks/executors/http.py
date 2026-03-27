@@ -44,4 +44,3 @@ class HttpStepExecutor:
             ),
             error_message=None if response.success else summary,
         )
-

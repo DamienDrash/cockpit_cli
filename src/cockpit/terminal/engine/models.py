@@ -66,7 +66,9 @@ class TerminalEngineSnapshot:
     lines: tuple[str, ...]
     scrollback: tuple[str, ...] = field(default_factory=tuple)
     cells: tuple[tuple[TerminalCell, ...], ...] = field(default_factory=tuple)
-    scrollback_cells: tuple[tuple[TerminalCell, ...], ...] = field(default_factory=tuple)
+    scrollback_cells: tuple[tuple[TerminalCell, ...], ...] = field(
+        default_factory=tuple
+    )
     cursor: TerminalCursorState = field(default_factory=TerminalCursorState)
     title: str | None = None
     alternate_screen_active: bool = False

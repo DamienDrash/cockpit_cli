@@ -6,14 +6,14 @@ import textwrap
 import types
 import unittest
 
-from cockpit.application.dispatch.command_dispatcher import CommandDispatcher
-from cockpit.application.dispatch.event_bus import EventBus
-from cockpit.application.services.plugin_service import PluginService
-from cockpit.domain.commands.command import Command
-from cockpit.infrastructure.persistence.repositories import InstalledPluginRepository
-from cockpit.infrastructure.persistence.sqlite_store import SQLiteStore
-from cockpit.shared.enums import CommandSource
-from cockpit.shared.utils import make_id
+from cockpit.core.dispatch.command_dispatcher import CommandDispatcher
+from cockpit.core.dispatch.event_bus import EventBus
+from cockpit.plugins.services.plugin_service import PluginService
+from cockpit.core.command import Command
+from cockpit.workspace.repositories import InstalledPluginRepository
+from cockpit.core.persistence.sqlite_store import SQLiteStore
+from cockpit.core.enums import CommandSource
+from cockpit.core.utils import make_id
 from cockpit.ui.panels.registry import PanelRegistry
 
 PACKAGING_AVAILABLE = importlib.util.find_spec("packaging") is not None
@@ -59,24 +59,24 @@ def _write_plugin_module(
     manifest_source = textwrap.indent(textwrap.dedent(manifest_body).strip(), " " * 4)
     source = "\n".join(
         [
-            "from cockpit.application.handlers.base import DispatchResult",
-            "from cockpit.domain.models.panel_state import PanelState",
-            "from cockpit.domain.models.plugin import PluginManifest",
+            "from cockpit.core.dispatch.handler_base import DispatchResult",
+            "from cockpit.core.panel_state import PanelState",
+            "from cockpit.plugins.models import PluginManifest",
             "from cockpit.ui.panels.registry import PanelSpec",
             "",
             "class HostedPanel:",
-            f"    PANEL_ID = \"{module_name}-panel\"",
-            f"    PANEL_TYPE = \"{module_name}\"",
+            f'    PANEL_ID = "{module_name}-panel"',
+            f'    PANEL_TYPE = "{module_name}"',
             "",
             "    def __init__(self):",
             "        self._notes = []",
-            "        self._workspace_name = \"Plugin\"",
+            '        self._workspace_name = "Plugin"',
             "",
             "    def initialize(self, context):",
-            "        self._workspace_name = str(context.get(\"workspace_name\", \"Plugin\"))",
+            '        self._workspace_name = str(context.get("workspace_name", "Plugin"))',
             "",
             "    def restore_state(self, snapshot):",
-            "        notes = snapshot.get(\"notes\")",
+            '        notes = snapshot.get("notes")',
             "        if isinstance(notes, list):",
             "            self._notes = [str(item) for item in notes if isinstance(item, str)]",
             "",
@@ -84,13 +84,13 @@ def _write_plugin_module(
             "        return PanelState(",
             "            panel_id=self.PANEL_ID,",
             "            panel_type=self.PANEL_TYPE,",
-            "            snapshot={\"notes\": list(self._notes)},",
+            '            snapshot={"notes": list(self._notes)},',
             "        )",
             "",
             "    def command_context(self):",
             "        return {",
-            "            \"panel_id\": self.PANEL_ID,",
-            "            \"notes_count\": len(self._notes),",
+            '            "panel_id": self.PANEL_ID,',
+            '            "notes_count": len(self._notes),',
             "        }",
             "",
             "    def suspend(self):",
@@ -103,16 +103,16 @@ def _write_plugin_module(
             "        pass",
             "",
             "    def apply_command_result(self, payload):",
-            "        note = payload.get(\"note\")",
+            '        note = payload.get("note")',
             "        if isinstance(note, str) and note:",
             "            self._notes.append(note)",
             "",
             "    def _render_text(self):",
             "        if not self._notes:",
-            "            return f\"{self._workspace_name}\\n\\nNo plugin notes yet.\"",
-            "        lines = [self._workspace_name, \"\"]",
-            "        lines.extend(f\"- {note}\" for note in self._notes)",
-            "        return \"\\n\".join(lines)",
+            '            return f"{self._workspace_name}\\n\\nNo plugin notes yet."',
+            '        lines = [self._workspace_name, ""]',
+            '        lines.extend(f"- {note}" for note in self._notes)',
+            '        return "\\n".join(lines)',
             "",
             "class EchoHandler:",
             "    def __call__(self, command):",
@@ -127,11 +127,11 @@ def _write_plugin_module(
             "        PanelSpec(",
             "            panel_type=HostedPanel.PANEL_TYPE,",
             "            panel_id=HostedPanel.PANEL_ID,",
-            f"            display_name=\"{module_name.title()}\",",
+            f'            display_name="{module_name.title()}",',
             "            factory=lambda _container: HostedPanel(),",
             "        )",
             "    )",
-            f"    context.register_command(\"{module_name}.echo\", EchoHandler())",
+            f'    context.register_command("{module_name}.echo", EchoHandler())',
             "",
         ]
     )
@@ -226,7 +226,9 @@ class PluginServiceTests(unittest.TestCase):
             service.shutdown()
             store.close()
 
-    @unittest.skipUnless(PACKAGING_AVAILABLE, "packaging must be installed for compat checks")
+    @unittest.skipUnless(
+        PACKAGING_AVAILABLE, "packaging must be installed for compat checks"
+    )
     def test_rejects_incompatible_plugin_manifest(self) -> None:
         with TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)

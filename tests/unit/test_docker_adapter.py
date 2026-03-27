@@ -3,8 +3,8 @@ import unittest
 from unittest.mock import patch
 
 from cockpit.infrastructure.docker.docker_adapter import DockerAdapter
-from cockpit.infrastructure.ssh.command_runner import SSHCommandResult
-from cockpit.shared.enums import SessionTargetKind
+from cockpit.datasources.adapters.ssh_command_runner import SSHCommandResult
+from cockpit.core.enums import SessionTargetKind
 
 
 class FakeSSHCommandRunner:
@@ -34,7 +34,9 @@ class FakeSSHCommandRunner:
 class DockerAdapterTests(unittest.TestCase):
     def test_reports_missing_docker_binary_cleanly(self) -> None:
         adapter = DockerAdapter()
-        with patch("cockpit.infrastructure.docker.docker_adapter.subprocess.run") as run_mock:
+        with patch(
+            "cockpit.infrastructure.docker.docker_adapter.subprocess.run"
+        ) as run_mock:
             run_mock.side_effect = FileNotFoundError()
             snapshot = adapter.list_containers()
 
@@ -124,7 +126,9 @@ class DockerAdapterTests(unittest.TestCase):
 
     def test_reports_missing_docker_binary_on_restart(self) -> None:
         adapter = DockerAdapter()
-        with patch("cockpit.infrastructure.docker.docker_adapter.subprocess.run") as run_mock:
+        with patch(
+            "cockpit.infrastructure.docker.docker_adapter.subprocess.run"
+        ) as run_mock:
             run_mock.side_effect = FileNotFoundError()
             result = adapter.restart_container("abc123")
 

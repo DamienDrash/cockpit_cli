@@ -2,15 +2,18 @@
 
 from __future__ import annotations
 
-from cockpit.application.services.datasource_service import DataSourceService
-from cockpit.domain.models.datasource import DataSourceOperationResult
-from cockpit.infrastructure.db.database_adapter import DatabaseAdapter, DatabaseQueryResult
+from cockpit.datasources.services.datasource_service import DataSourceService
+from cockpit.datasources.models.datasource import DataSourceOperationResult
+from cockpit.datasources.adapters.database_adapter import (
+    DatabaseAdapter,
+    DatabaseQueryResult,
+)
 from cockpit.infrastructure.runbooks.executors.base import (
     ExecutorArtifact,
     ExecutorContext,
     ExecutorResult,
 )
-from cockpit.shared.enums import SessionTargetKind
+from cockpit.core.enums import SessionTargetKind
 
 
 class DatabaseStepExecutor:
@@ -38,13 +41,17 @@ class DatabaseStepExecutor:
             return self._from_datasource_result(result)
 
         database_path = str(context.resolved_config.get("database_path", "")).strip()
-        target_kind = SessionTargetKind(str(context.resolved_config.get("target_kind", "local")))
+        target_kind = SessionTargetKind(
+            str(context.resolved_config.get("target_kind", "local"))
+        )
         target_ref = context.resolved_config.get("target_ref")
         result = self._database_adapter.run_query(
             database_path,
             statement,
             target_kind=target_kind,
-            target_ref=str(target_ref) if isinstance(target_ref, str) and target_ref else None,
+            target_ref=str(target_ref)
+            if isinstance(target_ref, str) and target_ref
+            else None,
             row_limit=int(context.resolved_config.get("row_limit", 50) or 50),
         )
         return self._from_database_result(result)
@@ -66,7 +73,9 @@ class DatabaseStepExecutor:
             error_message=None if result.success else result.message,
         )
 
-    def _from_datasource_result(self, result: DataSourceOperationResult) -> ExecutorResult:
+    def _from_datasource_result(
+        self, result: DataSourceOperationResult
+    ) -> ExecutorResult:
         payload = result.to_dict()
         return ExecutorResult(
             success=result.success,
@@ -82,4 +91,3 @@ class DatabaseStepExecutor:
             ),
             error_message=None if result.success else result.message,
         )
-

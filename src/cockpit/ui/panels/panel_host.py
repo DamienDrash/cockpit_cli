@@ -3,14 +3,17 @@
 from __future__ import annotations
 
 import copy
-from collections.abc import Iterable
+import logging
+from collections.abc import Callable, Iterable
 
 from textual.app import ComposeResult
 from textual.containers import Horizontal, Vertical
 
 from cockpit.bootstrap import ApplicationContainer
-from cockpit.domain.models.panel_state import PanelState
+from cockpit.core.panel_state import PanelState
 from cockpit.ui.panels.registry import PanelContract
+
+logger = logging.getLogger(__name__)
 
 
 class PanelHost(Vertical):
@@ -26,6 +29,7 @@ class PanelHost(Vertical):
         self._layout_id = "default"
         self._layout_render_scheduled = False
         self._pending_focus_panel_id: str | None = None
+        self._failed_panels: set[str] = set()
         self._tabs: list[dict[str, object]] = [
             {
                 "id": "work",
@@ -50,6 +54,14 @@ class PanelHost(Vertical):
         yield self._parking
 
     async def on_mount(self) -> None:
+        # Inject dispatch callback into panels that declare _dispatch=None.
+        # Late-bound because the app shell doesn't exist at panel construction time.
+        dispatch_fn = getattr(self.app, "_dispatch_command", None)
+        if dispatch_fn is not None:
+            for panel in self._panels_by_id.values():
+                if hasattr(panel, "_dispatch") and getattr(panel, "_dispatch") is None:
+                    panel._dispatch = dispatch_fn  # noqa: SLF001
+
         self._parking.display = False
         await self._parking.mount(*self._panels_by_id.values())
         self._queue_layout_render()
@@ -60,16 +72,28 @@ class PanelHost(Vertical):
             self._layout_id = layout_id
         self._tabs = self._normalize_tabs(context.get("tabs"))
         snapshot = context.get("snapshot")
-        panel_snapshots = self._panel_snapshots(snapshot if isinstance(snapshot, dict) else {})
+        panel_snapshots = self._panel_snapshots(
+            snapshot if isinstance(snapshot, dict) else {}
+        )
         for panel_id, panel in self._panels_by_id.items():
             panel_snapshot = panel_snapshots.get(panel_id, {})
             panel_context = dict(context)
             panel_context.update(panel_snapshot)
-            panel.initialize(panel_context)
-            panel.restore_state(panel_snapshot)
+            self._safe_panel_call(
+                panel_id,
+                "initialize",
+                lambda p=panel, ctx=panel_context: p.initialize(ctx),
+            )
+            self._safe_panel_call(
+                panel_id,
+                "restore_state",
+                lambda p=panel, s=panel_snapshot: p.restore_state(s),
+            )
         active_tab_id = context.get("active_tab_id")
         self._active_tab_id = (
-            str(active_tab_id) if isinstance(active_tab_id, str) and active_tab_id else "work"
+            str(active_tab_id)
+            if isinstance(active_tab_id, str) and active_tab_id
+            else "work"
         )
         self.set_active_tab(self._active_tab_id, focus=False)
 
@@ -93,8 +117,7 @@ class PanelHost(Vertical):
         panels = self._panels()
         active_state = self._active_panel().snapshot_state()
         panel_snapshots = {
-            panel.PANEL_ID: panel.snapshot_state().snapshot
-            for panel in panels
+            panel.PANEL_ID: panel.snapshot_state().snapshot for panel in panels
         }
         work_snapshot = panel_snapshots.get("work-panel", {})
         snapshot = dict(active_state.snapshot)
@@ -114,7 +137,11 @@ class PanelHost(Vertical):
         )
 
     def set_active_tab(self, tab_id: str, *, focus: bool = True) -> str:
-        next_tab = tab_id if tab_id in {str(tab["id"]) for tab in self._tabs} else str(self._tabs[0]["id"])
+        next_tab = (
+            tab_id
+            if tab_id in {str(tab["id"]) for tab in self._tabs}
+            else str(self._tabs[0]["id"])
+        )
         self._active_tab_id = next_tab
         if focus:
             self._pending_focus_panel_id = self._panel_ids_for_tab(next_tab)[0]
@@ -125,8 +152,8 @@ class PanelHost(Vertical):
         return self._active_tab_id
 
     def shutdown(self) -> None:
-        for panel in self._panels():
-            panel.dispose()
+        for panel_id, panel in self._panels_by_id.items():
+            self._safe_panel_call(panel_id, "dispose", panel.dispose)
 
     def available_tabs(self) -> list[tuple[str, str]]:
         return [(str(tab["id"]), str(tab["name"])) for tab in self._tabs]
@@ -149,12 +176,16 @@ class PanelHost(Vertical):
     def refresh_panel(self, panel_id: str) -> None:
         panel = self._panels_by_id.get(panel_id)
         if panel is not None:
-            panel.resume()
+            self._safe_panel_call(panel_id, "resume", panel.resume)
 
     def deliver_panel_result(self, panel_id: str, payload: dict[str, object]) -> None:
         panel = self._panels_by_id.get(panel_id)
         if panel is not None:
-            panel.apply_command_result(payload)
+            self._safe_panel_call(
+                panel_id,
+                "apply_command_result",
+                lambda p=panel, pl=payload: p.apply_command_result(pl),
+            )
 
     def focus_panel(self, panel_id: str) -> None:
         panel = self._panels_by_id.get(panel_id)
@@ -169,7 +200,9 @@ class PanelHost(Vertical):
             return
         current_id = self._active_panel().PANEL_ID
         if current_id in visible_panel_ids:
-            next_index = (visible_panel_ids.index(current_id) + 1) % len(visible_panel_ids)
+            next_index = (visible_panel_ids.index(current_id) + 1) % len(
+                visible_panel_ids
+            )
         else:
             next_index = 0
         self.focus_panel(visible_panel_ids[next_index])
@@ -179,7 +212,11 @@ class PanelHost(Vertical):
         if panel is not None:
             return panel
         visible_panel_ids = self._panel_ids_for_tab(self._active_tab_id)
-        active_panel_id = visible_panel_ids[0] if visible_panel_ids else self._tab_panel_id(self._active_tab_id)
+        active_panel_id = (
+            visible_panel_ids[0]
+            if visible_panel_ids
+            else self._tab_panel_id(self._active_tab_id)
+        )
         panel = self._panels_by_id.get(active_panel_id)
         if panel is not None:
             return panel
@@ -188,7 +225,9 @@ class PanelHost(Vertical):
     def _panels(self) -> list[PanelContract]:
         return list(self._panels_by_id.values())
 
-    def _panel_snapshots(self, snapshot: dict[str, object]) -> dict[str, dict[str, object]]:
+    def _panel_snapshots(
+        self, snapshot: dict[str, object]
+    ) -> dict[str, dict[str, object]]:
         raw_panels = snapshot.get("panels", {})
         if not isinstance(raw_panels, dict):
             raw_panels = {}
@@ -291,8 +330,12 @@ class PanelHost(Vertical):
     def _queue_layout_render(self) -> None:
         if not self.is_mounted or self._layout_render_scheduled:
             return
+        # In E2E tests or high-load, workers might delay rendering.
+        # We try to keep it as responsive as possible.
         self._layout_render_scheduled = True
-        self.run_worker(self._render_active_layout(), exclusive=True, group="panel-layout")
+        self.run_worker(
+            self._render_active_layout(), exclusive=True, group="panel-layout"
+        )
 
     async def _render_active_layout(self) -> None:
         try:
@@ -304,7 +347,7 @@ class PanelHost(Vertical):
                         await panel.remove()
                         await self._parking.mount(panel)
                     panel.display = False
-                    panel.suspend()
+                    self._safe_panel_call(panel.PANEL_ID, "suspend", panel.suspend)
             root_split = self._root_split_for_tab(self._active_tab_id)
             if root_split is None:
                 return
@@ -314,7 +357,7 @@ class PanelHost(Vertical):
                 if panel is None:
                     continue
                 panel.display = True
-                panel.resume()
+                self._safe_panel_call(panel_id, "resume", panel.resume)
             if self._pending_focus_panel_id:
                 panel = self._panels_by_id.get(self._pending_focus_panel_id)
                 if panel is not None and panel.PANEL_ID in visible_panel_ids:
@@ -340,10 +383,18 @@ class PanelHost(Vertical):
         children = raw_node.get("children", [])
         if not isinstance(children, list):
             children = []
-        if len(children) == 1 and isinstance(children[0], dict) and isinstance(children[0].get("panel_id"), str):
+        if (
+            len(children) == 1
+            and isinstance(children[0], dict)
+            and isinstance(children[0].get("panel_id"), str)
+        ):
             return await self._mount_node(parent, children[0])
 
-        container = Horizontal(classes="split-node") if orientation == "horizontal" else Vertical(classes="split-node")
+        container = (
+            Horizontal(classes="split-node")
+            if orientation == "horizontal"
+            else Vertical(classes="split-node")
+        )
         await parent.mount(container)
         mounted_children = []
         for child in children:
@@ -354,7 +405,12 @@ class PanelHost(Vertical):
         self._apply_child_ratios(container, mounted_children, raw_node)
         return container
 
-    def _apply_child_ratios(self, container: Vertical | Horizontal, children: list[object], raw_node: dict[str, object]) -> None:
+    def _apply_child_ratios(
+        self,
+        container: Vertical | Horizontal,
+        children: list[object],
+        raw_node: dict[str, object],
+    ) -> None:
         if len(children) != 2:
             return
         ratio = raw_node.get("ratio", 0.5)
@@ -383,3 +439,30 @@ class PanelHost(Vertical):
                 if isinstance(root_split, dict):
                     return root_split
         return None
+
+    # ------------------------------------------------------------------
+    # Error boundary
+    # ------------------------------------------------------------------
+
+    def _safe_panel_call(
+        self,
+        panel_id: str,
+        operation: str,
+        fn: Callable[[], object],
+    ) -> None:
+        """Execute *fn* with a per-panel error boundary.
+
+        If *fn* raises, the exception is logged with full traceback and
+        the panel is marked as failed. Other panels remain unaffected.
+        """
+        try:
+            fn()
+        except Exception as exc:
+            self._failed_panels.add(panel_id)
+            logger.error(
+                "Panel '%s' failed during '%s': %s",
+                panel_id,
+                operation,
+                exc,
+                exc_info=True,
+            )

@@ -2,16 +2,18 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
 
-from cockpit.application.dispatch.event_bus import EventBus
-from cockpit.application.services.component_watch_service import ComponentWatchService
-from cockpit.domain.models.datasource import DataSourceOperationResult
-from cockpit.infrastructure.docker.docker_adapter import DockerContainerDiagnosticsSnapshot
-from cockpit.infrastructure.persistence.ops_repositories import (
+from cockpit.core.dispatch.event_bus import EventBus
+from cockpit.ops.services.component_watch_service import ComponentWatchService
+from cockpit.datasources.models.datasource import DataSourceOperationResult
+from cockpit.infrastructure.docker.docker_adapter import (
+    DockerContainerDiagnosticsSnapshot,
+)
+from cockpit.ops.repositories import (
     ComponentWatchRepository,
     OperationDiagnosticsRepository,
 )
-from cockpit.infrastructure.persistence.sqlite_store import SQLiteStore
-from cockpit.shared.enums import SessionTargetKind, WatchProbeOutcome
+from cockpit.core.persistence.sqlite_store import SQLiteStore
+from cockpit.core.enums import SessionTargetKind, WatchProbeOutcome
 
 
 class _FakeDatasourceService:
@@ -32,7 +34,9 @@ class _FakeDockerAdapter:
     def __init__(self, *, healthy: bool) -> None:
         self._healthy = healthy
 
-    def collect_diagnostics(self, *, target_kind=SessionTargetKind.LOCAL, target_ref=None):
+    def collect_diagnostics(
+        self, *, target_kind=SessionTargetKind.LOCAL, target_ref=None
+    ):
         del target_kind, target_ref
         return [
             DockerContainerDiagnosticsSnapshot(

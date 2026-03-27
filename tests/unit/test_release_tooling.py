@@ -36,7 +36,9 @@ class ReleaseToolingTests(unittest.TestCase):
             dependencies = export_runtime_requirements(pyproject, output)
 
             self.assertEqual(dependencies, ["textual>=0.58.0", "PyYAML>=6.0"])
-            self.assertEqual(output.read_text(encoding="utf-8"), "textual>=0.58.0\nPyYAML>=6.0\n")
+            self.assertEqual(
+                output.read_text(encoding="utf-8"), "textual>=0.58.0\nPyYAML>=6.0\n"
+            )
 
     def test_sync_directory_replaces_stale_destination(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -66,15 +68,34 @@ class ReleaseToolingTests(unittest.TestCase):
             checksums = release_root / "SHA256SUMS.txt"
 
             files = collect_release_files(release_root)
-            write_release_manifest(files, manifest, root=release_root, version="0.1.0", git_ref="refs/tags/v0.1.0")
-            write_sha256_manifest(collect_release_files(release_root, exclude_names=(checksums.name,), exclude_suffixes=(".sigstore.json",)), checksums, root=release_root)
+            write_release_manifest(
+                files,
+                manifest,
+                root=release_root,
+                version="0.1.0",
+                git_ref="refs/tags/v0.1.0",
+            )
+            write_sha256_manifest(
+                collect_release_files(
+                    release_root,
+                    exclude_names=(checksums.name,),
+                    exclude_suffixes=(".sigstore.json",),
+                ),
+                checksums,
+                root=release_root,
+            )
 
             manifest_payload = json.loads(manifest.read_text(encoding="utf-8"))
             paths = [artifact["path"] for artifact in manifest_payload["artifacts"]]
             self.assertIn("dist/cockpit_cli-0.1.0-py3-none-any.whl", paths)
             self.assertIn("sbom.json", paths)
             checksum_lines = checksums.read_text(encoding="utf-8").splitlines()
-            self.assertTrue(any(line.endswith("  dist/cockpit_cli-0.1.0-py3-none-any.whl") for line in checksum_lines))
+            self.assertTrue(
+                any(
+                    line.endswith("  dist/cockpit_cli-0.1.0-py3-none-any.whl")
+                    for line in checksum_lines
+                )
+            )
 
 
 if __name__ == "__main__":

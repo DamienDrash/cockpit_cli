@@ -1,12 +1,16 @@
 import unittest
 from datetime import UTC, datetime
 
-from cockpit.domain.commands.command import Command, CommandAuditEntry, CommandHistoryEntry
-from cockpit.domain.models.layout import Layout, PanelRef, SplitNode, TabLayout
-from cockpit.domain.models.panel_state import PanelState
-from cockpit.domain.models.session import Session
-from cockpit.domain.models.workspace import SessionTarget, Workspace
-from cockpit.shared.enums import (
+from cockpit.core.command import (
+    Command,
+    CommandAuditEntry,
+    CommandHistoryEntry,
+)
+from cockpit.workspace.models.layout import Layout, PanelRef, SplitNode, TabLayout
+from cockpit.core.panel_state import PanelState
+from cockpit.workspace.models.session import Session
+from cockpit.workspace.models.workspace import SessionTarget, Workspace
+from cockpit.core.enums import (
     CommandSource,
     PanelPersistPolicy,
     SessionStatus,

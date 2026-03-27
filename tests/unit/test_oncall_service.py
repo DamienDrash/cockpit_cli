@@ -3,16 +3,19 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
 
-from cockpit.application.services.oncall_service import OnCallService, OnCallValidationError
-from cockpit.domain.models.escalation import EscalationPolicy
-from cockpit.domain.models.oncall import (
+from cockpit.ops.services.oncall_service import (
+    OnCallService,
+    OnCallValidationError,
+)
+from cockpit.ops.models.escalation import EscalationPolicy
+from cockpit.ops.models.oncall import (
     OnCallSchedule,
     OperatorPerson,
     OperatorTeam,
     RotationRule,
     TeamMembership,
 )
-from cockpit.infrastructure.persistence.ops_repositories import (
+from cockpit.ops.repositories import (
     EscalationPolicyRepository,
     OnCallScheduleRepository,
     OperatorPersonRepository,
@@ -22,8 +25,12 @@ from cockpit.infrastructure.persistence.ops_repositories import (
     ScheduleOverrideRepository,
     TeamMembershipRepository,
 )
-from cockpit.infrastructure.persistence.sqlite_store import SQLiteStore
-from cockpit.shared.enums import RotationIntervalKind, ScheduleCoverageKind, TeamMembershipRole
+from cockpit.core.persistence.sqlite_store import SQLiteStore
+from cockpit.core.enums import (
+    RotationIntervalKind,
+    ScheduleCoverageKind,
+    TeamMembershipRole,
+)
 
 
 def _build_service(store: SQLiteStore) -> OnCallService:

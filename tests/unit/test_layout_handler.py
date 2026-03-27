@@ -1,16 +1,16 @@
 import unittest
 
-from cockpit.application.dispatch.event_bus import EventBus
-from cockpit.application.handlers.layout_handlers import (
+from cockpit.core.dispatch.event_bus import EventBus
+from cockpit.workspace.handlers.layout_handlers import (
     AdjustActiveLayoutRatioHandler,
     ApplyDefaultLayoutHandler,
     FocusNextPanelHandler,
     ToggleActiveLayoutOrientationHandler,
 )
-from cockpit.application.handlers.base import CommandContextError
-from cockpit.domain.commands.command import Command
-from cockpit.domain.events.domain_events import LayoutApplied
-from cockpit.shared.enums import CommandSource
+from cockpit.core.dispatch.handler_base import CommandContextError
+from cockpit.core.command import Command
+from cockpit.workspace.events import LayoutApplied
+from cockpit.core.enums import CommandSource
 
 
 class ApplyDefaultLayoutHandlerTests(unittest.TestCase):
@@ -68,7 +68,9 @@ class ApplyDefaultLayoutHandlerTests(unittest.TestCase):
         )
 
         self.assertTrue(result.success)
-        self.assertEqual(result.data["tabs"][0]["root_split"]["orientation"], "horizontal")
+        self.assertEqual(
+            result.data["tabs"][0]["root_split"]["orientation"], "horizontal"
+        )
 
     def test_adjusts_active_layout_ratio(self) -> None:
         handler = AdjustActiveLayoutRatioHandler(delta=0.1)

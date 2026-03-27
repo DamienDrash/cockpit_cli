@@ -2,11 +2,11 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
 
-from cockpit.application.services.layout_service import LayoutService
-from cockpit.domain.models.layout import Layout, PanelRef, SplitNode, TabLayout
-from cockpit.infrastructure.config.config_loader import ConfigLoader
-from cockpit.infrastructure.persistence.repositories import LayoutRepository
-from cockpit.infrastructure.persistence.sqlite_store import SQLiteStore
+from cockpit.workspace.services.layout_service import LayoutService
+from cockpit.workspace.models.layout import Layout, PanelRef, SplitNode, TabLayout
+from cockpit.workspace.config_loader import ConfigLoader
+from cockpit.workspace.repositories import LayoutRepository
+from cockpit.core.persistence.sqlite_store import SQLiteStore
 
 
 class LayoutServiceTests(unittest.TestCase):
@@ -125,5 +125,7 @@ class LayoutServiceTests(unittest.TestCase):
             )
 
             self.assertFalse(result["ok"])
-            self.assertIn("ghost-panel", " ".join(str(item) for item in result["errors"]))
+            self.assertIn(
+                "ghost-panel", " ".join(str(item) for item in result["errors"])
+            )
             store.close()

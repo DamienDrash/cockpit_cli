@@ -3,11 +3,13 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
 
-from cockpit.application.services.suppression_service import SuppressionService
-from cockpit.domain.models.notifications import NotificationCandidate
-from cockpit.infrastructure.persistence.ops_repositories import NotificationSuppressionRepository
-from cockpit.infrastructure.persistence.sqlite_store import SQLiteStore
-from cockpit.shared.enums import (
+from cockpit.notifications.services.suppression_service import SuppressionService
+from cockpit.notifications.models import NotificationCandidate
+from cockpit.ops.repositories import (
+    NotificationSuppressionRepository,
+)
+from cockpit.core.persistence.sqlite_store import SQLiteStore
+from cockpit.core.enums import (
     ComponentKind,
     IncidentSeverity,
     NotificationEventClass,

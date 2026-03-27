@@ -3,12 +3,15 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
 
-from cockpit.application.services.secret_service import SecretService
-from cockpit.domain.models.secret import VaultProfile
-from cockpit.infrastructure.persistence.repositories import WebAdminStateRepository
-from cockpit.infrastructure.persistence.sqlite_store import SQLiteStore
+from cockpit.datasources.services.secret_service import SecretService
+from cockpit.datasources.models.secret import VaultProfile
+from cockpit.workspace.repositories import WebAdminStateRepository
+from cockpit.core.persistence.sqlite_store import SQLiteStore
 from cockpit.infrastructure.secrets.cache_cipher import SecretCacheCipher
-from cockpit.infrastructure.secrets.vault_client import VaultAuthResult, VaultLeaseResult
+from cockpit.datasources.adapters.vault_client import (
+    VaultAuthResult,
+    VaultLeaseResult,
+)
 
 
 class FakeKeyring:
@@ -46,7 +49,9 @@ class FakeVaultClient:
             metadata={"display_name": "token"},
         )
 
-    def login_approle(self, *, mount: str, role_id: str, secret_id: str) -> VaultAuthResult:
+    def login_approle(
+        self, *, mount: str, role_id: str, secret_id: str
+    ) -> VaultAuthResult:
         self.login_calls.append(("approle", (mount, role_id, secret_id)))
         return VaultAuthResult(
             token="approle-token",
@@ -66,7 +71,9 @@ class FakeVaultClient:
             metadata={"display_name": "jwt"},
         )
 
-    def kv_read(self, *, mount: str, path: str, token: str, version: int | None = None) -> dict[str, object]:
+    def kv_read(
+        self, *, mount: str, path: str, token: str, version: int | None = None
+    ) -> dict[str, object]:
         del version
         self.kv_reads.append((mount, path, token))
         return {
@@ -87,7 +94,9 @@ class FakeVaultClient:
         self.kv_writes.append((mount, path, dict(data)))
         return {"written": True}
 
-    def dynamic_credentials(self, *, mount: str, role: str, token: str) -> VaultLeaseResult:
+    def dynamic_credentials(
+        self, *, mount: str, role: str, token: str
+    ) -> VaultLeaseResult:
         self.dynamic_calls.append((mount, role))
         return VaultLeaseResult(
             lease_id="lease-1",
@@ -97,17 +106,23 @@ class FakeVaultClient:
             metadata={"token": token},
         )
 
-    def transit_encrypt(self, *, mount: str, key_name: str, token: str, plaintext_b64: str) -> dict[str, object]:
+    def transit_encrypt(
+        self, *, mount: str, key_name: str, token: str, plaintext_b64: str
+    ) -> dict[str, object]:
         del token, plaintext_b64
         self.transit_calls.append(("encrypt", f"{mount}/{key_name}"))
         return {"data": {"ciphertext": "vault:v1:abcd"}}
 
-    def transit_decrypt(self, *, mount: str, key_name: str, token: str, ciphertext: str) -> dict[str, object]:
+    def transit_decrypt(
+        self, *, mount: str, key_name: str, token: str, ciphertext: str
+    ) -> dict[str, object]:
         del token, ciphertext
         self.transit_calls.append(("decrypt", f"{mount}/{key_name}"))
         return {"data": {"plaintext": "c2VjcmV0"}}
 
-    def transit_sign(self, *, mount: str, key_name: str, token: str, input_b64: str) -> dict[str, object]:
+    def transit_sign(
+        self, *, mount: str, key_name: str, token: str, input_b64: str
+    ) -> dict[str, object]:
         del token, input_b64
         self.transit_calls.append(("sign", f"{mount}/{key_name}"))
         return {"data": {"signature": "vault:v1:signature"}}
@@ -125,7 +140,9 @@ class FakeVaultClient:
         self.transit_calls.append(("verify", f"{mount}/{key_name}"))
         return {"data": {"valid": True}}
 
-    def renew_self(self, *, token: str, increment_seconds: int | None = None) -> VaultAuthResult:
+    def renew_self(
+        self, *, token: str, increment_seconds: int | None = None
+    ) -> VaultAuthResult:
         del increment_seconds
         return VaultAuthResult(
             token=token,
@@ -135,7 +152,9 @@ class FakeVaultClient:
             metadata={"display_name": "renewed"},
         )
 
-    def renew_lease(self, *, lease_id: str, token: str, increment_seconds: int | None = None) -> VaultLeaseResult:
+    def renew_lease(
+        self, *, lease_id: str, token: str, increment_seconds: int | None = None
+    ) -> VaultLeaseResult:
         del token, increment_seconds
         return VaultLeaseResult(
             lease_id=lease_id,
@@ -285,14 +304,18 @@ class SecretServiceTests(unittest.TestCase):
                 value="secret",
             )
             renewed = service.renew_vault_lease("lease-1")
-            service.rotate_entry("dynamic-test", secret_value="ignored") if False else None
+            service.rotate_entry(
+                "dynamic-test", secret_value="ignored"
+            ) if False else None
 
             self.assertEqual(kv_value, "vault-secret")
             self.assertEqual(dynamic_value, "dyn-user")
             self.assertEqual(transit_result["ciphertext"], "vault:v1:abcd")
             self.assertEqual(renewed.lease_id, "lease-1")
             self.assertEqual(len(service.list_vault_leases()), 1)
-            self.assertEqual(service.vault_profile_health("ops-vault")["profile_id"], "ops-vault")
+            self.assertEqual(
+                service.vault_profile_health("ops-vault")["profile_id"], "ops-vault"
+            )
 
             service.logout_vault_profile("ops-vault", revoke=True)
             self.assertTrue(clients["ops-vault"].revoked_self)

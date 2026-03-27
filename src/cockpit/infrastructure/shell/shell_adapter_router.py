@@ -3,13 +3,15 @@
 from __future__ import annotations
 
 from cockpit.infrastructure.shell.base import ShellAdapter, ShellLaunchConfig
-from cockpit.shared.enums import SessionTargetKind
+from cockpit.core.enums import SessionTargetKind
 
 
 class ShellAdapterRouter:
     """Dispatch build requests to the correct target-specific shell adapter."""
 
-    def __init__(self, *, local_adapter: ShellAdapter, ssh_adapter: ShellAdapter) -> None:
+    def __init__(
+        self, *, local_adapter: ShellAdapter, ssh_adapter: ShellAdapter
+    ) -> None:
         self._local_adapter = local_adapter
         self._ssh_adapter = ssh_adapter
 

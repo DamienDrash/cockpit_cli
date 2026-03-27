@@ -2,7 +2,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
 
-from cockpit.infrastructure.config.config_loader import ConfigLoader
+from cockpit.workspace.config_loader import ConfigLoader
 
 
 class ConfigLoaderTests(unittest.TestCase):
@@ -12,7 +12,9 @@ class ConfigLoaderTests(unittest.TestCase):
             (root / "config" / "layouts").mkdir(parents=True)
             (root / "config" / "themes").mkdir(parents=True)
             (root / "src").mkdir()
-            (root / "pyproject.toml").write_text("[project]\nname='cockpit'\n", encoding="utf-8")
+            (root / "pyproject.toml").write_text(
+                "[project]\nname='cockpit'\n", encoding="utf-8"
+            )
             (root / "config" / "layouts" / "default.yaml").write_text(
                 "id: default\nname: Default\n",
                 encoding="utf-8",
@@ -42,7 +44,9 @@ class ConfigLoaderTests(unittest.TestCase):
 
             self.assertEqual(loader.load_layout_definition()["id"], "default")
             self.assertEqual(loader.load_keybindings()["bindings"][0]["key"], "ctrl+k")
-            self.assertEqual(loader.load_command_catalog()["commands"][0], "workspace.open")
+            self.assertEqual(
+                loader.load_command_catalog()["commands"][0], "workspace.open"
+            )
             self.assertEqual(
                 loader.load_connections()["connections"]["dev"]["target"],
                 "dev@example.com",

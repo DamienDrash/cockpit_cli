@@ -1,19 +1,18 @@
 import unittest
 
-from cockpit.application.handlers.base import ConfirmationRequiredError
-from cockpit.application.handlers.docker_handlers import (
+from cockpit.core.dispatch.handler_base import ConfirmationRequiredError
+from cockpit.infrastructure.docker.docker_handlers import (
     RemoveDockerContainerHandler,
     RestartDockerContainerHandler,
     StopDockerContainerHandler,
 )
-from cockpit.domain.commands.command import Command
-from cockpit.domain.models.policy import GuardDecision
+from cockpit.core.command import Command
+from cockpit.ops.models.policy import GuardDecision
 from cockpit.infrastructure.docker.docker_adapter import DockerActionResult
-from cockpit.shared.enums import (
+from cockpit.core.enums import (
     CommandSource,
     GuardDecisionOutcome,
     SessionTargetKind,
-    TargetRiskLevel,
 )
 
 
@@ -116,7 +115,9 @@ class RestartDockerContainerHandlerTests(unittest.TestCase):
             ctx.exception.payload["pending_command_name"],
             "docker.restart",
         )
-        self.assertIn("Restart container web?", ctx.exception.payload["confirmation_message"])
+        self.assertIn(
+            "Restart container web?", ctx.exception.payload["confirmation_message"]
+        )
         self.assertIn("PROD", str(ctx.exception))
 
     def test_restarts_selected_container_after_confirmation(self) -> None:

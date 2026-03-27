@@ -2,19 +2,19 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
 
-from cockpit.application.dispatch.command_dispatcher import CommandDispatcher
-from cockpit.application.dispatch.event_bus import EventBus
-from cockpit.application.handlers.base import DispatchResult
-from cockpit.application.services.activity_log_service import ActivityLogService
-from cockpit.domain.commands.command import Command
-from cockpit.domain.events.domain_events import WorkspaceOpened
-from cockpit.domain.events.runtime_events import PTYStartupFailed
-from cockpit.infrastructure.persistence.repositories import (
+from cockpit.core.dispatch.command_dispatcher import CommandDispatcher
+from cockpit.core.dispatch.event_bus import EventBus
+from cockpit.core.dispatch.handler_base import DispatchResult
+from cockpit.workspace.services.activity_log_service import ActivityLogService
+from cockpit.core.command import Command
+from cockpit.workspace.events import WorkspaceOpened
+from cockpit.core.events.runtime import PTYStartupFailed
+from cockpit.workspace.repositories import (
     AuditLogRepository,
     CommandHistoryRepository,
 )
-from cockpit.infrastructure.persistence.sqlite_store import SQLiteStore
-from cockpit.shared.enums import CommandSource, SessionTargetKind
+from cockpit.core.persistence.sqlite_store import SQLiteStore
+from cockpit.core.enums import CommandSource, SessionTargetKind
 
 
 class ActivityLogServiceTests(unittest.TestCase):

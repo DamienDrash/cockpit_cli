@@ -2,13 +2,19 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
 
-from cockpit.application.services.guard_policy_service import GuardPolicyService
-from cockpit.application.services.response_executor_service import ResponseExecutorService
-from cockpit.domain.models.health import IncidentRecord
-from cockpit.domain.models.response import ResponseRun, ResponseStepRun, RunbookStepDefinition
-from cockpit.infrastructure.persistence.ops_repositories import GuardDecisionRepository
-from cockpit.infrastructure.persistence.sqlite_store import SQLiteStore
-from cockpit.shared.enums import (
+from cockpit.ops.services.guard_policy_service import GuardPolicyService
+from cockpit.ops.services.response_executor_service import (
+    ResponseExecutorService,
+)
+from cockpit.ops.models.health import IncidentRecord
+from cockpit.ops.models.response import (
+    ResponseRun,
+    ResponseStepRun,
+    RunbookStepDefinition,
+)
+from cockpit.ops.repositories import GuardDecisionRepository
+from cockpit.core.persistence.sqlite_store import SQLiteStore
+from cockpit.core.enums import (
     ComponentKind,
     IncidentSeverity,
     IncidentStatus,
@@ -82,7 +88,9 @@ class ResponseExecutorServiceTests(unittest.TestCase):
             )
 
             self.assertTrue(outcome.result.success)
-            self.assertEqual(outcome.result.payload["instructions"], "Investigate incident inc-1")
+            self.assertEqual(
+                outcome.result.payload["instructions"], "Investigate incident inc-1"
+            )
             self.assertEqual(len(operations.calls), 1)
 
     def test_shell_destructive_step_is_blocked_by_guard_policy(self) -> None:

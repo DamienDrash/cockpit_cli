@@ -36,7 +36,12 @@ def export_runtime_requirements(pyproject_path: Path, output_path: Path) -> list
     return dependencies
 
 
-def collect_release_files(root: Path, *, exclude_names: Sequence[str] = (), exclude_suffixes: Sequence[str] = ()) -> list[Path]:
+def collect_release_files(
+    root: Path,
+    *,
+    exclude_names: Sequence[str] = (),
+    exclude_suffixes: Sequence[str] = (),
+) -> list[Path]:
     """Collect release files in stable order."""
 
     files: list[Path] = []
@@ -51,7 +56,9 @@ def collect_release_files(root: Path, *, exclude_names: Sequence[str] = (), excl
     return files
 
 
-def write_sha256_manifest(paths: Iterable[Path], output_path: Path, *, root: Path | None = None) -> None:
+def write_sha256_manifest(
+    paths: Iterable[Path], output_path: Path, *, root: Path | None = None
+) -> None:
     """Write a sha256 checksum manifest."""
 
     lines: list[str] = []
@@ -90,7 +97,9 @@ def write_release_manifest(
         "artifacts": artifacts,
     }
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    output_path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    output_path.write_text(
+        json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    )
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -98,7 +107,9 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     sync_parser = subparsers.add_parser("sync-layout-editor")
-    sync_parser.add_argument("--source", type=Path, default=Path("web/layout-editor/dist"))
+    sync_parser.add_argument(
+        "--source", type=Path, default=Path("web/layout-editor/dist")
+    )
     sync_parser.add_argument(
         "--destination",
         type=Path,
@@ -106,7 +117,9 @@ def build_parser() -> argparse.ArgumentParser:
     )
 
     requirements_parser = subparsers.add_parser("export-runtime-requirements")
-    requirements_parser.add_argument("--pyproject", type=Path, default=Path("pyproject.toml"))
+    requirements_parser.add_argument(
+        "--pyproject", type=Path, default=Path("pyproject.toml")
+    )
     requirements_parser.add_argument("--output", type=Path, required=True)
 
     manifest_parser = subparsers.add_parser("manifest")

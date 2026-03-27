@@ -11,9 +11,13 @@ if TEXTUAL_AVAILABLE:
     from cockpit.ui.widgets.embedded_terminal import EmbeddedTerminal
 
 
-@unittest.skipUnless(TEXTUAL_AVAILABLE, "textual must be installed for embedded terminal tests")
+@unittest.skipUnless(
+    TEXTUAL_AVAILABLE, "textual must be installed for embedded terminal tests"
+)
 class EmbeddedTerminalWidgetTests(unittest.IsolatedAsyncioTestCase):
-    async def test_viewport_navigation_preserves_scrollback_until_scrolled_to_end(self) -> None:
+    async def test_viewport_navigation_preserves_scrollback_until_scrolled_to_end(
+        self,
+    ) -> None:
         app = TerminalWidgetTestApp()
 
         async with app.run_test(size=(80, 8)) as pilot:
@@ -202,6 +206,7 @@ class EmbeddedTerminalWidgetTests(unittest.IsolatedAsyncioTestCase):
 
 
 if TEXTUAL_AVAILABLE:
+
     class TerminalWidgetTestApp(App[None]):
         CSS = """
         Screen {

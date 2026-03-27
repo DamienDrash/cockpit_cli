@@ -1,19 +1,19 @@
 import unittest
 
-from cockpit.application.dispatch.command_dispatcher import (
+from cockpit.core.dispatch.command_dispatcher import (
     CommandDispatcher,
     UnknownCommandError,
 )
-from cockpit.application.dispatch.event_bus import EventBus
-from cockpit.application.handlers.base import (
+from cockpit.core.dispatch.event_bus import EventBus
+from cockpit.core.dispatch.handler_base import (
     CommandContextError,
     ConfirmationRequiredError,
     DispatchResult,
 )
-from cockpit.domain.commands.command import Command
-from cockpit.domain.events.domain_events import CommandExecuted
-from cockpit.domain.events.runtime_events import StatusMessagePublished
-from cockpit.shared.enums import CommandSource
+from cockpit.core.command import Command
+from cockpit.workspace.events import CommandExecuted
+from cockpit.core.events.runtime import StatusMessagePublished
+from cockpit.core.enums import CommandSource
 
 
 class CommandDispatcherTests(unittest.TestCase):
@@ -31,7 +31,9 @@ class CommandDispatcherTests(unittest.TestCase):
         )
 
         self.assertTrue(result.success)
-        self.assertTrue(any(isinstance(event, CommandExecuted) for event in bus.published))
+        self.assertTrue(
+            any(isinstance(event, CommandExecuted) for event in bus.published)
+        )
 
     def test_turns_context_errors_into_failure_results(self) -> None:
         bus = EventBus()
@@ -76,7 +78,9 @@ class CommandDispatcherTests(unittest.TestCase):
         self.assertTrue(result.data["confirmation_required"])
         self.assertEqual(result.data["pending_command_name"], "docker.restart")
         self.assertEqual(observed, [])
-        self.assertFalse(any(isinstance(event, CommandExecuted) for event in bus.published))
+        self.assertFalse(
+            any(isinstance(event, CommandExecuted) for event in bus.published)
+        )
         self.assertTrue(
             any(
                 isinstance(event, StatusMessagePublished)

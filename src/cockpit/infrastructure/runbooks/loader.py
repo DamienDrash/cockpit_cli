@@ -7,7 +7,7 @@ from pathlib import Path
 
 import yaml
 
-from cockpit.domain.models.response import RunbookDefinition
+from cockpit.ops.models.response import RunbookDefinition
 from cockpit.infrastructure.runbooks.schema import validate_runbook_payload
 
 
@@ -38,4 +38,3 @@ class RunbookLoader:
                 )
             )
         return definitions
-

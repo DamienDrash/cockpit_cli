@@ -2,11 +2,16 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
 
-from cockpit.application.services.runbook_catalog_service import RunbookCatalogService
-from cockpit.domain.models.health import IncidentRecord
-from cockpit.infrastructure.persistence.ops_repositories import RunbookCatalogRepository
-from cockpit.infrastructure.persistence.sqlite_store import SQLiteStore
-from cockpit.shared.enums import ComponentKind, IncidentSeverity, IncidentStatus, TargetRiskLevel
+from cockpit.ops.services.runbook_catalog_service import RunbookCatalogService
+from cockpit.ops.models.health import IncidentRecord
+from cockpit.ops.repositories import RunbookCatalogRepository
+from cockpit.core.persistence.sqlite_store import SQLiteStore
+from cockpit.core.enums import (
+    ComponentKind,
+    IncidentSeverity,
+    IncidentStatus,
+    TargetRiskLevel,
+)
 
 
 class RunbookCatalogServiceTests(unittest.TestCase):

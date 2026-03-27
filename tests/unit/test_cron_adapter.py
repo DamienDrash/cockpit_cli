@@ -3,8 +3,8 @@ import unittest
 from unittest.mock import patch
 
 from cockpit.infrastructure.cron.cron_adapter import CronAdapter
-from cockpit.infrastructure.ssh.command_runner import SSHCommandResult
-from cockpit.shared.enums import SessionTargetKind
+from cockpit.datasources.adapters.ssh_command_runner import SSHCommandResult
+from cockpit.core.enums import SessionTargetKind
 
 
 class FakeSSHCommandRunner:
@@ -66,7 +66,9 @@ class CronAdapterTests(unittest.TestCase):
 
     def test_reports_missing_crontab_binary_cleanly(self) -> None:
         adapter = CronAdapter()
-        with patch("cockpit.infrastructure.cron.cron_adapter.subprocess.run") as run_mock:
+        with patch(
+            "cockpit.infrastructure.cron.cron_adapter.subprocess.run"
+        ) as run_mock:
             run_mock.side_effect = FileNotFoundError()
             snapshot = adapter.list_jobs()
 
@@ -78,12 +80,12 @@ class CronAdapterTests(unittest.TestCase):
             ssh_command_runner=FakeSSHCommandRunner(
                 [
                     SSHCommandResult(
-                    target_ref="dev@example.com",
-                    command="crontab -l",
-                    returncode=0,
-                    stdout="@daily /usr/local/bin/cleanup\n",
-                    stderr="",
-                )
+                        target_ref="dev@example.com",
+                        command="crontab -l",
+                        returncode=0,
+                        stdout="@daily /usr/local/bin/cleanup\n",
+                        stderr="",
+                    )
                 ]
             )
         )

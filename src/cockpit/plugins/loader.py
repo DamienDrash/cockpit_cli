@@ -8,8 +8,8 @@ import importlib
 from pathlib import Path
 from typing import Any, Protocol
 
-from cockpit.application.dispatch.command_dispatcher import CommandDispatcher
-from cockpit.domain.models.plugin import PluginManifest
+from cockpit.core.dispatch.command_dispatcher import CommandDispatcher
+from cockpit.plugins.models import PluginManifest
 from cockpit.ui.panels.registry import PanelRegistry, PanelSpec
 
 
@@ -76,8 +76,7 @@ class PluginLoader:
 
     def _load_register_hook(self, module_name: str) -> PluginRegistrationHook:
         if self._allowed_module_prefixes and not any(
-            module_name.startswith(prefix)
-            for prefix in self._allowed_module_prefixes
+            module_name.startswith(prefix) for prefix in self._allowed_module_prefixes
         ):
             raise ValueError(
                 f"Plugin module '{module_name}' is not permitted in the in-process loader."
@@ -108,9 +107,25 @@ class PluginLoader:
                     if raw_manifest.get("summary") is not None
                     else None
                 ),
-                panels=[str(item) for item in raw_manifest.get("panels", []) if isinstance(item, str)],
-                commands=[str(item) for item in raw_manifest.get("commands", []) if isinstance(item, str)],
-                datasources=[str(item) for item in raw_manifest.get("datasources", []) if isinstance(item, str)],
-                admin_pages=[str(item) for item in raw_manifest.get("admin_pages", []) if isinstance(item, str)],
+                panels=[
+                    str(item)
+                    for item in raw_manifest.get("panels", [])
+                    if isinstance(item, str)
+                ],
+                commands=[
+                    str(item)
+                    for item in raw_manifest.get("commands", [])
+                    if isinstance(item, str)
+                ],
+                datasources=[
+                    str(item)
+                    for item in raw_manifest.get("datasources", [])
+                    if isinstance(item, str)
+                ],
+                admin_pages=[
+                    str(item)
+                    for item in raw_manifest.get("admin_pages", [])
+                    if isinstance(item, str)
+                ],
             )
         return None

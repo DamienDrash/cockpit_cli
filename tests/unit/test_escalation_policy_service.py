@@ -3,17 +3,17 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
 
-from cockpit.application.services.escalation_policy_service import (
+from cockpit.ops.services.escalation_policy_service import (
     EscalationPolicyService,
     EscalationPolicyValidationError,
 )
-from cockpit.domain.models.escalation import EscalationPolicy, EscalationStep
-from cockpit.infrastructure.persistence.ops_repositories import (
+from cockpit.ops.models.escalation import EscalationPolicy, EscalationStep
+from cockpit.ops.repositories import (
     EscalationPolicyRepository,
     EscalationStepRepository,
 )
-from cockpit.infrastructure.persistence.sqlite_store import SQLiteStore
-from cockpit.shared.enums import EscalationTargetKind
+from cockpit.core.persistence.sqlite_store import SQLiteStore
+from cockpit.core.enums import EscalationTargetKind
 
 
 def _build_service(store: SQLiteStore) -> EscalationPolicyService:
@@ -91,7 +91,9 @@ class EscalationPolicyServiceTests(unittest.TestCase):
                 ),
                 datetime(2026, 3, 24, 12, 2, tzinfo=UTC),
             )
-            self.assertEqual(service.max_repeat_pages(policy=detail.policy, step=step), 3)
+            self.assertEqual(
+                service.max_repeat_pages(policy=detail.policy, step=step), 3
+            )
 
 
 if __name__ == "__main__":

@@ -2,14 +2,16 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
+
 from cockpit.terminal.engine.factory import create_terminal_engine
 
 
 class TerminalBuffer:
     """Compatibility wrapper for legacy widget call sites."""
 
-    def __init__(self) -> None:
-        self._engine = create_terminal_engine()
+    def __init__(self, on_input: Callable[[str], None] | None = None) -> None:
+        self._engine = create_terminal_engine(on_input=on_input)
 
     def reset(self) -> None:
         self._engine.reset()

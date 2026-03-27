@@ -4,8 +4,8 @@ from threading import Event
 import time
 import unittest
 
-from cockpit.application.dispatch.event_bus import EventBus
-from cockpit.domain.events.runtime_events import (
+from cockpit.core.dispatch.event_bus import EventBus
+from cockpit.core.events.runtime import (
     PTYStarted,
     PTYStartupFailed,
     ProcessOutputReceived,
@@ -16,7 +16,7 @@ from cockpit.infrastructure.shell.local_shell_adapter import LocalShellAdapter
 from cockpit.runtime.pty_manager import PTYManager
 from cockpit.runtime.stream_router import StreamRouter
 from cockpit.runtime.task_supervisor import TaskSupervisor
-from cockpit.shared.enums import SessionTargetKind
+from cockpit.core.enums import SessionTargetKind
 
 
 class PTYManagerTests(unittest.TestCase):
@@ -165,7 +165,9 @@ class PTYManagerTests(unittest.TestCase):
 
             self.assertIsNotNone(session)
             self.assertTrue(exited.wait(2.0))
-            self.assertTrue(self._wait_for(lambda: manager.get_session("work-panel") is None))
+            self.assertTrue(
+                self._wait_for(lambda: manager.get_session("work-panel") is None)
+            )
             manager.shutdown()
 
     def test_starts_remote_session_and_preserves_target_metadata(self) -> None:
@@ -224,6 +226,7 @@ class PTYManagerTests(unittest.TestCase):
                 return True
             time.sleep(0.05)
         return bool(predicate())
+
 
 class FakeRemoteShellAdapter:
     def build_launch_config(

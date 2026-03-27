@@ -3,8 +3,10 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
 
-from cockpit.application.services.oncall_resolution_service import OnCallResolutionService
-from cockpit.domain.models.oncall import (
+from cockpit.ops.services.oncall_resolution_service import (
+    OnCallResolutionService,
+)
+from cockpit.ops.models.oncall import (
     OnCallSchedule,
     OperatorContactTarget,
     OperatorPerson,
@@ -13,7 +15,7 @@ from cockpit.domain.models.oncall import (
     RotationRule,
     ScheduleOverride,
 )
-from cockpit.infrastructure.persistence.ops_repositories import (
+from cockpit.ops.repositories import (
     OnCallScheduleRepository,
     OperatorPersonRepository,
     OperatorTeamRepository,
@@ -21,8 +23,8 @@ from cockpit.infrastructure.persistence.ops_repositories import (
     RotationRuleRepository,
     ScheduleOverrideRepository,
 )
-from cockpit.infrastructure.persistence.sqlite_store import SQLiteStore
-from cockpit.shared.enums import (
+from cockpit.core.persistence.sqlite_store import SQLiteStore
+from cockpit.core.enums import (
     ComponentKind,
     EscalationTargetKind,
     ResolutionOutcome,
@@ -96,7 +98,9 @@ class OnCallResolutionServiceTests(unittest.TestCase):
                     id="opr-1",
                     display_name="Alice Example",
                     handle="alice",
-                    contact_targets=(OperatorContactTarget(channel_id="slack-alice", label="Slack"),),
+                    contact_targets=(
+                        OperatorContactTarget(channel_id="slack-alice", label="Slack"),
+                    ),
                 )
             )
             person_repo.save(
@@ -104,7 +108,9 @@ class OnCallResolutionServiceTests(unittest.TestCase):
                     id="opr-2",
                     display_name="Bob Example",
                     handle="bob",
-                    contact_targets=(OperatorContactTarget(channel_id="slack-bob", label="Slack"),),
+                    contact_targets=(
+                        OperatorContactTarget(channel_id="slack-bob", label="Slack"),
+                    ),
                 )
             )
             schedule_repo.save(
@@ -157,9 +163,15 @@ class OnCallResolutionServiceTests(unittest.TestCase):
             rotation_repo = RotationRuleRepository(store)
             override_repo = ScheduleOverrideRepository(store)
             team_repo.save(OperatorTeam(id="team-1", name="Platform Ops"))
-            person_repo.save(OperatorPerson(id="opr-1", display_name="Alice", handle="alice"))
-            person_repo.save(OperatorPerson(id="opr-2", display_name="Bob", handle="bob"))
-            person_repo.save(OperatorPerson(id="opr-3", display_name="Carol", handle="carol"))
+            person_repo.save(
+                OperatorPerson(id="opr-1", display_name="Alice", handle="alice")
+            )
+            person_repo.save(
+                OperatorPerson(id="opr-2", display_name="Bob", handle="bob")
+            )
+            person_repo.save(
+                OperatorPerson(id="opr-3", display_name="Carol", handle="carol")
+            )
             schedule_repo.save(
                 OnCallSchedule(
                     id="sch-1",

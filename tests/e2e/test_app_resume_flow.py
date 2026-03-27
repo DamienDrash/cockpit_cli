@@ -10,8 +10,12 @@ TEXTUAL_AVAILABLE = importlib.util.find_spec("textual") is not None
 
 if TEXTUAL_AVAILABLE:
     from cockpit.bootstrap import build_container
-    from cockpit.infrastructure.cron.cron_adapter import CronAdapter, CronJob, CronSnapshot
-    from cockpit.infrastructure.db.database_adapter import (
+    from cockpit.infrastructure.cron.cron_adapter import (
+        CronAdapter,
+        CronJob,
+        CronSnapshot,
+    )
+    from cockpit.datasources.adapters.database_adapter import (
         DatabaseCatalogSnapshot,
         DatabaseQueryResult,
     )
@@ -25,8 +29,8 @@ if TEXTUAL_AVAILABLE:
         LocalShellAdapter,
     )
     from cockpit.infrastructure.shell.base import ShellLaunchConfig
-    from cockpit.infrastructure.ssh.command_runner import SSHCommandResult
-    from cockpit.shared.enums import SessionTargetKind
+    from cockpit.datasources.adapters.ssh_command_runner import SSHCommandResult
+    from cockpit.core.enums import SessionTargetKind
     from cockpit.ui.panels.curl_panel import CurlPanel
     from cockpit.ui.panels.db_panel import DBPanel
     from cockpit.ui.panels.docker_panel import DockerPanel
@@ -41,7 +45,6 @@ if TEXTUAL_AVAILABLE:
     from cockpit.ui.widgets.file_explorer import FileExplorer
     from cockpit.ui.widgets.slash_input import SlashInput
     from cockpit.ui.widgets.tab_bar import TabBar
-
 
     class StaticShellAdapter(LocalShellAdapter):
         def build_launch_config(
@@ -85,7 +88,6 @@ if TEXTUAL_AVAILABLE:
                 env=env,
             )
 
-
     class FakeSSHCommandRunner:
         def run(
             self,
@@ -96,7 +98,9 @@ if TEXTUAL_AVAILABLE:
         ) -> SSHCommandResult:
             del timeout_seconds
             if "pwd" in command and "ls -1Ap" in command:
-                browser_path = "/srv/app/current" if "/srv/app/current" in command else "/srv/app"
+                browser_path = (
+                    "/srv/app/current" if "/srv/app/current" in command else "/srv/app"
+                )
                 listing = "current/\nREADME.md\nsrc/\n"
                 if browser_path == "/srv/app/current":
                     listing = "api/\nrelease.txt\n"
@@ -130,7 +134,6 @@ if TEXTUAL_AVAILABLE:
                 stdout="",
                 stderr="unsupported test command",
             )
-
 
     class FakeCronAdapter(CronAdapter):
         def list_jobs(
@@ -170,7 +173,9 @@ if TEXTUAL_AVAILABLE:
         ) -> DockerRuntimeSnapshot:
             del target_kind, target_ref
             web_restarts = self._restart_counts.get("abc123", 0)
-            web_status = "Up 10 minutes" if web_restarts == 0 else "Up 0 seconds (restarted)"
+            web_status = (
+                "Up 10 minutes" if web_restarts == 0 else "Up 0 seconds (restarted)"
+            )
             return DockerRuntimeSnapshot(
                 containers=[
                     DockerContainerSummary(
@@ -203,9 +208,10 @@ if TEXTUAL_AVAILABLE:
             target_ref: str | None = None,
         ) -> DockerActionResult:
             del target_kind, target_ref
-            self._restart_counts[container_id] = self._restart_counts.get(container_id, 0) + 1
+            self._restart_counts[container_id] = (
+                self._restart_counts.get(container_id, 0) + 1
+            )
             return DockerActionResult(success=True, message=f"restarted {container_id}")
-
 
     class FakeDatabaseAdapter:
         def __init__(self) -> None:
@@ -238,7 +244,9 @@ if TEXTUAL_AVAILABLE:
             del target_kind, target_ref, row_limit
             self.calls.append(query)
             lowered = query.lower()
-            if lowered.startswith(("insert", "update", "delete", "create", "alter", "drop")):
+            if lowered.startswith(
+                ("insert", "update", "delete", "create", "alter", "drop")
+            ):
                 return DatabaseQueryResult(
                     success=True,
                     database_path=database_path,
@@ -255,7 +263,6 @@ if TEXTUAL_AVAILABLE:
                 row_count=2,
                 message="Returned 2 rows.",
             )
-
 
     class FakeHttpAdapter:
         def __init__(self) -> None:
@@ -287,10 +294,12 @@ if TEXTUAL_AVAILABLE:
 
 @unittest.skipUnless(TEXTUAL_AVAILABLE, "textual must be installed for e2e tests")
 class CockpitAppE2ETests(unittest.IsolatedAsyncioTestCase):
-    async def test_startup_open_command_loads_workspace_without_manual_input(self) -> None:
+    async def test_startup_open_command_loads_workspace_without_manual_input(
+        self,
+    ) -> None:
         with TemporaryDirectory() as temp_dir:
-            root, workspace_dir, _nested_dir, _selected_file = self._write_project_fixture(
-                Path(temp_dir)
+            root, workspace_dir, _nested_dir, _selected_file = (
+                self._write_project_fixture(Path(temp_dir))
             )
             app = self._build_app(
                 root,
@@ -308,8 +317,8 @@ class CockpitAppE2ETests(unittest.IsolatedAsyncioTestCase):
 
     async def test_open_workspace_renders_work_panel(self) -> None:
         with TemporaryDirectory() as temp_dir:
-            root, workspace_dir, nested_dir, _selected_file = self._write_project_fixture(
-                Path(temp_dir)
+            root, workspace_dir, nested_dir, _selected_file = (
+                self._write_project_fixture(Path(temp_dir))
             )
             app = self._build_app(root)
 
@@ -328,8 +337,8 @@ class CockpitAppE2ETests(unittest.IsolatedAsyncioTestCase):
 
     async def test_restart_restores_workspace_and_explorer_selection(self) -> None:
         with TemporaryDirectory() as temp_dir:
-            root, workspace_dir, nested_dir, selected_file = self._write_project_fixture(
-                Path(temp_dir)
+            root, workspace_dir, nested_dir, selected_file = (
+                self._write_project_fixture(Path(temp_dir))
             )
 
             first_app = self._build_app(root)
@@ -360,8 +369,8 @@ class CockpitAppE2ETests(unittest.IsolatedAsyncioTestCase):
 
     async def test_command_palette_dispatches_workspace_open(self) -> None:
         with TemporaryDirectory() as temp_dir:
-            root, _workspace_dir, _nested_dir, _selected_file = self._write_project_fixture(
-                Path(temp_dir)
+            root, _workspace_dir, _nested_dir, _selected_file = (
+                self._write_project_fixture(Path(temp_dir))
             )
             app = self._build_app(root)
 
@@ -384,10 +393,12 @@ class CockpitAppE2ETests(unittest.IsolatedAsyncioTestCase):
                 self.assertIn(f"Root: {root.resolve()}", context_text)
 
     @unittest.skipUnless(which("git"), "git must be installed for git panel e2e")
-    async def test_git_tab_displays_repository_status_and_restores_active_tab(self) -> None:
+    async def test_git_tab_displays_repository_status_and_restores_active_tab(
+        self,
+    ) -> None:
         with TemporaryDirectory() as temp_dir:
-            root, workspace_dir, _nested_dir, _selected_file = self._write_project_fixture(
-                Path(temp_dir)
+            root, workspace_dir, _nested_dir, _selected_file = (
+                self._write_project_fixture(Path(temp_dir))
             )
             self._init_git_repo(workspace_dir)
             tracked = workspace_dir / "tracked.txt"
@@ -415,10 +426,12 @@ class CockpitAppE2ETests(unittest.IsolatedAsyncioTestCase):
                 self.assertIn("[Git]", tab_text)
                 self.assertIn("tracked.txt", git_text)
 
-    async def test_logs_tab_displays_recent_activity_and_restores_active_tab(self) -> None:
+    async def test_logs_tab_displays_recent_activity_and_restores_active_tab(
+        self,
+    ) -> None:
         with TemporaryDirectory() as temp_dir:
-            root, workspace_dir, _nested_dir, _selected_file = self._write_project_fixture(
-                Path(temp_dir)
+            root, workspace_dir, _nested_dir, _selected_file = (
+                self._write_project_fixture(Path(temp_dir))
             )
 
             first_app = self._build_app(root)
@@ -443,10 +456,12 @@ class CockpitAppE2ETests(unittest.IsolatedAsyncioTestCase):
                 self.assertIn("[Logs]", tab_text)
                 self.assertIn("session.restored", logs_text)
 
-    async def test_docker_tab_displays_runtime_state_and_restores_active_tab(self) -> None:
+    async def test_docker_tab_displays_runtime_state_and_restores_active_tab(
+        self,
+    ) -> None:
         with TemporaryDirectory() as temp_dir:
-            root, workspace_dir, _nested_dir, _selected_file = self._write_project_fixture(
-                Path(temp_dir)
+            root, workspace_dir, _nested_dir, _selected_file = (
+                self._write_project_fixture(Path(temp_dir))
             )
 
             first_app = self._build_app(root)
@@ -470,10 +485,12 @@ class CockpitAppE2ETests(unittest.IsolatedAsyncioTestCase):
                 self.assertIn("[Docker]", tab_text)
                 self.assertIn("Containers:", docker_text)
 
-    async def test_docker_restart_requires_confirmation_and_refreshes_panel(self) -> None:
+    async def test_docker_restart_requires_confirmation_and_refreshes_panel(
+        self,
+    ) -> None:
         with TemporaryDirectory() as temp_dir:
-            root, workspace_dir, _nested_dir, _selected_file = self._write_project_fixture(
-                Path(temp_dir)
+            root, workspace_dir, _nested_dir, _selected_file = (
+                self._write_project_fixture(Path(temp_dir))
             )
 
             app = self._build_app(root)
@@ -489,7 +506,9 @@ class CockpitAppE2ETests(unittest.IsolatedAsyncioTestCase):
 
                 confirmation_bar = app.query_one(ConfirmationBar)
                 self.assertTrue(confirmation_bar.is_open)
-                self.assertIn("Restart container web?", self._rendered_text(confirmation_bar))
+                self.assertIn(
+                    "Restart container web?", self._rendered_text(confirmation_bar)
+                )
 
                 await pilot.press("enter")
                 await pilot.pause()
@@ -500,8 +519,8 @@ class CockpitAppE2ETests(unittest.IsolatedAsyncioTestCase):
 
     async def test_cron_tab_displays_jobs_and_restores_active_tab(self) -> None:
         with TemporaryDirectory() as temp_dir:
-            root, workspace_dir, _nested_dir, _selected_file = self._write_project_fixture(
-                Path(temp_dir)
+            root, workspace_dir, _nested_dir, _selected_file = (
+                self._write_project_fixture(Path(temp_dir))
             )
 
             first_app = self._build_app(root)
@@ -527,8 +546,8 @@ class CockpitAppE2ETests(unittest.IsolatedAsyncioTestCase):
 
     async def test_db_tab_runs_query_and_restores_active_tab(self) -> None:
         with TemporaryDirectory() as temp_dir:
-            root, workspace_dir, _nested_dir, _selected_file = self._write_project_fixture(
-                Path(temp_dir)
+            root, workspace_dir, _nested_dir, _selected_file = (
+                self._write_project_fixture(Path(temp_dir))
             )
 
             first_app = self._build_app(root)
@@ -560,8 +579,8 @@ class CockpitAppE2ETests(unittest.IsolatedAsyncioTestCase):
 
     async def test_db_write_query_requires_confirmation(self) -> None:
         with TemporaryDirectory() as temp_dir:
-            root, workspace_dir, _nested_dir, _selected_file = self._write_project_fixture(
-                Path(temp_dir)
+            root, workspace_dir, _nested_dir, _selected_file = (
+                self._write_project_fixture(Path(temp_dir))
             )
 
             app = self._build_app(root)
@@ -586,10 +605,12 @@ class CockpitAppE2ETests(unittest.IsolatedAsyncioTestCase):
                 self.assertFalse(confirmation_bar.is_open)
                 self.assertIn("affected_rows=1", db_text)
 
-    async def test_curl_tab_sends_request_and_requires_confirmation_for_post(self) -> None:
+    async def test_curl_tab_sends_request_and_requires_confirmation_for_post(
+        self,
+    ) -> None:
         with TemporaryDirectory() as temp_dir:
-            root, workspace_dir, _nested_dir, _selected_file = self._write_project_fixture(
-                Path(temp_dir)
+            root, workspace_dir, _nested_dir, _selected_file = (
+                self._write_project_fixture(Path(temp_dir))
             )
 
             app = self._build_app(root)
@@ -608,13 +629,17 @@ class CockpitAppE2ETests(unittest.IsolatedAsyncioTestCase):
 
                 slash_input = app.query_one(SlashInput)
                 slash_input.focus()
-                slash_input.value = '/curl send POST https://example.com/api body="{\\"ok\\":true}"'
+                slash_input.value = (
+                    '/curl send POST https://example.com/api body="{\\"ok\\":true}"'
+                )
                 await pilot.press("enter")
                 await pilot.pause()
 
                 confirmation_bar = app.query_one(ConfirmationBar)
                 self.assertTrue(confirmation_bar.is_open)
-                self.assertIn("Send POST request", self._rendered_text(confirmation_bar))
+                self.assertIn(
+                    "Send POST request", self._rendered_text(confirmation_bar)
+                )
 
                 await pilot.press("enter")
                 await pilot.pause()
@@ -623,16 +648,20 @@ class CockpitAppE2ETests(unittest.IsolatedAsyncioTestCase):
                 self.assertFalse(confirmation_bar.is_open)
                 self.assertIn("POST 200 https://example.com/api", curl_text)
 
-    async def test_remote_workspace_opens_with_remote_context_and_restores(self) -> None:
+    async def test_remote_workspace_opens_with_remote_context_and_restores(
+        self,
+    ) -> None:
         with TemporaryDirectory() as temp_dir:
-            root, _workspace_dir, _nested_dir, _selected_file = self._write_project_fixture(
-                Path(temp_dir)
+            root, _workspace_dir, _nested_dir, _selected_file = (
+                self._write_project_fixture(Path(temp_dir))
             )
             remote_uri = "ssh://dev@example.com/srv/app"
 
             first_app = self._build_app(root)
             async with first_app.run_test() as pilot:
-                await self._run_slash_command(first_app, pilot, f"/workspace open {remote_uri}")
+                await self._run_slash_command(
+                    first_app, pilot, f"/workspace open {remote_uri}"
+                )
 
                 context_text = self._rendered_text(first_app.query_one(FileContext))
                 explorer_text = self._rendered_text(first_app.query_one(FileExplorer))
@@ -640,7 +669,9 @@ class CockpitAppE2ETests(unittest.IsolatedAsyncioTestCase):
 
                 self.assertIn("Root: /srv/app", context_text)
                 self.assertIn("Target: ssh:dev@example.com", context_text)
-                self.assertIn("Explorer: remote dev@example.com:/srv/app", explorer_text)
+                self.assertIn(
+                    "Explorer: remote dev@example.com:/srv/app", explorer_text
+                )
                 self.assertIn("> current/", explorer_text)
                 self.assertIn("remote ready", terminal_output)
                 await pilot.press("enter")
@@ -650,7 +681,9 @@ class CockpitAppE2ETests(unittest.IsolatedAsyncioTestCase):
                 explorer_text = self._rendered_text(first_app.query_one(FileExplorer))
 
                 self.assertIn("Selected: /srv/app/current/api", context_text)
-                self.assertIn("Explorer: remote dev@example.com:/srv/app/current", explorer_text)
+                self.assertIn(
+                    "Explorer: remote dev@example.com:/srv/app/current", explorer_text
+                )
                 self.assertIn("> api/", explorer_text)
 
             second_app = self._build_app(root)
@@ -662,14 +695,16 @@ class CockpitAppE2ETests(unittest.IsolatedAsyncioTestCase):
 
                 self.assertIn("Root: /srv/app", context_text)
                 self.assertIn("Target: ssh:dev@example.com", context_text)
-                self.assertIn("Explorer: remote dev@example.com:/srv/app/current", explorer_text)
+                self.assertIn(
+                    "Explorer: remote dev@example.com:/srv/app/current", explorer_text
+                )
                 self.assertIn("Selected: /srv/app/current/api", context_text)
                 self.assertIn("> api/", explorer_text)
 
     async def test_apply_default_layout_resets_focus_to_first_tab(self) -> None:
         with TemporaryDirectory() as temp_dir:
-            root, workspace_dir, _nested_dir, _selected_file = self._write_project_fixture(
-                Path(temp_dir)
+            root, workspace_dir, _nested_dir, _selected_file = (
+                self._write_project_fixture(Path(temp_dir))
             )
 
             app = self._build_app(root)
@@ -684,9 +719,11 @@ class CockpitAppE2ETests(unittest.IsolatedAsyncioTestCase):
 
     async def test_split_layout_displays_multiple_panels_in_the_same_tab(self) -> None:
         with TemporaryDirectory() as temp_dir:
-            root, workspace_dir, _nested_dir, _selected_file = self._write_project_fixture(
-                Path(temp_dir),
-                split_layout=True,
+            root, workspace_dir, _nested_dir, _selected_file = (
+                self._write_project_fixture(
+                    Path(temp_dir),
+                    split_layout=True,
+                )
             )
 
             app = self._build_app(root)
@@ -729,7 +766,9 @@ class CockpitAppE2ETests(unittest.IsolatedAsyncioTestCase):
         await getattr(pilot, "press")("enter")
         await getattr(pilot, "pause")()
 
-    async def _run_slash_command(self, app: "CockpitApp", pilot: object, command: str) -> None:
+    async def _run_slash_command(
+        self, app: "CockpitApp", pilot: object, command: str
+    ) -> None:
         slash_input = app.query_one(SlashInput)
         slash_input.focus()
         slash_input.value = command

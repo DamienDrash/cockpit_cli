@@ -6,7 +6,7 @@ import os
 from pathlib import Path
 
 from cockpit.infrastructure.shell.base import ShellLaunchConfig
-from cockpit.shared.enums import SessionTargetKind
+from cockpit.core.enums import SessionTargetKind
 
 
 class LocalShellAdapter:
@@ -28,7 +28,9 @@ class LocalShellAdapter:
                 f"LocalShellAdapter cannot launch target kind '{target_kind.value}'."
             )
         if target_ref is not None:
-            raise ValueError("LocalShellAdapter does not accept a remote target reference.")
+            raise ValueError(
+                "LocalShellAdapter does not accept a remote target reference."
+            )
         path = Path(cwd).expanduser().resolve()
         if not path.exists():
             raise FileNotFoundError(f"Shell cwd '{path}' does not exist.")

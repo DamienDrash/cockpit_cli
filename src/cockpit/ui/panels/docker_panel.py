@@ -1,213 +1,189 @@
-"""Reference DockerPanel implementation."""
+"""Professional DockerPanel implementation with Sidebar and Multi-View Detail."""
 
 from __future__ import annotations
 
+from rich.text import Text
 from textual import events
-from textual.widgets import Static
+from textual.app import ComposeResult
+from textual.containers import Horizontal, Vertical
+from textual.widgets import Static, Label, Button, ContentSwitcher
 
-from cockpit.application.dispatch.event_bus import EventBus
-from cockpit.domain.events.runtime_events import PanelMounted, PanelStateChanged
-from cockpit.domain.models.panel_state import PanelState
+from cockpit.core.dispatch.event_bus import EventBus
+from cockpit.core.events.runtime import PanelMounted
+from cockpit.core.panel_state import PanelState
 from cockpit.infrastructure.docker.docker_adapter import (
     DockerAdapter,
     DockerContainerSummary,
-    DockerRuntimeSnapshot,
 )
-from cockpit.shared.enums import SessionTargetKind
+from cockpit.core.enums import SessionTargetKind
+from cockpit.ui.panels.base_panel import BasePanel
+from cockpit.ui.branding import C_PRIMARY
 
 
-class DockerPanel(Static):
-    """Read-only docker runtime panel for local container inspection."""
+class DockerPanel(BasePanel):
+    """Professional Docker TUI with sidebar navigation and multi-view detail."""
 
     PANEL_ID = "docker-panel"
     PANEL_TYPE = "docker"
     can_focus = True
 
     def __init__(self, *, event_bus: EventBus, docker_adapter: DockerAdapter) -> None:
-        super().__init__("", id=self.PANEL_ID, markup=False)
+        super().__init__(id=self.PANEL_ID)
         self._event_bus = event_bus
         self._docker_adapter = docker_adapter
-        self._workspace_name = "No workspace"
         self._workspace_root = ""
-        self._workspace_id: str | None = None
-        self._session_id: str | None = None
         self._target_kind = SessionTargetKind.LOCAL
         self._target_ref: str | None = None
         self._containers: list[DockerContainerSummary] = []
-        self._selected_container_id: str | None = None
-        self._message = "No docker state loaded."
+        self._selected_index = 0
+        self._active_detail_tab = "logs"
+
+    def compose(self) -> ComposeResult:
+        with Horizontal():
+            # Sidebar
+            with Vertical(id="docker-sidebar", classes="sidebar"):
+                yield Label(" [ CONTAINERS ] ", classes="section-title")
+                yield Static(
+                    "loading...", id="docker-container-list", classes="list-view"
+                )
+                yield Label(" [ ACTIONS ] ", classes="section-title")
+                yield Static(
+                    " r: Restart\n s: Stop\n u: Start\n Enter: Exec", id="docker-legend"
+                )
+
+            # Main Detail Area
+            with Vertical(id="docker-main"):
+                with Horizontal(id="docker-detail-tabs"):
+                    yield Button("LOGS", id="docker-tab-logs", classes="mini-tab")
+                    yield Button("STATS", id="docker-tab-stats", classes="mini-tab")
+                    yield Button("INSPECT", id="docker-tab-inspect", classes="mini-tab")
+
+                with ContentSwitcher(initial="logs", id="docker-detail-switcher"):
+                    yield Static("Loading logs...", id="logs", classes="detail-view")
+                    yield Static("Loading stats...", id="stats", classes="detail-view")
+                    yield Static(
+                        "Loading config...", id="inspect", classes="detail-view"
+                    )
 
     def on_mount(self) -> None:
         self._event_bus.publish(
-            PanelMounted(
-                panel_id=self.PANEL_ID,
-                panel_type=self.PANEL_TYPE,
-            )
+            PanelMounted(panel_id=self.PANEL_ID, panel_type=self.PANEL_TYPE)
         )
-        self._render_state()
+        self.refresh_runtime()
 
     def initialize(self, context: dict[str, object]) -> None:
-        self._workspace_name = str(context.get("workspace_name", "Workspace"))
         self._workspace_root = str(context.get("workspace_root", ""))
-        self._workspace_id = self._optional_str(context.get("workspace_id"))
-        self._session_id = self._optional_str(context.get("session_id"))
-        self._target_kind = self._target_kind_from_context(context.get("target_kind"))
-        self._target_ref = self._optional_str(context.get("target_ref"))
-        selected_container_id = context.get("selected_container_id")
-        if isinstance(selected_container_id, str) and selected_container_id:
-            self._selected_container_id = selected_container_id
+        self._target_kind = SessionTargetKind(str(context.get("target_kind", "local")))
         self.refresh_runtime()
+        self.focus()
 
-    def restore_state(self, snapshot: dict[str, object]) -> None:
-        selected_container_id = snapshot.get("selected_container_id")
-        if isinstance(selected_container_id, str) and selected_container_id:
-            self._selected_container_id = selected_container_id
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id and event.button.id.startswith("docker-tab-"):
+            self._switch_detail_tab(event.button.id.replace("docker-tab-", ""))
 
-    def snapshot_state(self) -> PanelState:
-        return PanelState(
-            panel_id=self.PANEL_ID,
-            panel_type=self.PANEL_TYPE,
-            snapshot={"selected_container_id": self._selected_container_id},
-        )
+    def _switch_detail_tab(self, tab_id: str) -> None:
+        self._active_detail_tab = tab_id
+        self.query_one("#docker-detail-switcher", ContentSwitcher).current = tab_id
+        for btn in self.query(".mini-tab"):
+            btn.remove_class("-active")
+            if btn.id == f"docker-tab-{tab_id}":
+                btn.add_class("-active")
+        self._update_detail()
 
-    def suspend(self) -> None:
-        """No runtime resources need suspension yet."""
+    def refresh_runtime(self) -> None:
+        try:
+            snapshot = self._docker_adapter.list_containers(
+                target_kind=self._target_kind,
+                target_ref=self._target_ref,
+            )
+            self._containers = snapshot.containers
+            self._render_list()
+            self._update_detail()
+        except Exception:
+            pass
 
-    def resume(self) -> None:
-        self.refresh_runtime()
+    def _render_list(self) -> None:
+        txt = Text()
+        if not self._containers:
+            txt.append("  No containers.", style="dim")
+        else:
+            for i, c in enumerate(self._containers):
+                marker = "▶ " if i == self._selected_index else "  "
+                color = "green" if c.state == "running" else "red"
+                txt.append(
+                    marker, style=C_PRIMARY if i == self._selected_index else "dim"
+                )
+                txt.append("● ", style=color)
+                txt.append(
+                    f"{c.name[:25]}\n",
+                    style="bold" if i == self._selected_index else "",
+                )
+        self.query_one("#docker-container-list", Static).update(txt)
 
-    def dispose(self) -> None:
-        """No runtime resources need disposal yet."""
+    def _update_detail(self) -> None:
+        if not self._containers:
+            return
+        container = self._containers[self._selected_index]
 
-    def command_context(self) -> dict[str, object]:
-        selected = self._selected_container()
-        return {
-            "panel_id": self.PANEL_ID,
-            "workspace_id": self._workspace_id,
-            "session_id": self._session_id,
-            "workspace_name": self._workspace_name,
-            "target_kind": self._target_kind.value,
-            "target_ref": self._target_ref,
-            "workspace_root": self._workspace_root,
-            "selected_container_id": self._selected_container_id,
-            "selected_container_name": selected.name if selected is not None else None,
-        }
+        try:
+            # We use collect_diagnostics to get logs and details
+            diags = self._docker_adapter.collect_diagnostics(
+                target_kind=self._target_kind, target_ref=self._target_ref, log_tail=100
+            )
+            # Find the diagnostic for the currently selected container
+            diag = next(
+                (d for d in diags if d.container_id == container.container_id), None
+            )
+
+            if not diag:
+                self.query_one(f"#{self._active_detail_tab}", Static).update(
+                    "No detail data found."
+                )
+                return
+
+            if self._active_detail_tab == "logs":
+                log_text = (
+                    "\n".join(diag.recent_logs)
+                    if diag.recent_logs
+                    else "No logs available."
+                )
+                self.query_one("#logs", Static).update(log_text)
+            elif self._active_detail_tab == "stats":
+                self.query_one("#stats", Static).update(
+                    f"Container: {diag.name}\nState: {diag.state}\nHealth: {diag.health or 'N/A'}"
+                )
+            elif self._active_detail_tab == "inspect":
+                self.query_one("#inspect", Static).update(
+                    f"ID: {diag.container_id}\nImage: {diag.image}\nStatus: {diag.status}\nPorts: {diag.ports}"
+                )
+        except Exception as exc:
+            self.query_one(f"#{self._active_detail_tab}", Static).update(
+                f"Error: {exc}"
+            )
 
     def on_key(self, event: events.Key) -> None:
         if event.key == "up":
-            self._move_selection(-1)
+            self._selected_index = max(0, self._selected_index - 1)
+            self._render_list()
+            self._update_detail()
             event.stop()
-            return
-        if event.key == "down":
-            self._move_selection(1)
+        elif event.key == "down":
+            self._selected_index = min(
+                len(self._containers) - 1, self._selected_index + 1
+            )
+            self._render_list()
+            self._update_detail()
             event.stop()
-            return
-        if event.key == "r":
+        elif event.key == "r":
             self.refresh_runtime()
             event.stop()
 
-    def refresh_runtime(self) -> None:
-        snapshot = self._docker_adapter.list_containers(
-            target_kind=self._target_kind,
-            target_ref=self._target_ref,
-        )
-        self._apply_snapshot(snapshot)
-        self._publish_panel_state()
+    def resume(self) -> None:
+        self.refresh_runtime()
+        self.focus()
 
-    def _apply_snapshot(self, snapshot: DockerRuntimeSnapshot) -> None:
-        self._containers = snapshot.containers
-        self._message = snapshot.message or ""
-        self._sync_selected_container()
-        self._render_state()
+    def command_context(self) -> dict[str, object]:
+        return {"panel_id": self.PANEL_ID}
 
-    def _sync_selected_container(self) -> None:
-        available_ids = {container.container_id for container in self._containers}
-        if self._selected_container_id in available_ids:
-            return
-        self._selected_container_id = (
-            self._containers[0].container_id if self._containers else None
-        )
-
-    def _move_selection(self, delta: int) -> None:
-        if not self._containers:
-            return
-        current_index = 0
-        for index, container in enumerate(self._containers):
-            if container.container_id == self._selected_container_id:
-                current_index = index
-                break
-        next_index = max(0, min(len(self._containers) - 1, current_index + delta))
-        self._selected_container_id = self._containers[next_index].container_id
-        self._render_state()
-        self._publish_panel_state()
-
-    def _render_state(self) -> None:
-        self.update(self._render_text())
-
-    def _render_text(self) -> str:
-        lines = [
-            f"Workspace: {self._workspace_name}",
-            f"Root: {self._workspace_root or '(none)'}",
-            f"Containers: {len(self._containers)}",
-            "",
-            "Runtime:",
-        ]
-        if not self._containers:
-            lines.append(self._message or "No docker containers found.")
-        else:
-            for container in self._containers[:12]:
-                marker = ">" if container.container_id == self._selected_container_id else " "
-                lines.append(
-                    f"{marker} {container.name} [{container.state}] {container.image}"
-                )
-        lines.extend(["", "Selected detail:"])
-        selected = self._selected_container()
-        if selected is None:
-            lines.append(self._message or "No container selected.")
-        else:
-            lines.extend(
-                [
-                    f"id={selected.container_id}",
-                    f"status={selected.status}",
-                    f"ports={selected.ports or '(none)'}",
-                ]
-            )
-        lines.extend(
-            [
-                "",
-                "Use Up/Down to inspect containers. Press r to refresh. Press F8/F9/F10 to restart, stop, or remove the selected container.",
-            ]
-        )
-        return "\n".join(lines)
-
-    def _selected_container(self) -> DockerContainerSummary | None:
-        for container in self._containers:
-            if container.container_id == self._selected_container_id:
-                return container
-        return self._containers[0] if self._containers else None
-
-    def _publish_panel_state(self) -> None:
-        state = self.snapshot_state()
-        self._event_bus.publish(
-            PanelStateChanged(
-                panel_id=self.PANEL_ID,
-                panel_type=self.PANEL_TYPE,
-                snapshot=state.snapshot,
-                config=state.config,
-            )
-        )
-
-    @staticmethod
-    def _optional_str(value: object) -> str | None:
-        return value if isinstance(value, str) else None
-
-    @staticmethod
-    def _target_kind_from_context(value: object) -> SessionTargetKind:
-        if isinstance(value, SessionTargetKind):
-            return value
-        if isinstance(value, str):
-            try:
-                return SessionTargetKind(value)
-            except ValueError:
-                return SessionTargetKind.LOCAL
-        return SessionTargetKind.LOCAL
+    def snapshot_state(self) -> PanelState:
+        return PanelState(panel_id=self.PANEL_ID, panel_type=self.PANEL_TYPE)

@@ -48,7 +48,11 @@ class FileExplorer(Static):
         browser = self._resolve_browser_path(root, browser_path)
         recovery_messages: list[str] = []
 
-        if browser != Path(browser_path).expanduser().resolve() if browser_path else False:
+        if (
+            browser != Path(browser_path).expanduser().resolve()
+            if browser_path
+            else False
+        ):
             recovery_messages.append("Explorer path was reset to the workspace root.")
 
         self._root_path = root
@@ -56,12 +60,19 @@ class FileExplorer(Static):
         self._entries = self._list_entries(browser)
         self._selected_index = self._resolve_selected_index(selected_path)
 
-        if selected_path and self.selected_path != str(Path(selected_path).expanduser()):
+        if selected_path and self.selected_path != str(
+            Path(selected_path).expanduser()
+        ):
             selected_candidate = Path(selected_path).expanduser()
             if not selected_candidate.exists():
                 recovery_messages.append("Explorer selection no longer exists.")
-            elif root not in selected_candidate.resolve().parents and selected_candidate.resolve() != root:
-                recovery_messages.append("Explorer selection moved outside the workspace and was reset.")
+            elif (
+                root not in selected_candidate.resolve().parents
+                and selected_candidate.resolve() != root
+            ):
+                recovery_messages.append(
+                    "Explorer selection moved outside the workspace and was reset."
+                )
 
         self._refresh_view()
         return ExplorerSelection(
@@ -141,11 +152,18 @@ class FileExplorer(Static):
         return 0
 
     def _list_entries(self, directory: Path) -> list[Path]:
-        entries = sorted(
-            directory.iterdir(),
-            key=lambda path: (not path.is_dir(), path.name.lower()),
-        )
-        return entries[:200]
+        import os
+
+        try:
+            # Use os.scandir for better performance on large directories
+            with os.scandir(directory) as it:
+                entries = sorted(
+                    [Path(entry.path) for entry in it],
+                    key=lambda path: (not path.is_dir(), path.name.lower()),
+                )
+            return entries[:500]  # Limit to 500 entries for UI performance
+        except Exception:
+            return []
 
     def _refresh_view(self) -> None:
         if self._browser_path is None:

@@ -4,14 +4,17 @@ from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
-from cockpit.application.services.datasource_service import DataSourceService
-from cockpit.domain.models.datasource import DataSourceOperationResult, DataSourceProfile
-from cockpit.infrastructure.config.config_loader import ConfigLoader
-from cockpit.infrastructure.datasources.base import DataSourceInspection
-from cockpit.infrastructure.persistence.repositories import DataSourceProfileRepository
-from cockpit.infrastructure.persistence.sqlite_store import SQLiteStore
-from cockpit.infrastructure.secrets.secret_resolver import SecretResolver
-from cockpit.shared.enums import SessionTargetKind
+from cockpit.datasources.services.datasource_service import DataSourceService
+from cockpit.datasources.models.datasource import (
+    DataSourceOperationResult,
+    DataSourceProfile,
+)
+from cockpit.workspace.config_loader import ConfigLoader
+from cockpit.datasources.adapters.backends.base import DataSourceInspection
+from cockpit.workspace.repositories import DataSourceProfileRepository
+from cockpit.core.persistence.sqlite_store import SQLiteStore
+from cockpit.datasources.adapters.secret_resolver import SecretResolver
+from cockpit.core.enums import SessionTargetKind
 
 
 class FakeDatasourceAdapter:
@@ -97,12 +100,16 @@ class DataSourceServiceTests(unittest.TestCase):
                 connection_url="http://localhost:8000",
             )
             inspection = service.inspect_profile("pg-main")
-            result = service.run_statement(created.id, '{"collection":"docs"}', operation="query")
+            result = service.run_statement(
+                created.id, '{"collection":"docs"}', operation="query"
+            )
 
             self.assertTrue(inspection.success)
             self.assertTrue(result.success)
             self.assertEqual(sql.inspect_calls, ["pg-main"])
-            self.assertEqual(chroma.run_calls, [(created.id, '{"collection":"docs"}', "query")])
+            self.assertEqual(
+                chroma.run_calls, [(created.id, '{"collection":"docs"}', "query")]
+            )
             store.close()
 
     def test_resolves_secret_refs_and_ssh_tunnels_before_routing(self) -> None:

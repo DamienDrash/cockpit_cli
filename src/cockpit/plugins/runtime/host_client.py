@@ -13,7 +13,7 @@ from threading import RLock
 from typing import TextIO
 
 from cockpit.plugins.runtime.contracts import PluginHostStartup
-from cockpit.shared.utils import make_id
+from cockpit.core.utils import make_id
 
 
 class PluginHostError(RuntimeError):
@@ -116,7 +116,9 @@ class PluginHostClient:
                         startup_message.get("error", "Plugin host startup failed.")
                     )
                     raise PluginHostError(self._last_error)
-                startup = PluginHostStartup.from_payload(startup_message.get("payload", {}))
+                startup = PluginHostStartup.from_payload(
+                    startup_message.get("payload", {})
+                )
                 startup.pid = process.pid
                 self._startup = startup
                 self._last_error = None
@@ -170,7 +172,9 @@ class PluginHostClient:
                     f"Plugin host response mismatch for '{self._plugin_id}'."
                 )
             if response.get("ok") is not True:
-                error_message = str(response.get("error", "Plugin host request failed."))
+                error_message = str(
+                    response.get("error", "Plugin host request failed.")
+                )
                 self._last_error = error_message
                 raise PluginHostError(error_message)
             payload = response.get("result", {})
@@ -182,7 +186,9 @@ class PluginHostClient:
     def diagnostics(self) -> dict[str, object]:
         return {
             "running": self.is_running(),
-            "pid": self._process.pid if self.is_running() and self._process is not None else None,
+            "pid": self._process.pid
+            if self.is_running() and self._process is not None
+            else None,
             "last_error": self._last_error,
             "module": self._module_name,
         }
@@ -219,7 +225,9 @@ class PluginHostClient:
             if process is not None and process.poll() is None:
                 process.terminate()
             self._cleanup_process()
-            self._last_error = error_text or f"Plugin host '{self._plugin_id}' exited unexpectedly."
+            self._last_error = (
+                error_text or f"Plugin host '{self._plugin_id}' exited unexpectedly."
+            )
             raise PluginHostError(self._last_error)
         try:
             payload = json.loads(line)

@@ -4,8 +4,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from cockpit.domain.models.health import IncidentRecord
-from cockpit.domain.models.response import ResponseRun, ResponseStepRun, RunbookStepDefinition
+from cockpit.ops.models.health import IncidentRecord
+from cockpit.ops.models.response import (
+    ResponseRun,
+    ResponseStepRun,
+    RunbookStepDefinition,
+)
 
 
 @dataclass(slots=True, frozen=True)
@@ -40,4 +44,3 @@ class ExecutorResult:
     payload: dict[str, object] = field(default_factory=dict)
     artifacts: tuple[ExecutorArtifact, ...] = ()
     error_message: str | None = None
-

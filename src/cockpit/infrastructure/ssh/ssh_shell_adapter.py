@@ -6,7 +6,7 @@ import os
 import shlex
 
 from cockpit.infrastructure.shell.base import ShellLaunchConfig
-from cockpit.shared.enums import SessionTargetKind
+from cockpit.core.enums import SessionTargetKind
 
 
 class SSHShellAdapter:
@@ -24,7 +24,9 @@ class SSHShellAdapter:
         target_ref: str | None = None,
     ) -> ShellLaunchConfig:
         if target_kind is not SessionTargetKind.SSH:
-            raise ValueError(f"SSHShellAdapter cannot launch target kind '{target_kind.value}'.")
+            raise ValueError(
+                f"SSHShellAdapter cannot launch target kind '{target_kind.value}'."
+            )
         if not target_ref:
             raise ValueError("An SSH target reference is required.")
 
@@ -48,7 +50,4 @@ class SSHShellAdapter:
             remote_exec = shlex.join([str(part) for part in command])
         else:
             remote_exec = 'exec "${SHELL:-/bin/bash}" -li'
-        return (
-            f"cd {shlex.quote(cwd)} >/dev/null 2>&1 || exit 1; "
-            f"{remote_exec}"
-        )
+        return f"cd {shlex.quote(cwd)} >/dev/null 2>&1 || exit 1; {remote_exec}"

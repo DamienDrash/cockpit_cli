@@ -6,8 +6,8 @@ from dataclasses import dataclass, field
 import shlex
 import subprocess
 
-from cockpit.infrastructure.ssh.command_runner import SSHCommandRunner
-from cockpit.shared.enums import SessionTargetKind
+from cockpit.datasources.adapters.ssh_command_runner import SSHCommandRunner
+from cockpit.core.enums import SessionTargetKind
 
 
 @dataclass(slots=True, frozen=True)
@@ -208,7 +208,9 @@ class CronAdapter:
         target_ref: str | None = None,
     ) -> CronWriteResult:
         if target_kind is SessionTargetKind.SSH:
-            return self._set_remote_job_enabled(command, enabled=enabled, target_ref=target_ref)
+            return self._set_remote_job_enabled(
+                command, enabled=enabled, target_ref=target_ref
+            )
         return self._set_local_job_enabled(command, enabled=enabled)
 
     def _set_local_job_enabled(self, command: str, *, enabled: bool) -> CronWriteResult:
@@ -226,12 +228,17 @@ class CronAdapter:
                 success=False,
                 message="The crontab executable is not available in this environment.",
             )
-        if read_result.returncode != 0 and "no crontab" not in read_result.stderr.lower():
+        if (
+            read_result.returncode != 0
+            and "no crontab" not in read_result.stderr.lower()
+        ):
             return CronWriteResult(
                 success=False,
                 message=read_result.stderr.strip() or "crontab -l failed.",
             )
-        updated_text, changed = self._rewrite_job_enabled(read_result.stdout, command, enabled=enabled)
+        updated_text, changed = self._rewrite_job_enabled(
+            read_result.stdout, command, enabled=enabled
+        )
         if not changed:
             state = "enabled" if enabled else "disabled"
             return CronWriteResult(
@@ -250,7 +257,8 @@ class CronAdapter:
         if write_result.returncode != 0:
             return CronWriteResult(
                 success=False,
-                message=write_result.stderr.strip() or "Failed to write updated crontab.",
+                message=write_result.stderr.strip()
+                or "Failed to write updated crontab.",
             )
         state = "Enabled" if enabled else "Disabled"
         return CronWriteResult(success=True, message=f"{state} cron job {command}.")
@@ -278,12 +286,17 @@ class CronAdapter:
                 success=False,
                 message=read_result.message or "SSH is unavailable.",
             )
-        if read_result.returncode != 0 and "no crontab" not in read_result.stderr.lower():
+        if (
+            read_result.returncode != 0
+            and "no crontab" not in read_result.stderr.lower()
+        ):
             return CronWriteResult(
                 success=False,
                 message=read_result.stderr.strip() or "crontab -l failed.",
             )
-        updated_text, changed = self._rewrite_job_enabled(read_result.stdout, command, enabled=enabled)
+        updated_text, changed = self._rewrite_job_enabled(
+            read_result.stdout, command, enabled=enabled
+        )
         if not changed:
             state = "enabled" if enabled else "disabled"
             return CronWriteResult(
@@ -304,7 +317,8 @@ class CronAdapter:
         if write_result.returncode != 0:
             return CronWriteResult(
                 success=False,
-                message=write_result.stderr.strip() or "Failed to write updated remote crontab.",
+                message=write_result.stderr.strip()
+                or "Failed to write updated remote crontab.",
             )
         state = "Enabled" if enabled else "Disabled"
         return CronWriteResult(success=True, message=f"{state} cron job {command}.")
@@ -319,12 +333,16 @@ class CronAdapter:
         updated_lines: list[str] = []
         changed = False
         for raw_line in raw_output.splitlines():
-            rewritten, line_changed = self._rewrite_line(raw_line, command, enabled=enabled)
+            rewritten, line_changed = self._rewrite_line(
+                raw_line, command, enabled=enabled
+            )
             updated_lines.append(rewritten)
             changed = changed or line_changed
         return ("\n".join(updated_lines) + ("\n" if updated_lines else "")), changed
 
-    def _rewrite_line(self, raw_line: str, command: str, *, enabled: bool) -> tuple[str, bool]:
+    def _rewrite_line(
+        self, raw_line: str, command: str, *, enabled: bool
+    ) -> tuple[str, bool]:
         stripped = raw_line.strip()
         if not stripped:
             return raw_line, False

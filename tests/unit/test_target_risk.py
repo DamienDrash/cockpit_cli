@@ -1,7 +1,7 @@
 import unittest
 
-from cockpit.shared.enums import SessionTargetKind, TargetRiskLevel
-from cockpit.shared.risk import classify_target_risk, risk_presentation
+from cockpit.core.enums import SessionTargetKind, TargetRiskLevel
+from cockpit.core.risk import classify_target_risk, risk_presentation
 
 
 class TargetRiskTests(unittest.TestCase):

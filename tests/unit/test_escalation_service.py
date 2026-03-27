@@ -3,16 +3,20 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
 
-from cockpit.application.dispatch.event_bus import EventBus
-from cockpit.application.services.escalation_policy_service import EscalationPolicyService
-from cockpit.application.services.escalation_service import EscalationService
-from cockpit.application.services.oncall_resolution_service import ResolvedEscalationRecipient
-from cockpit.domain.events.health_events import IncidentOpened
-from cockpit.domain.models.escalation import EscalationPolicy, EscalationStep
-from cockpit.domain.models.health import IncidentRecord
-from cockpit.domain.models.notifications import NotificationRecord
-from cockpit.domain.models.oncall import OperatorTeam, OwnershipResolution
-from cockpit.infrastructure.persistence.ops_repositories import (
+from cockpit.core.dispatch.event_bus import EventBus
+from cockpit.ops.services.escalation_policy_service import (
+    EscalationPolicyService,
+)
+from cockpit.ops.services.escalation_service import EscalationService
+from cockpit.ops.services.oncall_resolution_service import (
+    ResolvedEscalationRecipient,
+)
+from cockpit.ops.events.health import IncidentOpened
+from cockpit.ops.models.escalation import EscalationPolicy, EscalationStep
+from cockpit.ops.models.health import IncidentRecord
+from cockpit.notifications.models import NotificationRecord
+from cockpit.ops.models.oncall import OperatorTeam, OwnershipResolution
+from cockpit.ops.repositories import (
     EngagementDeliveryLinkRepository,
     EngagementTimelineRepository,
     EscalationPolicyRepository,
@@ -22,8 +26,8 @@ from cockpit.infrastructure.persistence.ops_repositories import (
     NotificationRepository,
     OperatorTeamRepository,
 )
-from cockpit.infrastructure.persistence.sqlite_store import SQLiteStore
-from cockpit.shared.enums import (
+from cockpit.core.persistence.sqlite_store import SQLiteStore
+from cockpit.core.enums import (
     ComponentKind,
     EngagementStatus,
     EscalationTargetKind,
@@ -31,9 +35,8 @@ from cockpit.shared.enums import (
     IncidentStatus,
     NotificationStatus,
     ResolutionOutcome,
-    TargetRiskLevel,
 )
-from cockpit.shared.utils import utc_now
+from cockpit.core.utils import utc_now
 
 
 class _FakeNotificationService:
@@ -72,7 +75,12 @@ class _FakeOperationsDiagnosticsService:
 
 
 class _FakeOnCallResolutionService:
-    def __init__(self, *, ownership: OwnershipResolution, recipients: dict[tuple[EscalationTargetKind, str], ResolvedEscalationRecipient]) -> None:
+    def __init__(
+        self,
+        *,
+        ownership: OwnershipResolution,
+        recipients: dict[tuple[EscalationTargetKind, str], ResolvedEscalationRecipient],
+    ) -> None:
         self._ownership = ownership
         self._recipients = dict(recipients)
 
@@ -103,7 +111,9 @@ class EscalationServiceTests(unittest.TestCase):
             delivery_link_repo = EngagementDeliveryLinkRepository(store)
             notification_repo = NotificationRepository(store)
             policy_service = _build_policy_service(store)
-            OperatorTeamRepository(store).save(OperatorTeam(id="team-1", name="Platform Ops"))
+            OperatorTeamRepository(store).save(
+                OperatorTeam(id="team-1", name="Platform Ops")
+            )
             policy_service.save_policy(
                 EscalationPolicy(id="epc-1", name="Default"),
                 steps=(
@@ -128,7 +138,7 @@ class EscalationServiceTests(unittest.TestCase):
                 )
             )
             notification_service = _FakeNotificationService(notification_repo)
-            service = EscalationService(
+            EscalationService(
                 event_bus=event_bus,
                 incident_repository=incident_repo,
                 engagement_repository=engagement_repo,
@@ -172,7 +182,7 @@ class EscalationServiceTests(unittest.TestCase):
                 )
             )
 
-            engagement = engagement_repo.get_active_for_incident("inc-1")
+            engagement = engagement_repo.find_active_for_incident("inc-1")
             self.assertIsNotNone(engagement)
             assert engagement is not None
             self.assertEqual(engagement.status, EngagementStatus.ACTIVE)
@@ -189,7 +199,9 @@ class EscalationServiceTests(unittest.TestCase):
             delivery_link_repo = EngagementDeliveryLinkRepository(store)
             notification_repo = NotificationRepository(store)
             policy_service = _build_policy_service(store)
-            OperatorTeamRepository(store).save(OperatorTeam(id="team-1", name="Platform Ops"))
+            OperatorTeamRepository(store).save(
+                OperatorTeam(id="team-1", name="Platform Ops")
+            )
             policy_service.save_policy(
                 EscalationPolicy(
                     id="epc-1",
@@ -284,7 +296,7 @@ class EscalationServiceTests(unittest.TestCase):
                 effective_now=datetime(2026, 3, 24, 10, 1, 1, tzinfo=UTC)
             )
 
-            engagement = engagement_repo.get_active_for_incident("inc-1")
+            engagement = engagement_repo.find_active_for_incident("inc-1")
             self.assertIsNotNone(engagement)
             assert engagement is not None
             self.assertEqual(engagement.current_step_index, 1)
@@ -301,7 +313,9 @@ class EscalationServiceTests(unittest.TestCase):
             delivery_link_repo = EngagementDeliveryLinkRepository(store)
             notification_repo = NotificationRepository(store)
             policy_service = _build_policy_service(store)
-            OperatorTeamRepository(store).save(OperatorTeam(id="team-1", name="Platform Ops"))
+            OperatorTeamRepository(store).save(
+                OperatorTeam(id="team-1", name="Platform Ops")
+            )
             policy_service.save_policy(
                 EscalationPolicy(id="epc-1", name="Default"),
                 steps=(
@@ -326,7 +340,7 @@ class EscalationServiceTests(unittest.TestCase):
                 )
             )
             notification_service = _FakeNotificationService(notification_repo)
-            service = EscalationService(
+            EscalationService(
                 event_bus=event_bus,
                 incident_repository=incident_repo,
                 engagement_repository=engagement_repo,
@@ -370,7 +384,7 @@ class EscalationServiceTests(unittest.TestCase):
                 )
             )
 
-            engagement = engagement_repo.get_active_for_incident("inc-1")
+            engagement = engagement_repo.find_active_for_incident("inc-1")
             self.assertIsNotNone(engagement)
             assert engagement is not None
             self.assertEqual(engagement.status, EngagementStatus.BLOCKED)

@@ -3,9 +3,9 @@ from tempfile import TemporaryDirectory
 import sqlite3
 import unittest
 
-from cockpit.infrastructure.db.database_adapter import DatabaseAdapter
-from cockpit.infrastructure.ssh.command_runner import SSHCommandResult
-from cockpit.shared.enums import SessionTargetKind
+from cockpit.datasources.adapters.database_adapter import DatabaseAdapter
+from cockpit.datasources.adapters.ssh_command_runner import SSHCommandResult
+from cockpit.core.enums import SessionTargetKind
 
 
 class FakeSSHCommandRunner:
@@ -55,14 +55,18 @@ class DatabaseAdapterTests(unittest.TestCase):
                 connection.commit()
 
             adapter = DatabaseAdapter()
-            result = adapter.run_query(str(database_path), "SELECT name FROM users ORDER BY name")
+            result = adapter.run_query(
+                str(database_path), "SELECT name FROM users ORDER BY name"
+            )
 
             self.assertTrue(result.success)
             self.assertEqual(result.columns, ["name"])
             self.assertEqual(result.rows, [["alice"], ["bob"]])
 
     def test_detects_mutating_query_prefixes(self) -> None:
-        self.assertTrue(DatabaseAdapter.is_mutating_query("UPDATE users SET name = 'x'"))
+        self.assertTrue(
+            DatabaseAdapter.is_mutating_query("UPDATE users SET name = 'x'")
+        )
         self.assertFalse(DatabaseAdapter.is_mutating_query("SELECT * FROM users"))
 
     def test_runs_remote_query_via_ssh_runner(self) -> None:

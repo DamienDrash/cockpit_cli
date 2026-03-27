@@ -2,19 +2,19 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
 
-from cockpit.application.dispatch.event_bus import EventBus
-from cockpit.application.services.approval_service import ApprovalService
-from cockpit.application.services.postincident_service import PostIncidentService
-from cockpit.application.services.response_executor_service import ResponseExecutionOutcome
-from cockpit.application.services.response_run_service import ResponseRunService
-from cockpit.domain.models.health import IncidentRecord
-from cockpit.domain.models.response import (
-    ResponseRun,
-    ResponseStepRun,
+from cockpit.core.dispatch.event_bus import EventBus
+from cockpit.ops.services.approval_service import ApprovalService
+from cockpit.ops.services.postincident_service import PostIncidentService
+from cockpit.ops.services.response_executor_service import (
+    ResponseExecutionOutcome,
+)
+from cockpit.ops.services.response_run_service import ResponseRunService
+from cockpit.ops.models.health import IncidentRecord
+from cockpit.ops.models.response import (
     RunbookDefinition,
     RunbookStepDefinition,
 )
-from cockpit.infrastructure.persistence.ops_repositories import (
+from cockpit.ops.repositories import (
     ActionItemRepository,
     ApprovalDecisionRepository,
     ApprovalRequestRepository,
@@ -28,9 +28,9 @@ from cockpit.infrastructure.persistence.ops_repositories import (
     ResponseTimelineRepository,
     ReviewFindingRepository,
 )
-from cockpit.infrastructure.persistence.sqlite_store import SQLiteStore
+from cockpit.core.persistence.sqlite_store import SQLiteStore
 from cockpit.infrastructure.runbooks.executors.base import ExecutorResult
-from cockpit.shared.enums import (
+from cockpit.core.enums import (
     ApprovalDecisionKind,
     ComponentKind,
     IncidentSeverity,
@@ -39,7 +39,6 @@ from cockpit.shared.enums import (
     ResponseStepStatus,
     RunbookExecutorKind,
     RunbookRiskClass,
-    TargetRiskLevel,
 )
 
 
@@ -47,7 +46,9 @@ class _FakeRunbookCatalogService:
     def __init__(self, runbooks: dict[str, RunbookDefinition]) -> None:
         self._runbooks = runbooks
 
-    def get_runbook(self, runbook_id: str, version: str | None = None) -> RunbookDefinition:
+    def get_runbook(
+        self, runbook_id: str, version: str | None = None
+    ) -> RunbookDefinition:
         if version is None:
             return self._runbooks[runbook_id]
         return self._runbooks[f"{runbook_id}:{version}"]
@@ -117,7 +118,9 @@ class ResponseRunServiceTests(unittest.TestCase):
                     f"{runbook.id}:{runbook.version}": runbook,
                 }
             ),
-            response_executor_service=_FakeResponseExecutorService(success=executor_success),
+            response_executor_service=_FakeResponseExecutorService(
+                success=executor_success
+            ),
             approval_service=approval_service,
             postincident_service=postincident_service,
         )
@@ -174,10 +177,13 @@ class ResponseRunServiceTests(unittest.TestCase):
             )
             self.assertEqual(ready.status, ResponseRunStatus.READY)
 
-            completed = service.execute_current_step(started.id, actor="alice", confirmed=True)
+            completed = service.execute_current_step(
+                started.id, actor="alice", confirmed=True
+            )
             self.assertEqual(completed.status, ResponseRunStatus.COMPLETED)
-            self.assertIsNotNone(PostIncidentReviewRepository(store).get_for_incident("inc-1"))
-
+            self.assertIsNotNone(
+                PostIncidentReviewRepository(store).find_for_incident("inc-1")
+            )
     def test_requires_confirmation_before_running_mutating_step(self) -> None:
         with TemporaryDirectory() as temp_dir:
             runbook = RunbookDefinition(
@@ -206,7 +212,9 @@ class ResponseRunServiceTests(unittest.TestCase):
             waiting = service.execute_current_step(started.id, actor="alice")
 
             self.assertEqual(waiting.status, ResponseRunStatus.WAITING_OPERATOR)
-            step_run = ResponseStepRunRepository(_store).get_by_run_and_index(started.id, 0)
+            step_run = ResponseStepRunRepository(_store).get_by_run_and_index(
+                started.id, 0
+            )
             self.assertEqual(step_run.status, ResponseStepStatus.WAITING_OPERATOR)
 
 

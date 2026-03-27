@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from cockpit.application.handlers.base import DispatchResult
+from cockpit.core.dispatch.handler_base import DispatchResult
 
 
 class RemotePluginCommandHandler:

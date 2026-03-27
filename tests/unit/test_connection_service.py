@@ -2,8 +2,8 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
 
-from cockpit.application.services.connection_service import ConnectionService
-from cockpit.infrastructure.config.config_loader import ConfigLoader
+from cockpit.workspace.services.connection_service import ConnectionService
+from cockpit.workspace.config_loader import ConfigLoader
 
 
 class ConnectionServiceTests(unittest.TestCase):
@@ -12,7 +12,9 @@ class ConnectionServiceTests(unittest.TestCase):
             root = Path(temp_dir)
             (root / "config").mkdir(parents=True)
             (root / "src").mkdir()
-            (root / "pyproject.toml").write_text("[project]\nname='cockpit'\n", encoding="utf-8")
+            (root / "pyproject.toml").write_text(
+                "[project]\nname='cockpit'\n", encoding="utf-8"
+            )
             (root / "config" / "connections.yaml").write_text(
                 "\n".join(
                     [
