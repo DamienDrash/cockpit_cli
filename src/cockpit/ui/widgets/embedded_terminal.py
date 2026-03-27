@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from collections.abc import Callable
 
+import re
 from rich.highlighter import RegexHighlighter
 from rich.text import Text
 from textual import events
@@ -29,6 +30,25 @@ class SemanticOutputHighlighter(RegexHighlighter):
         r"(?P<json>\{.*\}|\[.*\])",
     ]
 
+    def __init__(self) -> None:
+        super().__init__()
+        self.styles: dict[str, str] = {
+            "error": "bold #ff0055",
+            "warning": "bold #ffff00",
+            "url": "underline #00ffff",
+            "path": "#00ffff italic",
+            "json": "#00ff00",
+        }
+
+    def highlight(self, text: Text) -> None:
+        """Highlight text using internal style mapping."""
+        for highlight in self.highlights:
+            for match in re.finditer(highlight, text.plain):
+                for name, value in match.groupdict().items():
+                    if value and name in self.styles:
+                        start, end = match.span(name)
+                        text.stylize(self.styles[name], start, end)
+
 
 class EmbeddedTerminal(Static):
     """Focusable terminal output surface backed by the runtime PTY stream."""
@@ -41,12 +61,6 @@ class EmbeddedTerminal(Static):
         )
         self._buffer = TerminalBuffer(on_input=on_input)
         self._highlighter = SemanticOutputHighlighter()
-        # Explicit styles for highlighter groups
-        self._highlighter.styles["error"] = "bold #ff0055"
-        self._highlighter.styles["warning"] = "bold #ffff00"
-        self._highlighter.styles["url"] = "underline #00ffff"
-        self._highlighter.styles["path"] = "#00ffff italic"
-        self._highlighter.styles["json"] = "#00ff00"
         self._max_chars = 32_000  # Increased buffer
         self._placeholder = "Terminal idle. Focus here and type to send input."
         self._viewport_offset = 0
