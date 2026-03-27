@@ -439,6 +439,27 @@ Each `wire_*` module returns a dataclass or namedtuple of its wired components.
 
 **Verification**: full test suite, `python -m compileall src tests`, CI green
 
+### Phase 4 — Shell Syntax Highlighting (UX Polish)
+
+17. Implement `SlashCmdHighlighter(RegexHighlighter)` for `/command` and `--flag` detection.
+18. Implement `SemanticOutputHighlighter` for terminal buffers (detecting URLs, JSON-like structures, and Error/Warning patterns).
+19. Integrate `SlashCmdHighlighter` into `SlashInput` widget.
+20. Add high-contrast "Dark/Neon" syntax theme for code snippets in `DBPanel` and `CurlPanel`.
+
+**Verification**: visual check in TUI, fuzzy search remains functional.
+
+### Phase 5 — Advanced Developer Experience (DX)
+
+21. **Git-Deep-Integration**: Track branch status and dirty state live in the sidebar.
+22. **Environment-Badge**: Display active venv/node/cloud context in the header.
+23. **Resource Management**: Implement real-time CPU/MEM sparklines for local/container processes.
+24. **Kontextsensitive "Action-Bar"**: Add F-key shortcuts (F5-F10) with contextual labels per panel.
+25. **Breadcrumb-Navigation**: Interactive path navigation in the header or breadcrumb row.
+26. **Context-Alert Borders**: Pulsing borders (e.g., Neon-Red) for "PROD" or high-risk contexts.
+27. **Micro-Animations**: Add scanline effects, glitch transitions, and reactive spinners.
+
+**Verification**: Performance benchmark (no UI lag), user review of aesthetic consistency.
+
 > [!IMPORTANT]
 > Phase 3 is the largest change. It should be done in a feature branch with import-level backwards-compat aliases to avoid breaking plugins.
 

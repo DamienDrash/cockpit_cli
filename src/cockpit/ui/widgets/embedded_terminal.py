@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from collections.abc import Callable
 
+from rich.highlighter import RegexHighlighter
 from rich.text import Text
 from textual import events
 from textual.widgets import Static
@@ -14,6 +15,19 @@ from cockpit.ui.widgets.terminal_buffer import TerminalBuffer
 
 
 Position = tuple[int, int]
+
+
+class SemanticOutputHighlighter(RegexHighlighter):
+    """Semantic highlighter for terminal output monitoring."""
+
+    base_style = ""
+    highlights = [
+        r"(?P<error>ERROR|CRITICAL|FATAL|Exception|Traceback)",
+        r"(?P<warning>WARNING|WARN)",
+        r"(?P<url>https?://[^\s]+)",
+        r"(?P<path>/(?:[a-zA-Z0-9._-]+/)+[a-zA-Z0-9._-]+)",
+        r"(?P<json>\{.*\}|\[.*\])",
+    ]
 
 
 class EmbeddedTerminal(Static):
@@ -26,6 +40,13 @@ class EmbeddedTerminal(Static):
             "Terminal idle. Focus here and type to send input.", id="embedded-terminal"
         )
         self._buffer = TerminalBuffer(on_input=on_input)
+        self._highlighter = SemanticOutputHighlighter()
+        # Explicit styles for highlighter groups
+        self._highlighter.styles["error"] = "bold #ff0055"
+        self._highlighter.styles["warning"] = "bold #ffff00"
+        self._highlighter.styles["url"] = "underline #00ffff"
+        self._highlighter.styles["path"] = "#00ffff italic"
+        self._highlighter.styles["json"] = "#00ff00"
         self._max_chars = 32_000  # Increased buffer
         self._placeholder = "Terminal idle. Focus here and type to send input."
         self._viewport_offset = 0
@@ -276,6 +297,7 @@ class EmbeddedTerminal(Static):
             self._append_row(renderable, row)
             if index < len(visible_rows) - 1:
                 renderable.append("\n")
+        self._highlighter.highlight(renderable)
         self._apply_search_highlights(renderable, row_offsets, start)
         self._apply_selection_highlights(renderable, row_offsets, start)
         self._apply_cursor_highlight(renderable, row_offsets, start)

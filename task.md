@@ -28,3 +28,32 @@
 - [x] All existing tests pass (206/206, 2 pre-existing failures)
 - [x] `python -m compileall` passes
 - [x] Smoke test passes (Container build successful)
+
+## Phase 2 — EventBus Scoping + CI Hardening
+- [x] Add `PanelEventScope` filtering
+- [x] Implement `EventBus` ring buffer
+- [x] Add `mypy --strict` to CI
+- [x] Add `ruff` to CI
+
+## Phase 3 — Module Restructuring
+- [x] Create `core/`, `workspace/`, `ops/`, `datasources/`, `notifications/` packages
+- [x] Move files per mapping
+- [x] Split `ops_repositories.py` (148KB)
+- [x] Split `web_admin_service.py` (61KB)
+- [x] Update all imports project-wide
+
+## Phase 4 — Shell Syntax Highlighting (UX Polish)
+- [x] Create `docs/migration/phase_4.md` for Shell Syntax Highlighting
+- [x] Implement `SlashCmdHighlighter`
+- [x] Add `SemanticOutputHighlighter` to terminal
+- [x] Unified Neon Syntax Theme
+
+## Phase 5 — Advanced Developer Experience (DX)
+- [x] Create `docs/migration/phase_5.md` for Advanced DX
+- [x] Git-Deep-Integration
+- [x] Environment-Badges
+- [x] Resource Management Sparklines
+- [x] Kontextsensitive "Action-Bar"
+- [x] Breadcrumb-Navigation
+- [x] Context-Alert Borders (Pulsing PROD)
+- [x] Micro-Animations (Scanlines, Glitch)

@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.1.44
+
+- **Semantic Shell Highlighting**: Added real-time syntax highlighting for slash commands (`/cmd`, `--flags`, `@targets`).
+- **Intelligent Terminal Buffers**: Implemented `SemanticOutputHighlighter` to flag errors in neon-red and highlight URLs/paths automatically.
+- **Kontextsensitive Action-Bar**: Introduced a dedicated F-key bar that adapts its shortcuts to the active panel.
+- **Git-Deep-Integration**: Revamped `GitPanel` with live branch monitoring, dirty state indicators, and ahead/behind status.
+- **Resource Management**: Integrated real-time CPU and Memory sparklines in the status bar for immediate performance monitoring.
+- **Environment Badges**: Added auto-detection for Python `.venv`, conda, Node.js, and Kubernetes contexts in the header.
+- **Risk-Alert Borders**: Implemented dynamic border coloring based on risk levels, including a pulsing red animation for high-risk (PROD) environments.
+
 ## 0.1.43
 
 - **Phase 3 Modular Monolith Restructuring**: Complete transition to DDD and Hexagonal architecture.

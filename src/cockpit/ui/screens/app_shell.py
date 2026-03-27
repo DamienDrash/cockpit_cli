@@ -34,6 +34,7 @@ from cockpit.ui.widgets.confirmation_bar import ConfirmationBar
 from cockpit.ui.widgets.command_palette import CommandPalette, PaletteItem
 from cockpit.ui.widgets.header import CockpitHeader
 from cockpit.ui.widgets.slash_input import SlashInput
+from cockpit.ui.widgets.action_bar import ActionBar
 from cockpit.ui.widgets.status_bar import StatusBar
 from cockpit.ui.widgets.tab_bar import TabBar
 
@@ -107,8 +108,8 @@ class CockpitApp(App[None]):
             yield PanelHost(container=self.container)
             yield CommandPalette()
             yield SlashInput()
+        yield ActionBar()
         yield StatusBar()
-        yield Footer()
 
     def on_mount(self) -> None:
         self._main_thread_id = get_ident()
@@ -547,6 +548,9 @@ class CockpitApp(App[None]):
             )
         elif isinstance(event, PanelFocused):
             try:
+                self.query_one(ActionBar).set_context(
+                    event.panel_id, event.panel_type
+                )
                 self.query_one(PanelHost).focus_terminal()
             except NoMatches:
                 return
@@ -621,6 +625,8 @@ class CockpitApp(App[None]):
             return
         panel_host = self.query_one(PanelHost)
         workspace_root = str(data["workspace_root"])
+        risk_level = self._risk_level_from_data(data)
+        
         panel_host.load_workspace(
             {
                 "workspace_name": str(data.get("workspace_name", "Workspace")),
@@ -639,17 +645,19 @@ class CockpitApp(App[None]):
                 "recovery_message": data.get("recovery_message"),
             }
         )
+        panel_host.apply_risk_level(risk_level)
+        
         self.query_one(TabBar).set_tabs(panel_host.available_tabs())
         self.query_one(TabBar).set_workspace(
             str(data.get("workspace_name", "Workspace")),
             active_tab_id=str(data.get("active_tab_id", "work")),
             restored=bool(data.get("restored", False)),
             target_label=self._target_label_from_data(data),
-            risk_level=self._risk_level_from_data(data),
+            risk_level=risk_level,
         )
         self.query_one(StatusBar).set_context(
             target_label=self._target_label_from_data(data),
-            risk_level=self._risk_level_from_data(data),
+            risk_level=risk_level,
         )
 
     def _command_context(self) -> dict[str, object]:

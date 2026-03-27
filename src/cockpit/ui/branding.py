@@ -33,7 +33,7 @@ def show_splash(console: Console) -> None:
             logo_text,
             border_style=C_SECONDARY,
             padding=(1, 2),
-            title="[bold white]v0.1.43[/]",
+            title="[bold white]v0.1.44[/]",
             subtitle="[dim]Keyboard-First TUI Platform[/]",
         )
     )

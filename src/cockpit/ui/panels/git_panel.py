@@ -36,6 +36,9 @@ class GitPanel(BasePanel):
         self._repo_root = ""
         self._branch_summary = ""
         self._files: list[GitFileStatus] = []
+        self._ahead_count = 0
+        self._behind_count = 0
+        self._is_dirty = False
         self._selected_index = 0
         self._commit_mode = False
         self._session_id: str | None = None
@@ -141,6 +144,9 @@ class GitPanel(BasePanel):
             self._repo_root = status.repo_root
             self._branch_summary = status.branch_summary
             self._files = status.files
+            self._ahead_count = status.ahead_count
+            self._behind_count = status.behind_count
+            self._is_dirty = status.is_dirty
             self._render_all()
         except Exception as exc:
             try:
@@ -153,9 +159,20 @@ class GitPanel(BasePanel):
     def _render_all(self) -> None:
         try:
             # 1. Branch Info
-            self.query_one("#git-branch-info", Static).update(
-                f" [bold cyan] {self._branch_summary}[/]"
-            )
+            branch_text = Text()
+            branch_text.append("  ", style="bold cyan")
+            branch_text.append(self._branch_summary, style="bold white")
+            
+            if self._is_dirty:
+                branch_text.append(" *", style="bold yellow")
+            
+            if self._ahead_count > 0:
+                branch_text.append(f" ↑{self._ahead_count}", style="bold green")
+            
+            if self._behind_count > 0:
+                branch_text.append(f" ↓{self._behind_count}", style="bold red")
+
+            self.query_one("#git-branch-info", Static).update(branch_text)
 
             # 2. File List
             file_list = Text()

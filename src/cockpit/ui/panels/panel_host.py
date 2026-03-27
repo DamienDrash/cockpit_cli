@@ -189,10 +189,30 @@ class PanelHost(Vertical):
 
     def focus_panel(self, panel_id: str) -> None:
         panel = self._panels_by_id.get(panel_id)
-        if panel is None:
-            return
-        self._pending_focus_panel_id = panel_id
-        self._queue_layout_render()
+        if panel is not None:
+            panel.focus()
+
+    def apply_risk_level(self, risk_level: TargetRiskLevel) -> None:
+        """Update border colors of all panels based on risk level."""
+        # Cyberpunk Neon Palette for Risks
+        color_map = {
+            TargetRiskLevel.DEV: "#00ffff",    # Neon Cyan
+            TargetRiskLevel.STAGE: "#ffff00",  # Neon Yellow
+            TargetRiskLevel.PROD: "#ff0055",   # Neon Red
+        }
+        border_color = color_map.get(risk_level, "#00ffff")
+
+        for panel in self._panels_by_id.values():
+            panel.styles.border_top = ("tall", border_color)
+            panel.styles.border_left = ("tall", border_color)
+            panel.styles.border_right = ("tall", border_color)
+            panel.styles.border_bottom = ("tall", border_color)
+
+            # Add pulsing animation for PROD
+            if risk_level == TargetRiskLevel.PROD:
+                panel.add_class("risk-prod")
+            else:
+                panel.remove_class("risk-prod")
 
     def focus_next_panel(self) -> None:
         visible_panel_ids = self._panel_ids_for_tab(self._active_tab_id)

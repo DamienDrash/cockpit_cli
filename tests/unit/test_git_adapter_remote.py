@@ -63,7 +63,8 @@ class RemoteGitAdapterTests(unittest.TestCase):
 
         self.assertTrue(status.is_repository)
         self.assertEqual(status.repo_root, "/srv/app")
-        self.assertEqual(status.branch_summary, "main...origin/main")
+        self.assertEqual(status.branch_summary, "main")
+        self.assertEqual(status.ahead_count, 0)
         self.assertEqual(
             {item.path for item in status.files},
             {"/srv/app/tracked.txt", "/srv/app/untracked.txt"},

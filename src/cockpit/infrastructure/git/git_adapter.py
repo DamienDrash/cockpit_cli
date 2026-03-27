@@ -27,6 +27,12 @@ class GitRepositoryStatus:
     is_repository: bool = True
     is_available: bool = True
     message: str | None = None
+    ahead_count: int = 0
+    behind_count: int = 0
+
+    @property
+    def is_dirty(self) -> bool:
+        return len(self.files) > 0
 
 
 class GitAdapter:
@@ -232,9 +238,29 @@ class GitAdapter:
         lines = raw_output.splitlines()
         branch_summary = "clean"
         files: list[GitFileStatus] = []
+        ahead_count = 0
+        behind_count = 0
 
         if lines and lines[0].startswith("## "):
-            branch_summary = lines[0][3:].strip() or "detached"
+            line = lines[0][3:].strip()
+            branch_summary = line.split("...", 1)[0] if "..." in line else line
+            
+            # Parse ahead/behind
+            if "[" in line and "]" in line:
+                meta = line[line.find("[") + 1 : line.find("]")]
+                for part in meta.split(","):
+                    part = part.strip()
+                    if part.startswith("ahead "):
+                        try:
+                            ahead_count = int(part[6:])
+                        except ValueError:
+                            pass
+                    elif part.startswith("behind "):
+                        try:
+                            behind_count = int(part[7:])
+                        except ValueError:
+                            pass
+            
             lines = lines[1:]
 
         for line in lines:
@@ -265,4 +291,6 @@ class GitAdapter:
             is_repository=True,
             is_available=True,
             message=message,
+            ahead_count=ahead_count,
+            behind_count=behind_count,
         )
