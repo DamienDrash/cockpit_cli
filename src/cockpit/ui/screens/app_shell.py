@@ -490,7 +490,7 @@ class CockpitApp(App[None]):
             self._set_status(str(exc), StatusLevel.ERROR)
             return
 
-        self._apply_command_result(command.name, result.data)
+        self._apply_command_result(command, result.data)
         if result.data.get("confirmation_required") is not True:
             self._clear_confirmation()
         if result.success and command.name in {
@@ -576,13 +576,19 @@ class CockpitApp(App[None]):
             return
         status_bar.set_message(message, level)
 
-    def _apply_command_result(self, command_name: str, data: dict[str, object]) -> None:
+    def _apply_command_result(self, command: Command, data: dict[str, object]) -> None:
+        command_name = command.name
         if data.get("confirmation_required") is True:
             self._set_pending_confirmation(data)
             return
         if isinstance(data.get("tabs"), list):
             panel_host = self.query_one(PanelHost)
             active_tab_id = data.get("active_tab_id")
+            
+            # Force 'work' tab on startup
+            if command.is_startup:
+                active_tab_id = "work"
+                
             panel_host.apply_tabs(
                 data["tabs"],
                 active_tab_id=active_tab_id
@@ -627,6 +633,10 @@ class CockpitApp(App[None]):
         workspace_root = str(data["workspace_root"])
         risk_level = self._risk_level_from_data(data)
         
+        active_tab_id = str(data.get("active_tab_id", "work"))
+        if command.is_startup:
+            active_tab_id = "work"
+
         panel_host.load_workspace(
             {
                 "workspace_name": str(data.get("workspace_name", "Workspace")),
@@ -639,7 +649,7 @@ class CockpitApp(App[None]):
                 "cwd": str(data.get("cwd", workspace_root)),
                 "browser_path": str(data.get("browser_path", workspace_root)),
                 "selected_path": str(data.get("selected_path", workspace_root)),
-                "active_tab_id": str(data.get("active_tab_id", "work")),
+                "active_tab_id": active_tab_id,
                 "snapshot": data.get("snapshot"),
                 "restored": bool(data.get("restored", False)),
                 "recovery_message": data.get("recovery_message"),
@@ -650,7 +660,7 @@ class CockpitApp(App[None]):
         self.query_one(TabBar).set_tabs(panel_host.available_tabs())
         self.query_one(TabBar).set_workspace(
             str(data.get("workspace_name", "Workspace")),
-            active_tab_id=str(data.get("active_tab_id", "work")),
+            active_tab_id=active_tab_id,
             restored=bool(data.get("restored", False)),
             target_label=self._target_label_from_data(data),
             risk_level=risk_level,
@@ -708,6 +718,7 @@ class CockpitApp(App[None]):
                 source=CommandSource.PANEL_ACTION,
                 name="session.restore",
                 context={"workspace_id": latest_session.workspace_id},
+                is_startup=True,
             )
         )
 
@@ -724,6 +735,7 @@ class CockpitApp(App[None]):
                 source=CommandSource.PANEL_ACTION,
                 context=self._command_context(),
             )
+            command.is_startup = True
         except CommandParseError as exc:
             self._set_status(str(exc), StatusLevel.ERROR)
             return

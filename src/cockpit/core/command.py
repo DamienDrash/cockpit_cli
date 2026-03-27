@@ -16,6 +16,7 @@ class Command:
     name: str
     args: dict[str, object] = field(default_factory=dict)
     context: dict[str, object] = field(default_factory=dict)
+    is_startup: bool = False
     timestamp: datetime = field(default_factory=utc_now)
 
     def to_dict(self) -> dict[str, object]:
