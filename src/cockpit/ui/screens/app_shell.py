@@ -35,6 +35,7 @@ from cockpit.ui.widgets.command_palette import CommandPalette, PaletteItem
 from cockpit.ui.widgets.header import CockpitHeader
 from cockpit.ui.widgets.slash_input import SlashInput
 from cockpit.ui.widgets.action_bar import ActionBar
+from cockpit.ui.widgets.scanlines import ScanlineOverlay
 from cockpit.ui.widgets.status_bar import StatusBar
 from cockpit.ui.widgets.tab_bar import TabBar
 
@@ -101,6 +102,7 @@ class CockpitApp(App[None]):
         self._pending_confirmation: dict[str, object] | None = None
 
     def compose(self) -> ComposeResult:
+        yield ScanlineOverlay()
         yield CockpitHeader(show_clock=False)
         with Vertical(id="app-body"):
             yield TabBar()
@@ -113,6 +115,21 @@ class CockpitApp(App[None]):
 
     def on_mount(self) -> None:
         self._main_thread_id = get_ident()
+        
+        # Register semantic highlighter styles in Rich console
+        from cockpit.ui.branding import C_PRIMARY, C_SECONDARY, C_ERROR, C_WARNING, C_TERMINAL_GREEN
+        self.console.push_styles({
+            "slash.command": f"{C_PRIMARY} bold",
+            "slash.flag": f"{C_SECONDARY} italic",
+            "slash.target": "bold yellow",
+            "slash.string": "green",
+            "terminal.error": C_ERROR,
+            "terminal.warning": C_WARNING,
+            "terminal.url": "underline cyan",
+            "terminal.path": "cyan italic",
+            "terminal.json": C_TERMINAL_GREEN,
+        })
+
         self.container.event_bus.subscribe(StatusMessagePublished, self._on_event)
         self.container.event_bus.subscribe(CommandExecuted, self._on_event)
         self.container.event_bus.subscribe(PanelFocused, self._on_event)
@@ -669,6 +686,38 @@ class CockpitApp(App[None]):
             target_label=self._target_label_from_data(data),
             risk_level=risk_level,
         )
+        # Final pass to ensure all app-wide contexts (git, etc) are current
+        self._update_app_context(data)
+
+    def _update_app_context(self, data: dict[str, object]) -> None:
+        """Refresh app-wide status context (Git branch, etc)."""
+        try:
+            status_bar = self.query_one(StatusBar)
+            target_kind = self._target_kind_from_data(data.get("target_kind"))
+            risk_level = self._risk_level_from_data(data)
+            
+            git_branch = None
+            git_dirty = False
+            
+            # App-wide Git tracking for local workspaces
+            if target_kind == SessionTargetKind.LOCAL:
+                root = str(data.get("workspace_root", ""))
+                if root:
+                    try:
+                        status = self.container.git_adapter.inspect_repository(root)
+                        git_branch = status.branch_summary
+                        git_dirty = status.is_dirty
+                    except Exception:
+                        pass
+            
+            status_bar.set_context(
+                target_label=self._target_label_from_data(data),
+                risk_level=risk_level,
+                git_branch=git_branch,
+                git_dirty=git_dirty
+            )
+        except Exception:
+            pass
 
     def _command_context(self) -> dict[str, object]:
         try:

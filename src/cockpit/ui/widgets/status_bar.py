@@ -19,6 +19,8 @@ class StatusBar(Static):
     def __init__(self) -> None:
         self._target_label = "local"
         self._risk_level = TargetRiskLevel.DEV
+        self._git_branch: str | None = None
+        self._git_dirty: bool = False
         self._last_message = "Ready"
         self._last_level = StatusLevel.INFO
         
@@ -34,10 +36,18 @@ class StatusBar(Static):
         self.set_interval(2.0, self._update_resources)
 
     def _update_resource_usage(self) -> None:
-        # Mock resource usage for now since psutil is not a dependency
-        # In a real scenario, we'd use psutil.cpu_percent() etc.
-        self._cpu_history.append(random.uniform(5.0, 45.0))
-        self._mem_history.append(random.uniform(20.0, 60.0))
+        """Fetch real system metrics using psutil."""
+        try:
+            import psutil
+            cpu = psutil.cpu_percent()
+            mem = psutil.virtual_memory().percent
+            self._cpu_history.append(cpu)
+            self._mem_history.append(mem)
+        except Exception:
+            # Fallback to 0 if psutil fails for any reason
+            self._cpu_history.append(0.0)
+            self._mem_history.append(0.0)
+        
         self._render_state()
 
     def _update_resources(self) -> None:
@@ -53,9 +63,13 @@ class StatusBar(Static):
         *,
         target_label: str,
         risk_level: TargetRiskLevel,
+        git_branch: str | None = None,
+        git_dirty: bool = False,
     ) -> None:
         self._target_label = target_label
         self._risk_level = risk_level
+        self._git_branch = git_branch
+        self._git_dirty = git_dirty
         self._render_state()
 
     def _get_sparkline(self, data: deque[float]) -> Text:
@@ -84,6 +98,14 @@ class StatusBar(Static):
             f"{presentation.label}",
             style=f"bold {presentation.color} on {presentation.background}",
         )
+        
+        # Git Status Section
+        if self._git_branch:
+            status_text.append(" | ", style="dim white")
+            status_text.append(f" {self._git_branch}", style="bold cyan")
+            if self._git_dirty:
+                status_text.append("*", style="bold yellow")
+
         status_text.append(" ❯ ", style=C_SECONDARY)
 
         # Message Section

@@ -44,16 +44,16 @@
 
 ## Phase 4 — Shell Syntax Highlighting (UX Polish)
 - [x] Create `docs/migration/phase_4.md` for Shell Syntax Highlighting
-- [x] Implement `SlashCmdHighlighter`
-- [x] Add `SemanticOutputHighlighter` to terminal
+- [x] Implement `SlashCmdHighlighter` (Standard RegexHighlighter flow)
+- [x] Add `SemanticOutputHighlighter` to terminal (Standard RegexHighlighter flow)
 - [x] Unified Neon Syntax Theme
 
 ## Phase 5 — Advanced Developer Experience (DX)
 - [x] Create `docs/migration/phase_5.md` for Advanced DX
-- [x] Git-Deep-Integration
-- [x] Environment-Badges
-- [x] Resource Management Sparklines
-- [x] Kontextsensitive "Action-Bar"
-- [x] Breadcrumb-Navigation
+- [x] Git-Deep-Integration (App-wide status context)
+- [x] Environment-Badges (Fixed Table-based alignment)
+- [x] Resource Management Sparklines (Real psutil data)
+- [x] Kontextsensitive "Action-Bar" (Complete)
+- [ ] Breadcrumb-Navigation
 - [x] Context-Alert Borders (Pulsing PROD)
-- [x] Micro-Animations (Scanlines, Glitch)
+- [x] Micro-Animations (Scanlines overlay)

@@ -19,9 +19,12 @@ Position = tuple[int, int]
 
 
 class SemanticOutputHighlighter(RegexHighlighter):
-    """Semantic highlighter for terminal output monitoring."""
+    """Semantic highlighter for terminal output monitoring.
+    
+    Uses standard RegexHighlighter mechanics with 'terminal.' prefix.
+    """
 
-    base_style = ""
+    base_style = "terminal."
     highlights = [
         r"(?P<error>ERROR|CRITICAL|FATAL|Exception|Traceback)",
         r"(?P<warning>WARNING|WARN)",
@@ -29,25 +32,6 @@ class SemanticOutputHighlighter(RegexHighlighter):
         r"(?P<path>/(?:[a-zA-Z0-9._-]+/)+[a-zA-Z0-9._-]+)",
         r"(?P<json>\{.*\}|\[.*\])",
     ]
-
-    def __init__(self) -> None:
-        super().__init__()
-        self.styles: dict[str, str] = {
-            "error": "bold #ff0055",
-            "warning": "bold #ffff00",
-            "url": "underline #00ffff",
-            "path": "#00ffff italic",
-            "json": "#00ff00",
-        }
-
-    def highlight(self, text: Text) -> None:
-        """Highlight text using internal style mapping."""
-        for highlight in self.highlights:
-            for match in re.finditer(highlight, text.plain):
-                for name, value in match.groupdict().items():
-                    if value and name in self.styles:
-                        start, end = match.span(name)
-                        text.stylize(self.styles[name], start, end)
 
 
 class EmbeddedTerminal(Static):

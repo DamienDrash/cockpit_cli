@@ -5,7 +5,7 @@ import sys
 from importlib.metadata import version as get_version
 from pathlib import Path
 
-from rich.text import Text
+from rich.table import Table
 from textual.app import RenderResult
 from textual.widgets import Header
 
@@ -16,28 +16,25 @@ class CockpitHeader(Header):
     """Custom header with Cyberpunk branding and environment status."""
 
     def render(self) -> RenderResult:
-        """Render the header with dynamic info and cyberpunk colors."""
+        """Render the header with dynamic info using a Table for alignment."""
         try:
             ver = get_version("cockpit-cli")
         except Exception:
-            ver = "0.1.43"
+            ver = "0.1.44"
 
-        header_text = Text()
-        header_text.append(" COCKPIT ", style=f"{C_PRIMARY} reverse")
-        header_text.append(f" v{ver} ", style=C_SECONDARY)
-        header_text.append(" ❯ ", style="white")
-        header_text.append(self.app.title, style="bold white")
+        # Use a table to ensure perfect left/right alignment
+        table = Table.grid(expand=True)
+        table.add_column("left", justify="left")
+        table.add_column("right", justify="right")
+
+        left_text = Text()
+        left_text.append(" COCKPIT ", style=f"{C_PRIMARY} reverse")
+        left_text.append(f" v{ver} ", style=C_SECONDARY)
+        left_text.append(" ❯ ", style="white")
+        left_text.append(self.app.title, style="bold white")
         
-        # Add Environment Badges (Right aligned essentially via space)
-        env_badge = self._get_env_badge()
-        if env_badge:
-            # Simple right-alignment strategy for fixed-height header
-            available_space = self.app.size.width - len(header_text.plain) - len(env_badge.plain) - 2
-            if available_space > 0:
-                header_text.append(" " * available_space)
-                header_text.append(env_badge)
-
-        return header_text
+        table.add_row(left_text, self._get_env_badge())
+        return table
 
     def _get_env_badge(self) -> Text:
         """Detect active developer environment (venv, node, cloud)."""

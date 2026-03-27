@@ -63,6 +63,9 @@ BasePanel {
   height: 1fr;
   width: 1fr;
   background: $background;
+  /* Subtle scanline effect via repeated linear gradient overlay */
+  background: $background 50% 50%;
+  color: $text;
 }
 
 .sidebar {
@@ -232,4 +235,16 @@ SelectOverlay > .select-overlay--filter {
   border: tall #ff0055;
   color: #ff0055;
   text-style: bold;
+}
+
+#scanline-overlay {
+  layer: overlay;
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0.03;
+  color: $primary;
+  pointer-events: none;
 }
