@@ -51,9 +51,9 @@
 ## Phase 5 — Advanced Developer Experience (DX)
 - [x] Create `docs/migration/phase_5.md` for Advanced DX
 - [x] Git-Deep-Integration (App-wide status context)
-- [x] Environment-Badges (Fixed Table-based alignment)
+- [x] Environment-Badges (Fixed via dedicated Static widget)
 - [x] Resource Management Sparklines (Real psutil data)
-- [x] Kontextsensitive "Action-Bar" (Complete)
-- [ ] Breadcrumb-Navigation
+- [x] Kontextsensitive "Action-Bar"
+- [x] Breadcrumb-Navigation
 - [x] Context-Alert Borders (Pulsing PROD)
 - [x] Micro-Animations (Scanlines overlay)

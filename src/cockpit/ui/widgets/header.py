@@ -5,15 +5,28 @@ import sys
 from importlib.metadata import version as get_version
 from pathlib import Path
 
+from rich.text import Text
 from rich.table import Table
 from textual.app import RenderResult
-from textual.widgets import Header
+from textual.widgets import Static
 
 from cockpit.ui.branding import C_PRIMARY, C_SECONDARY
 
 
-class CockpitHeader(Header):
-    """Custom header with Cyberpunk branding and environment status."""
+class CockpitHeader(Static):
+    """Custom header with Cyberpunk branding and environment status.
+    
+    Inherits from Static for full layout control.
+    """
+
+    DEFAULT_CSS = """
+    CockpitHeader {
+        height: 1;
+        background: $background;
+        color: $text;
+        dock: top;
+    }
+    """
 
     def render(self) -> RenderResult:
         """Render the header with dynamic info using a Table for alignment."""
@@ -56,8 +69,7 @@ class CockpitHeader(Header):
             badge.append(" node ", style="on #68A063 black")
 
         # 3. Cloud Context (Mock detection for now)
-        kube_config = os.environ.get("KUBECONFIG")
-        if kube_config:
+        if os.environ.get("KUBECONFIG"):
             badge.append(" k8s ", style="on #326CE5 white")
 
         return badge

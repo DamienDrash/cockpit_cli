@@ -103,7 +103,7 @@ class CockpitApp(App[None]):
 
     def compose(self) -> ComposeResult:
         yield ScanlineOverlay()
-        yield CockpitHeader(show_clock=False)
+        yield CockpitHeader()
         with Vertical(id="app-body"):
             yield TabBar()
             yield ConfirmationBar()

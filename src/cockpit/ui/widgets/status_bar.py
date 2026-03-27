@@ -8,6 +8,12 @@ from collections import deque
 from rich.text import Text
 from textual.widgets import Static
 
+try:
+    import psutil
+    PSUTIL_AVAILABLE = True
+except ImportError:
+    PSUTIL_AVAILABLE = False
+
 from cockpit.core.enums import StatusLevel, TargetRiskLevel
 from cockpit.core.risk import risk_presentation
 from cockpit.ui.branding import C_PRIMARY, C_SECONDARY
@@ -36,15 +42,19 @@ class StatusBar(Static):
         self.set_interval(2.0, self._update_resources)
 
     def _update_resource_usage(self) -> None:
-        """Fetch real system metrics using psutil."""
-        try:
-            import psutil
-            cpu = psutil.cpu_percent()
-            mem = psutil.virtual_memory().percent
-            self._cpu_history.append(cpu)
-            self._mem_history.append(mem)
-        except Exception:
-            # Fallback to 0 if psutil fails for any reason
+        """Fetch real system metrics using psutil if available."""
+        if PSUTIL_AVAILABLE:
+            try:
+                cpu = psutil.cpu_percent()
+                mem = psutil.virtual_memory().percent
+                self._cpu_history.append(cpu)
+                self._mem_history.append(mem)
+            except Exception:
+                # Fallback to 0 if psutil call fails
+                self._cpu_history.append(0.0)
+                self._mem_history.append(0.0)
+        else:
+            # Silent fallback to 0 if psutil is missing
             self._cpu_history.append(0.0)
             self._mem_history.append(0.0)
         

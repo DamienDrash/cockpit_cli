@@ -1,100 +1,63 @@
-# cockpit-cli – Full Project Review
+# cockpit-cli – Full Project Review (v0.1.44)
 
 ## Overview
 
-**cockpit-cli** (v0.1.44) is a keyboard-first TUI developer workspace for Linux. It follows a strictly isolated **Modular Monolith** architecture based on DDD and Hexagonal principles. It combines a Textual-based terminal UI, immersive DX features, and a high-integrity operational platform.
+**cockpit-cli** ist ein keyboard-fokussierter TUI-Developer-Workspace für Linux. Die Architektur wurde in den letzten Phasen von einem monolithischen Ansatz zu einem **Modularen Monolithen** mit strikter UI-Isolation und Domain-Driven Design transformiert.
 
 | Metric | Value |
 |---|---|
-| Python source files | ~135 |
-| Top-level Contexts | `core`, `workspace`, `ops`, `datasources`, `notifications`, `plugins`, `admin` |
-| Test files | 70+ (unit, integration, e2e) |
-| Architecture | Modular Monolith + Hexagonal + DDD-light |
-| Lines in Bootstrap | Modularized into context-specific wire modules |
+| Version | v0.1.44 |
+| Subpackages | 15+ (`core`, `workspace`, `ops`, `datasources`, `notifications`, `bootstrap`, `ui`, etc.) |
+| DI Services | ~30 (Modular wired) |
+| Architecture | Ports & Adapters (Hexagonal) |
 
 ---
 
-## Architecture
+## Migration Status
 
-```mermaid
-graph TD
-    CLI["CLI Entrypoint<br>app.py"] --> Bootstrap["bootstrap/<br>(Modular DI Root)"]
-    Bootstrap --> App["Textual TUI<br>CockpitApp"]
-    Bootstrap --> Admin["Web Admin Plane"]
-
-    subgraph "Core Context"
-        Dispatch["Dispatcher + EventBus"]
-        Events["Base + Runtime"]
-        Persistence["SQLiteStore + Schema"]
-    end
-
-    subgraph "Workspace Context"
-        WS["Workspace + Session"]
-        Layout["Layout + Navigation"]
-    end
-
-    subgraph "Ops Context"
-        Inc["Incident + Engagement"]
-        Esc["Escalation + On-Call"]
-        Resp["Response + Runbooks"]
-    end
-
-    subgraph "Datasource Context"
-        Adapters["DB + Secrets + SSH"]
-    end
-
-    subgraph "UI & DX"
-        Panels["Isolated Panels"]
-        DX["Highlighting + Sparklines + Badges"]
-    end
-
-    Bootstrap --> Core
-    App --> UI
-```
-
----
-
-## Recent Accomplishments (Phases 2-5)
-
-### 1. Modular Monolith Transformation
-The project successfully transitioned from generic `application`/`domain` layers to context-bound packages. Logic is now encapsulated within `core`, `workspace`, `ops`, `datasources`, `notifications`, `plugins`, and `admin`.
-
-### 2. DX & UX Modernization (The "Cyberpunk" Overhaul)
-- **Semantic Highlighting**: Real-time regex-based highlighting for slash commands and terminal buffers.
-- **Intelligent Monitoring**: Real-time CPU and Memory sparklines in the Status Bar (backed by `psutil`).
-- **Contextual Awareness**: 
-    - **ActionBar**: Dynamic F-key shortcuts that adapt to the focused panel.
-    - **Environment Badges**: Header indicators for active `.venv`, conda, Node.js, and Kubernetes contexts.
-    - **Git Deep Integration**: App-wide tracking of branch status and dirty state.
-- **Risk-Alert System**: Visual boundary alerts using color-coded borders and pulsing animations for high-risk (PROD) environments.
-
-### 3. CI/CD & Quality Hardening
-- **Static Analysis**: Integrated `mypy --strict` and `ruff` project-wide.
-- **Memory Safety**: Implemented a 10,000-event ring buffer for the `EventBus` to prevent unbounded growth.
-- **Type Safety**: PEP 561 compliance via `py.typed`.
-
-### 4. Data Integrity
-- **Model Consistency**: Implemented `payload_json` persistence across all repositories to ensure full model state is captured in SQLite.
-- **Standardized Queries**: Unified all repository access patterns under the `find_*` (queries) and `get` (ID-lookup) conventions.
-
----
-
-## Technical Debt Status
-
-| Debt | Status | Resolution |
+| Phase | Description | Status |
 |---|---|---|
-| Monolithic bootstrap.py | ✅ FIXED | Modularized into `bootstrap/wire_*.py` |
-| No Static Analysis | ✅ FIXED | `mypy --strict` and `ruff` active in CI |
-| Missing `rich` dependency | ✅ FIXED | Explicitly added to `pyproject.toml` |
-| Unbounded EventBus growth | ✅ FIXED | 10k event ring buffer implemented |
-| No `py.typed` | ✅ FIXED | Added for PEP 561 compliance |
-| Sparse Changelog | ✅ FIXED | Maintained from 0.1.42 through 0.1.44 |
+| **Phase 1** | Panel Isolation + Bootstrap Split | ✅ Complete |
+| **Phase 2** | EventBus Scoping + CI Hardening | ✅ Complete |
+| **Phase 3** | Module Restructuring | ✅ Complete |
+| **Phase 4** | Shell Syntax Highlighting | 🟡 Partial (Refactoring needed) |
+| **Phase 5** | Advanced DX (Animations, Mocks) | 🟡 Partial (Work in progress) |
 
 ---
 
-## Summary
+## Key Achievements
 
-`cockpit-cli` has reached a professional gold standard for developer tools. The architecture is robust, the DX is immersive and highly informative, and the system integrity is guarded by comprehensive testing and strict quality gates. It is no longer just a functional TUI, but a production-grade cockpit for modern developer workflows.
+### 1. Modular Architecture (Phase 1 & 3)
+Der ehemals 908 Zeilen umfassende Bootstrap ist nun in ein `bootstrap/` Paket aufgeteilt. Jede Domäne (`ops`, `datasources`, etc.) besitzt ihr eigenes Wiring-Modul.
+*   **Vorteil**: Neue Features können isoliert hinzugefügt werden, ohne den globalen DI-Container zu überladen.
+*   **Struktur**: Klare Trennung in `core/` (Logik), `ui/` (Präsentation) und funktionale Domänen-Pakete.
 
-## Current Milestone: Phase 5 Complete ✅
-All planned structural and visual enhancements are implemented, verified, and documented.
+### 2. Panel Isolation & Event Hardening (Phase 1 & 2)
+Jedes Panel läuft in einer **Error-Boundary** (`_safe_panel_call`). Ein Crash in einem Panel (z.B. DB) beeinträchtigt nicht den Rest der Anwendung.
+*   **EventBus Scoping**: Einführung von `PanelEventScope`. Panels abonnieren Events nun gefiltert, was unnötige Refreshes verhindert.
+*   **Memory Safety**: Der `EventBus` nutzt nun einen Ring-Buffer (`maxlen=10000`), um unbegrenztes Speicherwachstum zu verhindern.
+
+### 3. Cyberpunk UX & DX (Phase 4 & 5)
+Die Anwendung hat ein visuelles Upgrade erhalten, das den "Cyberpunk Vibe" unterstreicht:
+*   **Pulsing PROD Borders**: Panels in Hochrisiko-Umgebungen (PROD) zeigen eine pulsierende rote Border-Animation (Python-gesteuert).
+*   **Scanline Overlay**: Ein subtiles Overlay verstärkt das CRT-Feeling über die gesamte App.
+*   **Action-Bar**: Eine kontextsensitive F-Key-Leiste passt sich dem fokussierten Panel an.
+*   **Real-time Sparklines**: Die Statusleiste zeigt nun echte Systemlast-Daten (CPU/MEM) via `psutil`.
+*   **Environment Badges**: Der Header erkennt automatisch aktive `.venv`, conda oder Node.js Umgebungen.
+*   **Semantic Highlighting**: Slash-Commands und Terminal-Buffer werden semantisch hervorgehoben (standardisierte `Rich`-Architektur).
+
+---
+
+## Known Issues & Current Work
+
+*   **Syntax Highlighting**: Die aktuellen Regex-Highlighter in der Shell und im Terminal werden auf die native `Rich`-Architektur refactored, um Performance-Glitches zu vermeiden.
+*   **Resource Monitoring**: Umstellung der Sparklines von Zufallswerten auf echte Daten via `psutil`.
+*   **Environment Detection**: Implementierung der automatischen Erkennung von `.venv` und Git-Status im globalen Header.
+
+---
+
+## Next Steps
+
+1.  **Refactor Phase 4**: Korrektur der Highlighter-Implementierung.
+2.  **Hardening Phase 5**: Ersetzung der Mocks durch echte System-Adapter.
+3.  **CI Expansion**: Integration von `mypy --strict` und `ruff` zur Sicherstellung der Architekturregeln.
