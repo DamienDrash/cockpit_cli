@@ -112,6 +112,6 @@ class StatusBar(Static):
         available_space = self.app.size.width - len(status_text.plain) - len(res.plain) - 1
         if available_space > 0:
             status_text.append(" " * available_space)
-            status_text.extend(res)
+            status_text.append(res)
 
         self.update(status_text)
