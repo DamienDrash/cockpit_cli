@@ -27,8 +27,9 @@ class ActionBar(Static):
         
         renderable = Text()
         for i, (key, label) in enumerate(actions):
-            renderable.append(f" {key} ", style=f"bold black on {C_PRIMARY}")
-            renderable.append(f" {label} ", style=f"bold {C_PRIMARY} on #1a1a2e")
+            # Use specific colors instead of style constants to avoid 'bold' in background
+            renderable.append(f" {key} ", style="bold black on cyan")
+            renderable.append(f" {label} ", style="bold cyan on #1a1a2e")
             if i < len(actions) - 1:
                 renderable.append("  ")
         
